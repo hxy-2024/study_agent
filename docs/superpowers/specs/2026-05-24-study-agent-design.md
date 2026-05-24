@@ -4,7 +4,7 @@ Date: 2026-05-24
 
 ## Decision Summary
 
-Build study_agent as a Web-first personal learning agent MVP with enterprise extension points. The product uses a Production Modular Monolith architecture: Nuxt/Vue front end, FastAPI modular back end, background workers, Postgres with pgvector, Redis, object storage, and LangGraph for durable agent workflows.
+Build study_agent as a Web-first personal learning agent MVP with enterprise extension points. The product uses a Production Modular Monolith architecture: Nuxt/Vue front end, FastAPI modular back end, background workers, Postgres with pgvector, Redis, object storage, a first-class RAG layer, and LangGraph for durable agent workflows.
 
 The first production milestone focuses on this loop:
 
@@ -50,11 +50,17 @@ flowchart LR
   API --> Storage["S3 / MinIO"]
   API --> Worker["Workers"]
   Worker --> Ingestion["Ingestion / OCR / Chunking"]
+  Ingestion --> RAG["RAG Service: Index / Retrieve / Rerank / Cite"]
+  RAG --> DB
+  RAG --> Storage
   Worker --> Agents["LangGraph Agents"]
+  Agents --> RAG
   Agents --> Gateway["Model Gateway"]
   Gateway --> Models["LLM Providers / Local Models"]
   API --> Observability["Sentry / OpenTelemetry / Metrics"]
 ```
+
+RAG is a first-class infrastructure layer. It supplies grounded evidence to agents, but it is not the agent brain. Agents decide teaching strategy, learning state updates, and workflow transitions; RAG retrieves scoped source evidence and citations.
 
 ## Technical Choices
 
@@ -62,6 +68,7 @@ flowchart LR
 - Back end: FastAPI, Pydantic v2, SQLAlchemy 2.x async, Alembic.
 - Data: Postgres, pgvector, Redis, S3-compatible object storage.
 - Agent runtime: LangGraph Python.
+- RAG: source chunk index, hybrid retrieval, tenant/space/chapter filtering, reranking, citation construction, and grounded prompt assembly.
 - Streaming: SSE for chat responses.
 - Local development: Docker Compose with Postgres, Redis, MinIO, API, worker, and front end.
 - Observability: Sentry, OpenTelemetry, metrics dashboard.
@@ -278,15 +285,29 @@ Cannot directly modify the global learning route.
 
 ## RAG Flow
 
+RAG is a core platform module for grounded learning answers. It connects parsed source chunks, embeddings, keyword search, reranking, citation generation, and prompt assembly. Every retrieval request is scoped by tenant, study space, chapter, and source visibility.
+
+Responsibilities:
+
+- Index parsed chunks with embedding, page or paragraph metadata, source id, chapter mapping, and permission fields.
+- Rewrite user questions using session and chapter state.
+- Run hybrid retrieval with vector search and keyword search.
+- Filter results by `tenant_id`, `study_space_id`, `chapter_id`, and source visibility.
+- Merge and rerank results by relevance, chapter fit, source quality, and recency.
+- Return citations with source name, page or paragraph, chunk id, and quoted excerpt.
+- Assemble grounded context without allowing retrieved material to override system instructions.
+
 ```mermaid
 flowchart TD
   Q["User Question"] --> State["Load session and chapter state"]
   State --> Rewrite["Query rewrite"]
-  Rewrite --> Vector["Vector search"]
-  Rewrite --> Keyword["Keyword search"]
+  Rewrite --> Filter["Tenant / space / chapter filter"]
+  Filter --> Vector["Vector search"]
+  Filter --> Keyword["Keyword search"]
   Vector --> Merge["Merge and rerank"]
   Keyword --> Merge
-  Merge --> Prompt["Build grounded prompt"]
+  Merge --> Cite["Build citations"]
+  Cite --> Prompt["Build grounded prompt"]
   Prompt --> Tutor["Session Tutor"]
   Tutor --> Stream["Stream response"]
   Tutor --> Persist["Persist answer, citations, summary"]

@@ -70,7 +70,8 @@ MVP 不做但预留：
 
 - LangGraph Python 编排长期、可恢复、多步骤 agent 工作流。
 - Model Gateway 封装 OpenAI、Anthropic、本地模型或企业私有模型。
-- RAG 检索采用向量检索 + 关键词检索 + rerank/合并。
+- RAG 作为独立检索增强层，负责资料依据召回、权限过滤、引用生成和上下文组装。
+- RAG 检索采用向量检索 + 关键词检索 + rerank/合并，并按 `tenant_id`、`study_space_id`、`chapter_id` 做隔离。
 - LangSmith 或 OpenTelemetry trace 记录 agent 执行过程。
 
 ### 4.4 部署与运维
@@ -91,11 +92,17 @@ flowchart LR
   API --> Obj["S3 / MinIO Object Storage"]
   API --> Worker["Background Workers"]
   Worker --> Ingest["Document Ingestion / OCR / Chunking"]
+  Ingest --> RAG["RAG Service: Index / Retrieve / Rerank / Cite"]
+  RAG --> PG
+  RAG --> Obj
   Worker --> Graph["LangGraph Agent Runtime"]
+  Graph --> RAG
   Graph --> Gateway["Model Gateway"]
   Gateway --> LLM["LLM Providers / Local Models"]
   API --> Obs["Observability"]
 ```
+
+RAG 在架构中是 agent 的资料依据层，而不是独立替代 agent 的“大脑”。会话 agent 负责教学策略、解释、追问和状态更新；RAG 负责从当前租户、学习空间和章节的资料中找到可靠依据，并返回可引用的片段。
 
 ## 6. 核心页面与交互
 
@@ -315,15 +322,28 @@ exports
 
 ## 9. RAG 检索流程
 
+RAG 是 study_agent 的核心基础设施模块。它连接资料库、向量库、关键词索引、rerank 逻辑和 prompt 上下文构造，保证 AI 回答优先基于用户上传的教材和当前章节资料。
+
+RAG 模块职责：
+
+- 索引：把解析后的资料 chunks 写入 `source_chunks`，保存 embedding、页码、章节、来源、权限字段。
+- 检索：根据用户问题和章节状态进行 query rewrite，再执行向量检索和关键词检索。
+- 过滤：所有检索必须按 `tenant_id`、`study_space_id`、`chapter_id`、source 可见性过滤。
+- 重排：合并向量和关键词结果，按相关性、章节匹配度、资料可信度 rerank。
+- 引用：返回可展示的 citation，包括资料名、页码/段落、chunk id 和原文片段。
+- 组装：把检索结果、章节摘要、会话上下文和系统指令分层放入 prompt，避免资料内容覆盖系统指令。
+
 ```mermaid
 flowchart TD
   Q["User Question"] --> Ctx["Load session and chapter state"]
   Ctx --> Rewrite["Query rewrite"]
-  Rewrite --> Vec["Vector search in source_chunks"]
-  Rewrite --> KW["Keyword search"]
-  Vec --> Rank["Rerank and merge"]
+  Rewrite --> Filter["Tenant / space / chapter filter"]
+  Filter --> Vec["Vector search in source_chunks"]
+  Filter --> KW["Keyword search"]
+  Vec --> Rank["Merge and rerank"]
   KW --> Rank
-  Rank --> Prompt["Build grounded prompt"]
+  Rank --> Cite["Build citations"]
+  Cite --> Prompt["Build grounded prompt"]
   Prompt --> Tutor["Session Tutor"]
   Tutor --> Stream["SSE stream to UI"]
   Tutor --> Save["Persist answer, citations, summary"]
