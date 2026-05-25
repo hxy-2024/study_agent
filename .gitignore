@@ -1,2 +1,11 @@
 .superpowers/
 .worktrees/
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+.nuxt/
+.output/
+dist/
+coverage/
