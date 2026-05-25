@@ -28,6 +28,14 @@ def upgrade() -> None:
         name="ingestion_job_status",
     )
     ingestion_status.create(op.get_bind(), checkfirst=True)
+    ingestion_status_column = postgresql.ENUM(
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        name="ingestion_job_status",
+        create_type=False,
+    )
 
     op.create_table(
         "ingestion_jobs",
@@ -35,7 +43,7 @@ def upgrade() -> None:
         sa.Column("tenant_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tenants.id"), nullable=False),
         sa.Column("study_space_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("study_spaces.id"), nullable=False),
         sa.Column("source_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("sources.id"), nullable=False),
-        sa.Column("status", ingestion_status, nullable=False),
+        sa.Column("status", ingestion_status_column, nullable=False),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("chunk_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
