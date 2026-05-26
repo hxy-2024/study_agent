@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     rag_embedding_dimension: int = 16
     rag_chunk_max_chars: int = 1200
     rag_chunk_overlap_chars: int = 180
+    dev_auth_enabled: bool = True
+    auth_user_header: str = "X-User-Id"
+    auth_tenant_header: str = "X-Tenant-Id"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

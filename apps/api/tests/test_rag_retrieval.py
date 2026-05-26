@@ -2,7 +2,9 @@ import uuid
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
+from app.domain.rag.schemas import RetrieveRequest
 from app.domain.rag.retrieval import (
     EXPECTED_EMBEDDING_DIMENSION,
     RetrievedChunk,
@@ -203,3 +205,32 @@ async def test_retrieve_chunks_scopes_query_to_active_chunks_for_tenant_and_stud
     assert "source_chunks.tenant_id = :tenant_id_1" in statement_text
     assert "source_chunks.study_space_id = :study_space_id_1" in statement_text
     assert "source_chunks.is_active IS true" in statement_text
+
+
+def test_retrieve_request_does_not_accept_client_tenant_scope() -> None:
+    payload = RetrieveRequest(study_space_id=uuid.uuid4(), query="matrix rank", limit=5)
+
+    assert payload.query == "matrix rank"
+    assert payload.limit == 5
+    assert not hasattr(payload, "tenant_id")
+
+
+def test_retrieve_request_rejects_client_tenant_scope() -> None:
+    try:
+        RetrieveRequest(
+            tenant_id=uuid.uuid4(),
+            study_space_id=uuid.uuid4(),
+            query="matrix rank",
+            limit=5,
+        )
+    except ValidationError:
+        return
+    raise AssertionError("Expected ValidationError")
+
+
+def test_retrieve_request_rejects_empty_query() -> None:
+    try:
+        RetrieveRequest(study_space_id=uuid.uuid4(), query="", limit=5)
+    except ValidationError:
+        return
+    raise AssertionError("Expected ValidationError")

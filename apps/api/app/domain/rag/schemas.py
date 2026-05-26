@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class IngestSourceRequest(BaseModel):
@@ -16,7 +16,8 @@ class IngestSourceResponse(BaseModel):
 
 
 class RetrieveRequest(BaseModel):
-    tenant_id: uuid.UUID
+    model_config = ConfigDict(extra="forbid")
+
     study_space_id: uuid.UUID
     query: str = Field(min_length=1, max_length=2000)
     limit: int = Field(default=5, ge=1, le=20)
