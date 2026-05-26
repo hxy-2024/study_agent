@@ -3,7 +3,12 @@ import uuid
 import pytest
 from fastapi import HTTPException
 
-from app.core.auth import CurrentUserContext, ensure_tenant_membership, parse_dev_auth_headers
+from app.core.auth import (
+    CurrentUserContext,
+    ensure_tenant_membership,
+    get_current_user_context,
+    parse_dev_auth_headers,
+)
 from app.core.config import Settings
 from app.db.models import Membership
 
@@ -46,6 +51,49 @@ def test_parse_dev_auth_headers_rejects_invalid_uuid() -> None:
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "Invalid development auth header UUID"
+
+
+class FakeRequest:
+    def __init__(self, headers: dict[str, str]) -> None:
+        self.headers = headers
+
+
+@pytest.mark.anyio
+async def test_get_current_user_context_uses_configured_header_names() -> None:
+    user_id = uuid.uuid4()
+    tenant_id = uuid.uuid4()
+    request = FakeRequest(
+        {
+            "X-Dev-User": str(user_id),
+            "X-Dev-Tenant": str(tenant_id),
+        }
+    )
+    settings = Settings(
+        _env_file=None,
+        auth_user_header="X-Dev-User",
+        auth_tenant_header="X-Dev-Tenant",
+    )
+
+    context = await get_current_user_context(request=request, settings=settings)
+
+    assert context == CurrentUserContext(user_id=user_id, tenant_id=tenant_id)
+
+
+@pytest.mark.anyio
+async def test_get_current_user_context_fails_closed_when_dev_auth_disabled() -> None:
+    request = FakeRequest(
+        {
+            "X-User-Id": str(uuid.uuid4()),
+            "X-Tenant-Id": str(uuid.uuid4()),
+        }
+    )
+    settings = Settings(_env_file=None, dev_auth_enabled=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user_context(request=request, settings=settings)
+
+    assert exc_info.value.status_code == 501
+    assert exc_info.value.detail == "Production auth provider is not configured"
 
 
 class FakeScalarSession:

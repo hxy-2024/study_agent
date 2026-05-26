@@ -2,10 +2,11 @@ import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.db.models import Membership
 from app.db.session import get_db_session
 
@@ -31,10 +32,15 @@ def parse_dev_auth_headers(
 
 
 async def get_current_user_context(
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
-    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+    request: Request,
+    settings: Settings = Depends(get_settings),
 ) -> CurrentUserContext:
-    return parse_dev_auth_headers(user_id_header=x_user_id, tenant_id_header=x_tenant_id)
+    if not settings.dev_auth_enabled:
+        raise HTTPException(status_code=501, detail="Production auth provider is not configured")
+    return parse_dev_auth_headers(
+        user_id_header=request.headers.get(settings.auth_user_header),
+        tenant_id_header=request.headers.get(settings.auth_tenant_header),
+    )
 
 
 class ScalarSession(Protocol):

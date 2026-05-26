@@ -215,6 +215,19 @@ def test_retrieve_request_does_not_accept_client_tenant_scope() -> None:
     assert not hasattr(payload, "tenant_id")
 
 
+def test_retrieve_request_rejects_client_tenant_scope() -> None:
+    try:
+        RetrieveRequest(
+            tenant_id=uuid.uuid4(),
+            study_space_id=uuid.uuid4(),
+            query="matrix rank",
+            limit=5,
+        )
+    except ValidationError:
+        return
+    raise AssertionError("Expected ValidationError")
+
+
 def test_retrieve_request_rejects_empty_query() -> None:
     try:
         RetrieveRequest(study_space_id=uuid.uuid4(), query="", limit=5)

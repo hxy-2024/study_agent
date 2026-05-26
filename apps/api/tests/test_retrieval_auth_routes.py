@@ -5,6 +5,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api import routes_retrieval
 from app.core.auth import CurrentUserContext, get_authorized_user_context
+from app.core.config import Settings, get_settings
 from app.db.session import get_db_session
 from app.domain.rag.retrieval import RetrievedChunk
 from app.main import app
@@ -18,6 +19,54 @@ async def test_retrieval_route_requires_auth_context() -> None:
         )
 
     assert response.status_code == 401
+
+
+async def test_retrieval_route_fails_closed_when_dev_auth_is_disabled() -> None:
+    def fake_get_settings() -> Settings:
+        return Settings(_env_file=None, dev_auth_enabled=False)
+
+    app.dependency_overrides[get_settings] = fake_get_settings
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/rag/retrieve",
+                headers={
+                    "X-User-Id": str(uuid.uuid4()),
+                    "X-Tenant-Id": str(uuid.uuid4()),
+                },
+                json={"study_space_id": str(uuid.uuid4()), "query": "linear algebra", "limit": 5},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 501
+    assert response.json() == {"detail": "Production auth provider is not configured"}
+
+
+async def test_retrieval_route_rejects_request_body_tenant_id() -> None:
+    async def fake_get_db_session() -> AsyncGenerator[object, None]:
+        yield object()
+
+    async def fake_get_authorized_user_context() -> CurrentUserContext:
+        return CurrentUserContext(user_id=uuid.uuid4(), tenant_id=uuid.uuid4())
+
+    app.dependency_overrides[get_db_session] = fake_get_db_session
+    app.dependency_overrides[get_authorized_user_context] = fake_get_authorized_user_context
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/rag/retrieve",
+                json={
+                    "tenant_id": str(uuid.uuid4()),
+                    "study_space_id": str(uuid.uuid4()),
+                    "query": "linear algebra",
+                    "limit": 5,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
 
 
 async def test_retrieval_route_supplies_authorized_tenant_to_retrieve_chunks(
