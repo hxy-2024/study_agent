@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.domain.rag.chunking import ExtractedDocument, ExtractedPage, chunk_document
@@ -41,6 +43,32 @@ def test_chunk_document_uses_stable_citation_metadata() -> None:
     }
     with pytest.raises(TypeError):
         chunk.citation["filename"] = "changed"
+
+
+def test_chunk_payload_serializes_for_source_chunk_persistence() -> None:
+    document = ExtractedDocument(
+        source_id="source-1",
+        filename="lesson.md",
+        pages=[ExtractedPage(page_number=1, text="alpha beta gamma " * 20)],
+    )
+
+    chunk = chunk_document(document, max_chars=100, overlap_chars=10)[0]
+    payload = chunk.to_source_chunk_payload()
+
+    assert payload == {
+        "chunk_index": chunk.chunk_index,
+        "text": chunk.text,
+        "token_count": chunk.token_count,
+        "citation": {
+            "source_id": "source-1",
+            "filename": "lesson.md",
+            "page_start": 1,
+            "page_end": 1,
+        },
+    }
+    assert isinstance(payload, dict)
+    assert isinstance(payload["citation"], dict)
+    json.dumps(payload["citation"])
 
 
 def test_chunk_document_respects_boundaries_and_page_citations() -> None:

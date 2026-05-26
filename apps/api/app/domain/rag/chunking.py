@@ -41,6 +41,14 @@ class ChunkPayload:
     token_count: int
     citation: ChunkCitation
 
+    def to_source_chunk_payload(self) -> dict[str, object]:
+        return {
+            "chunk_index": self.chunk_index,
+            "text": self.text,
+            "token_count": self.token_count,
+            "citation": self.citation.to_dict(),
+        }
+
 
 @dataclass(frozen=True)
 class _PageRange:
