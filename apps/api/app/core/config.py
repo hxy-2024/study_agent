@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     s3_access_key_id: str = "minioadmin"
     s3_secret_access_key: str = "minioadmin"
     s3_bucket: str = "study-agent-local"
+    storage_text_max_bytes: int = 2_000_000
     rag_embedding_dimension: int = 16
     rag_chunk_max_chars: int = 1200
     rag_chunk_overlap_chars: int = 180
