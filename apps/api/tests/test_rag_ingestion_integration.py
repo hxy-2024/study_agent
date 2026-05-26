@@ -176,6 +176,42 @@ async def test_ingest_source_keeps_existing_chunks_when_embedding_fails() -> Non
     assert chunks[0].text == "old chunk survives"
 
 
+@pytest.mark.anyio
+async def test_ingest_source_commits_processing_before_reading_text() -> None:
+    engine = create_async_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    rows = None
+    reader = None
+    try:
+        async with session_factory() as session:
+            rows = await _create_source(session, status=SourceStatus.ready)
+            source = rows.source
+            await session.commit()
+            reader = StatusInspectingTextSourceReader(
+                session_factory=session_factory,
+                source_id=source.id,
+                text="Content read after processing status commits.",
+            )
+
+            await ingest_source(
+                session=session,
+                source_id=source.id,
+                reader=reader,
+                embedding_provider=DeterministicEmbeddingProvider(16),
+                max_chars=200,
+                overlap_chars=20,
+            )
+    finally:
+        if rows is not None:
+            async with session_factory() as cleanup_session:
+                await _cleanup_rows(cleanup_session, rows)
+        await engine.dispose()
+
+    assert reader is not None
+    assert reader.observed_status == SourceStatus.processing
+
+
 class FailingTextSourceReader(TextSourceReader):
     async def read_text(self, object_key: str) -> str:
         raise RuntimeError("storage unavailable")
@@ -187,6 +223,21 @@ class FailingEmbeddingProvider(DeterministicEmbeddingProvider):
 
     def embed_text(self, text: str) -> list[float]:
         raise RuntimeError("embedding unavailable")
+
+
+class StatusInspectingTextSourceReader(TextSourceReader):
+    def __init__(self, session_factory, source_id: uuid.UUID, text: str) -> None:
+        self._session_factory = session_factory
+        self._source_id = source_id
+        self._text = text
+        self.observed_status: SourceStatus | None = None
+
+    async def read_text(self, object_key: str) -> str:
+        async with self._session_factory() as session:
+            source = await session.get(Source, self._source_id)
+            assert source is not None
+            self.observed_status = source.status
+        return self._text
 
 
 @dataclass(frozen=True)

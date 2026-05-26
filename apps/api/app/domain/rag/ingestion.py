@@ -1,7 +1,7 @@
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import IngestionJob, IngestionJobStatus, Source, SourceChunk, SourceStatus
@@ -51,28 +51,15 @@ async def ingest_source(
     if embedding_provider.dimension != 16:
         raise ValueError("Embedding dimension must be 16")
 
-    tenant_id = source.tenant_id
-    study_space_id = source.study_space_id
-    object_key = source.object_key
-    filename = source.filename
-
-    job = IngestionJob(
-        tenant_id=tenant_id,
-        study_space_id=study_space_id,
-        source_id=source_id,
-        status=IngestionJobStatus.running,
-    )
-    session.add(job)
-    source.status = SourceStatus.processing
-    source.error_message = None
+    claim = await _claim_source_for_ingestion(session, source, allowed_statuses)
+    job_id = claim.job_id
+    chunk_count = 0
 
     try:
-        await session.flush()
-
-        text = await reader.read_text(object_key)
+        text = await reader.read_text(claim.object_key)
         document = ExtractedDocument(
             source_id=str(source_id),
-            filename=filename,
+            filename=claim.filename,
             pages=[ExtractedPage(page_number=1, text=text)],
         )
         chunks = chunk_document(
@@ -85,8 +72,8 @@ async def ingest_source(
             payload = chunk.to_source_chunk_payload()
             chunk_rows.append(
                 SourceChunk(
-                    tenant_id=tenant_id,
-                    study_space_id=study_space_id,
+                    tenant_id=claim.tenant_id,
+                    study_space_id=claim.study_space_id,
                     source_id=source_id,
                     chunk_index=payload["chunk_index"],
                     text=payload["text"],
@@ -100,37 +87,89 @@ async def ingest_source(
         await session.execute(delete(SourceChunk).where(SourceChunk.source_id == source_id))
         session.add_all(chunk_rows)
 
+        job = await session.get(IngestionJob, job_id)
+        source = await session.get(Source, source_id)
+        if job is None or source is None:
+            raise ValueError("Ingestion state not found")
+
+        chunk_count = len(chunks)
         job.status = IngestionJobStatus.completed
-        job.chunk_count = len(chunks)
+        job.chunk_count = chunk_count
         job.error_message = None
         source.status = SourceStatus.ready
         source.error_message = None
         await session.commit()
-        await session.refresh(job)
-        await session.refresh(source)
-        return IngestionResult(
-            job_id=job.id,
-            source_id=source_id,
-            status=job.status,
-            chunk_count=job.chunk_count,
-        )
     except Exception as exc:
         await session.rollback()
         await _persist_failed_ingestion(
             session=session,
             source_id=source_id,
-            tenant_id=tenant_id,
-            study_space_id=study_space_id,
+            job_id=job_id,
             error_message=str(exc),
         )
         raise
+
+    return IngestionResult(
+        job_id=job_id,
+        source_id=source_id,
+        status=IngestionJobStatus.completed,
+        chunk_count=chunk_count,
+    )
+
+
+@dataclass(frozen=True)
+class _IngestionClaim:
+    job_id: uuid.UUID
+    tenant_id: uuid.UUID
+    study_space_id: uuid.UUID
+    object_key: str
+    filename: str
+
+
+async def _claim_source_for_ingestion(
+    session: AsyncSession,
+    source: Source,
+    allowed_statuses: set[SourceStatus],
+) -> _IngestionClaim:
+    tenant_id = source.tenant_id
+    study_space_id = source.study_space_id
+    object_key = source.object_key
+    filename = source.filename
+
+    result = await session.execute(
+        update(Source)
+        .where(Source.id == source.id, Source.status.in_(allowed_statuses))
+        .values(status=SourceStatus.processing, error_message=None)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        await session.rollback()
+        raise ValueError("Source is already processing")
+
+    job = IngestionJob(
+        tenant_id=tenant_id,
+        study_space_id=study_space_id,
+        source_id=source.id,
+        status=IngestionJobStatus.running,
+    )
+    session.add(job)
+    await session.flush()
+    job_id = job.id
+    await session.commit()
+
+    return _IngestionClaim(
+        job_id=job_id,
+        tenant_id=tenant_id,
+        study_space_id=study_space_id,
+        object_key=object_key,
+        filename=filename,
+    )
 
 
 async def _persist_failed_ingestion(
     session: AsyncSession,
     source_id: uuid.UUID,
-    tenant_id: uuid.UUID,
-    study_space_id: uuid.UUID,
+    job_id: uuid.UUID,
     error_message: str,
 ) -> None:
     failed_source = await session.get(Source, source_id)
@@ -138,13 +177,8 @@ async def _persist_failed_ingestion(
         failed_source.status = SourceStatus.failed
         failed_source.error_message = error_message
 
-    session.add(
-        IngestionJob(
-            tenant_id=tenant_id,
-            study_space_id=study_space_id,
-            source_id=source_id,
-            status=IngestionJobStatus.failed,
-            error_message=error_message,
-        )
-    )
+    failed_job = await session.get(IngestionJob, job_id)
+    if failed_job is not None:
+        failed_job.status = IngestionJobStatus.failed
+        failed_job.error_message = error_message
     await session.commit()
