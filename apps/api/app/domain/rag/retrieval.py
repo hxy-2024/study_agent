@@ -9,6 +9,9 @@ from app.db.models import SourceChunk
 from app.domain.rag.embeddings import EmbeddingProvider
 
 
+EXPECTED_EMBEDDING_DIMENSION = 16
+
+
 @dataclass(frozen=True)
 class RetrievedChunk:
     id: uuid.UUID
@@ -23,7 +26,21 @@ class RetrievedChunk:
 
 
 def dot_product(left: Sequence[float], right: Sequence[float]) -> float:
+    _validate_vector(left, "left")
+    _validate_vector(right, "right")
+    if len(left) != len(right):
+        raise ValueError("Vectors must have the same dimension")
     return sum(left_value * right_value for left_value, right_value in zip(left, right, strict=False))
+
+
+def _validate_vector(vector: Sequence[float], name: str) -> None:
+    if len(vector) == 0:
+        raise ValueError(f"{name} vector must not be empty")
+
+
+def _validate_limit(limit: int) -> None:
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
 
 
 def rank_chunks_by_dot_product(
@@ -31,11 +48,16 @@ def rank_chunks_by_dot_product(
     chunks: Sequence[RetrievedChunk],
     limit: int,
 ) -> list[RetrievedChunk]:
+    _validate_limit(limit)
+    _validate_vector(query_embedding, "query_embedding")
     scored_chunks = [
         replace(chunk, score=dot_product(query_embedding, chunk.embedding))
         for chunk in chunks
     ]
-    return sorted(scored_chunks, key=lambda chunk: chunk.score, reverse=True)[:limit]
+    return sorted(
+        scored_chunks,
+        key=lambda chunk: (-chunk.score, chunk.source_id.int, chunk.chunk_index, chunk.id.int),
+    )[:limit]
 
 
 async def retrieve_chunks(
@@ -46,13 +68,17 @@ async def retrieve_chunks(
     limit: int,
     embedding_provider: EmbeddingProvider,
 ) -> list[RetrievedChunk]:
+    _validate_limit(limit)
+    if embedding_provider.dimension != EXPECTED_EMBEDDING_DIMENSION:
+        raise ValueError("Embedding dimension must be 16")
+
     query_embedding = embedding_provider.embed_text(query)
     result = await session.execute(
         select(SourceChunk).where(
             SourceChunk.tenant_id == tenant_id,
             SourceChunk.study_space_id == study_space_id,
             SourceChunk.is_active.is_(True),
-        )
+        ).order_by(SourceChunk.source_id, SourceChunk.chunk_index, SourceChunk.id)
     )
     chunks = [
         RetrievedChunk(
