@@ -4,7 +4,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Source, StudySpace
+from app.db.models import Source, SourceChunk, SourceStatus, StudySpace
 from app.domain.sources.schemas import UploadPresignRequest
 from app.infrastructure.storage import create_presigned_put_url
 
@@ -69,3 +69,67 @@ async def create_upload_request(
     await session.refresh(source)
     upload_url = create_presigned_put_url(object_key=object_key, content_type=payload.content_type)
     return source, upload_url
+
+
+async def get_source_for_tenant(
+    session: AsyncSession,
+    source_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> Source:
+    source = await session.scalar(
+        select(Source).where(
+            Source.id == source_id,
+            Source.tenant_id == tenant_id,
+        )
+    )
+    if source is None:
+        raise ValueError("Source not found for tenant")
+    return source
+
+
+async def list_sources_for_space(
+    session: AsyncSession,
+    study_space_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> list[Source]:
+    await ensure_study_space_in_tenant(session, study_space_id, tenant_id)
+    result = await session.scalars(
+        select(Source)
+        .where(
+            Source.tenant_id == tenant_id,
+            Source.study_space_id == study_space_id,
+        )
+        .order_by(Source.created_at.desc(), Source.id)
+    )
+    return list(result.all())
+
+
+async def mark_source_uploaded(
+    session: AsyncSession,
+    source_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> Source:
+    source = await get_source_for_tenant(session, source_id, tenant_id)
+    if source.status != SourceStatus.pending_upload:
+        raise ValueError(f"Source cannot be marked uploaded from status {source.status.value}")
+    source.status = SourceStatus.uploaded
+    await session.commit()
+    await session.refresh(source)
+    return source
+
+
+async def list_source_chunks(
+    session: AsyncSession,
+    source_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> list[SourceChunk]:
+    await get_source_for_tenant(session, source_id, tenant_id)
+    result = await session.scalars(
+        select(SourceChunk)
+        .where(
+            SourceChunk.source_id == source_id,
+            SourceChunk.tenant_id == tenant_id,
+        )
+        .order_by(SourceChunk.chunk_index)
+    )
+    return list(result.all())
