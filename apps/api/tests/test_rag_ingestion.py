@@ -53,3 +53,71 @@ async def test_ingest_source_rejects_pending_upload_sources() -> None:
             max_chars=200,
             overlap_chars=20,
         )
+
+
+@pytest.mark.anyio
+async def test_ingest_source_rejects_processing_sources() -> None:
+    source = _source_with_status(SourceStatus.processing)
+
+    with pytest.raises(ValueError, match="processing"):
+        await ingest_source(
+            session=FakeSourceSession(source),
+            source_id=source.id,
+            reader=InMemoryTextSourceReader({"objects/intro.md": "hello"}),
+            embedding_provider=DeterministicEmbeddingProvider(16),
+            max_chars=200,
+            overlap_chars=20,
+        )
+
+
+@pytest.mark.anyio
+async def test_ingest_source_rejects_wrong_embedding_dimension_before_writes() -> None:
+    source = _source_with_status(SourceStatus.uploaded)
+    session = FakeSourceSession(source)
+
+    with pytest.raises(ValueError, match="Embedding dimension must be 16"):
+        await ingest_source(
+            session=session,
+            source_id=source.id,
+            reader=InMemoryTextSourceReader({"objects/intro.md": "hello"}),
+            embedding_provider=DeterministicEmbeddingProvider(8),
+            max_chars=200,
+            overlap_chars=20,
+        )
+
+    assert session.write_attempted is False
+
+
+class FakeSourceSession:
+    def __init__(self, source: Source) -> None:
+        self.source = source
+        self.write_attempted = False
+
+    async def get(self, model, object_id):
+        assert model is Source
+        assert object_id == self.source.id
+        return self.source
+
+    def add(self, instance) -> None:
+        self.write_attempted = True
+
+    async def flush(self) -> None:
+        self.write_attempted = True
+
+    async def execute(self, statement) -> None:
+        self.write_attempted = True
+
+    async def commit(self) -> None:
+        self.write_attempted = True
+
+
+def _source_with_status(status: SourceStatus) -> Source:
+    return Source(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        study_space_id=uuid.uuid4(),
+        filename="intro.md",
+        content_type="text/markdown",
+        object_key="objects/intro.md",
+        status=status,
+    )
