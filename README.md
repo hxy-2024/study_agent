@@ -14,7 +14,18 @@ The current foundation includes:
 - Nuxt app shell.
 - Dashboard and create-space UI.
 
-RAG, LangGraph agents, streaming chat, quizzes, mastery tracking, and import/export are planned as separate implementation phases.
+LangGraph agents, streaming chat, quizzes, mastery tracking, and import/export are planned as separate implementation phases.
+
+### RAG foundation
+
+The API includes the first RAG foundation:
+
+- uploaded source metadata can be ingested into chunks;
+- chunks store citation metadata and embeddings;
+- retrieval is scoped by tenant and study space;
+- deterministic embeddings are used for local development and tests.
+
+The first runtime ingestion endpoint exposes the API shape but returns `501` until object-storage text reading is configured. Domain tests cover the ingestion path with an in-memory text reader.
 
 ## Local Development
 
