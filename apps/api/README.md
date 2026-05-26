@@ -28,3 +28,7 @@ uv run pytest tests/test_rag_chunking.py tests/test_rag_embeddings.py tests/test
 ```
 
 Guarded Postgres tests require `RUN_POSTGRES_TESTS=1` and `DATABASE_URL`.
+
+Runtime RAG endpoints are intentionally guarded in this foundation. Ingestion returns
+`501` until object-storage text reading is configured, and retrieval returns `501`
+until authenticated tenant context exists.

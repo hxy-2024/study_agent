@@ -1,11 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, HTTPException
 
-from app.core.config import get_settings
-from app.db.session import get_db_session
-from app.domain.rag.embeddings import DeterministicEmbeddingProvider
-from app.domain.rag.retrieval import retrieve_chunks
-from app.domain.rag.schemas import RetrieveRequest, RetrievedChunkResponse, RetrieveResponse
+from app.domain.rag.schemas import RetrieveRequest, RetrieveResponse
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 
@@ -13,33 +8,11 @@ router = APIRouter(prefix="/rag", tags=["rag"])
 @router.post("/retrieve", response_model=RetrieveResponse)
 async def retrieve_rag_chunks(
     payload: RetrieveRequest,
-    session: AsyncSession = Depends(get_db_session),
 ) -> RetrieveResponse:
-    settings = get_settings()
-    embedding_provider = DeterministicEmbeddingProvider(settings.rag_embedding_dimension)
-    try:
-        chunks = await retrieve_chunks(
-            session=session,
-            tenant_id=payload.tenant_id,
-            study_space_id=payload.study_space_id,
-            query=payload.query,
-            limit=payload.limit,
-            embedding_provider=embedding_provider,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return RetrieveResponse(
-        query=payload.query,
-        chunks=[
-            RetrievedChunkResponse(
-                chunk_id=chunk.id,
-                source_id=chunk.source_id,
-                chunk_index=chunk.chunk_index,
-                text=chunk.text,
-                citation=chunk.citation,
-                score=chunk.score,
-            )
-            for chunk in chunks
-        ],
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "Runtime retrieval API requires authenticated tenant context "
+            "before it can return source chunks"
+        ),
     )
