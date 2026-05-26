@@ -1,6 +1,14 @@
+from abc import ABC, abstractmethod
+
 import boto3
 
 from app.core.config import get_settings
+
+
+class TextSourceReader(ABC):
+    @abstractmethod
+    async def read_text(self, object_key: str) -> str:
+        raise NotImplementedError
 
 
 def create_presigned_put_url(object_key: str, content_type: str) -> str:
