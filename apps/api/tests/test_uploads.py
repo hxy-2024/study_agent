@@ -1,8 +1,15 @@
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
-from app.domain.sources.service import build_object_key, validate_content_type
+from app.domain.sources.schemas import UploadPresignRequest
+from app.domain.sources.service import (
+    build_object_key,
+    create_upload_request,
+    ensure_study_space_in_tenant,
+    validate_content_type,
+)
 
 
 def test_build_object_key_is_tenant_and_space_scoped() -> None:
@@ -25,3 +32,74 @@ def test_validate_content_type_accepts_supported_types() -> None:
 def test_validate_content_type_rejects_unsupported_types() -> None:
     with pytest.raises(ValueError, match="Unsupported content type"):
         validate_content_type("application/x-msdownload")
+
+
+async def test_ensure_study_space_in_tenant_accepts_matching_space() -> None:
+    study_space = SimpleNamespace(id=uuid.uuid4())
+
+    class FakeSession:
+        async def scalar(self, statement):
+            self.statement = statement
+            return study_space
+
+    session = FakeSession()
+
+    result = await ensure_study_space_in_tenant(
+        session,
+        study_space_id=study_space.id,
+        tenant_id=uuid.uuid4(),
+    )
+
+    assert result is study_space
+    assert session.statement is not None
+
+
+async def test_ensure_study_space_in_tenant_rejects_missing_space() -> None:
+    class FakeSession:
+        async def scalar(self, statement):
+            return None
+
+    with pytest.raises(ValueError, match="Study space not found for tenant"):
+        await ensure_study_space_in_tenant(
+            FakeSession(),
+            study_space_id=uuid.uuid4(),
+            tenant_id=uuid.uuid4(),
+        )
+
+
+async def test_create_upload_request_uses_explicit_tenant_id(monkeypatch) -> None:
+    tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    study_space_id = uuid.UUID("00000000-0000-0000-0000-000000000002")
+    payload = UploadPresignRequest(
+        study_space_id=study_space_id,
+        filename="algebra notes.pdf",
+        content_type="application/pdf",
+    )
+
+    class FakeSession:
+        def add(self, source):
+            self.source = source
+
+        async def commit(self):
+            self.committed = True
+
+        async def refresh(self, source):
+            source.id = uuid.uuid4()
+
+        async def scalar(self, statement):
+            return SimpleNamespace(id=study_space_id)
+
+    session = FakeSession()
+    monkeypatch.setattr(
+        "app.domain.sources.service.create_presigned_put_url",
+        lambda *, object_key, content_type: f"https://storage.example/{object_key}",
+    )
+
+    source, upload_url = await create_upload_request(session, payload, tenant_id=tenant_id)
+
+    assert source is session.source
+    assert source.tenant_id == tenant_id
+    assert source.study_space_id == study_space_id
+    assert source.object_key.startswith(f"tenants/{tenant_id}/spaces/{study_space_id}/sources/")
+    assert source.object_key.endswith("/algebra-notes.pdf")
+    assert upload_url == f"https://storage.example/{source.object_key}"

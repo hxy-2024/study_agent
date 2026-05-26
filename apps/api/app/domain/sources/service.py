@@ -1,9 +1,10 @@
 import re
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Source
+from app.db.models import Source, StudySpace
 from app.domain.sources.schemas import UploadPresignRequest
 from app.infrastructure.storage import create_presigned_put_url
 
@@ -32,14 +33,32 @@ def build_object_key(tenant_id: uuid.UUID, study_space_id: uuid.UUID, filename: 
     return f"tenants/{tenant_id}/spaces/{study_space_id}/sources/{source_id}/{safe_name}"
 
 
+async def ensure_study_space_in_tenant(
+    session: AsyncSession,
+    study_space_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> StudySpace:
+    study_space = await session.scalar(
+        select(StudySpace).where(
+            StudySpace.id == study_space_id,
+            StudySpace.tenant_id == tenant_id,
+        )
+    )
+    if study_space is None:
+        raise ValueError("Study space not found for tenant")
+    return study_space
+
+
 async def create_upload_request(
     session: AsyncSession,
     payload: UploadPresignRequest,
+    tenant_id: uuid.UUID,
 ) -> tuple[Source, str]:
     validate_content_type(payload.content_type)
-    object_key = build_object_key(payload.tenant_id, payload.study_space_id, payload.filename)
+    await ensure_study_space_in_tenant(session, payload.study_space_id, tenant_id)
+    object_key = build_object_key(tenant_id, payload.study_space_id, payload.filename)
     source = Source(
-        tenant_id=payload.tenant_id,
+        tenant_id=tenant_id,
         study_space_id=payload.study_space_id,
         filename=payload.filename,
         content_type=payload.content_type,

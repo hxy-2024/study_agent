@@ -1,10 +1,11 @@
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class UploadPresignRequest(BaseModel):
-    tenant_id: uuid.UUID
+    model_config = ConfigDict(extra="forbid")
+
     study_space_id: uuid.UUID
     filename: str = Field(min_length=1, max_length=255)
     content_type: str = Field(min_length=1, max_length=120)
