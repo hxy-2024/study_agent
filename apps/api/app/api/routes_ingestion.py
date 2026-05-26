@@ -11,6 +11,10 @@ from app.domain.rag.schemas import IngestSourceResponse
 from app.infrastructure.storage import TextSourceReader
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
+RUNTIME_TEXT_READER_CONFIGURED = False
+RUNTIME_TEXT_READER_UNSUPPORTED_DETAIL = (
+    "Runtime text reader is not configured for runtime ingestion"
+)
 
 
 class UnsupportedRuntimeTextReader(TextSourceReader):
@@ -23,6 +27,12 @@ async def run_source_ingestion(
     source_id: uuid.UUID,
     session: AsyncSession = Depends(get_db_session),
 ) -> IngestSourceResponse:
+    if not RUNTIME_TEXT_READER_CONFIGURED:
+        raise HTTPException(
+            status_code=501,
+            detail=RUNTIME_TEXT_READER_UNSUPPORTED_DETAIL,
+        )
+
     settings = get_settings()
     embedding_provider = DeterministicEmbeddingProvider(settings.rag_embedding_dimension)
     try:
@@ -36,8 +46,6 @@ async def run_source_ingestion(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=501, detail=str(exc)) from exc
 
     return IngestSourceResponse(
         job_id=result.job_id,
