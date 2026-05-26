@@ -1,7 +1,13 @@
 import uuid
 from dataclasses import dataclass
+from typing import Protocol
 
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import Membership
+from app.db.session import get_db_session
 
 
 @dataclass(frozen=True)
@@ -29,3 +35,30 @@ async def get_current_user_context(
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
 ) -> CurrentUserContext:
     return parse_dev_auth_headers(user_id_header=x_user_id, tenant_id_header=x_tenant_id)
+
+
+class ScalarSession(Protocol):
+    async def scalar(self, statement):
+        ...
+
+
+async def ensure_tenant_membership(
+    context: CurrentUserContext,
+    session: ScalarSession,
+) -> CurrentUserContext:
+    membership = await session.scalar(
+        select(Membership).where(
+            Membership.tenant_id == context.tenant_id,
+            Membership.user_id == context.user_id,
+        )
+    )
+    if membership is None:
+        raise HTTPException(status_code=403, detail="User is not a member of this tenant")
+    return context
+
+
+async def get_authorized_user_context(
+    context: CurrentUserContext = Depends(get_current_user_context),
+    session: AsyncSession = Depends(get_db_session),
+) -> CurrentUserContext:
+    return await ensure_tenant_membership(context=context, session=session)
