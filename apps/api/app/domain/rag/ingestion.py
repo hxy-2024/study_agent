@@ -36,10 +36,12 @@ async def ingest_source(
     embedding_provider: EmbeddingProvider,
     max_chars: int,
     overlap_chars: int,
+    tenant_id: uuid.UUID | None = None,
 ) -> IngestionResult:
     source = await session.get(Source, source_id)
     if source is None:
         raise ValueError("Source not found")
+    validate_source_for_ingestion(source=source, tenant_id=tenant_id)
 
     allowed_statuses = {
         SourceStatus.uploaded,
@@ -51,7 +53,12 @@ async def ingest_source(
     if embedding_provider.dimension != 16:
         raise ValueError("Embedding dimension must be 16")
 
-    claim = await _claim_source_for_ingestion(session, source, allowed_statuses)
+    claim = await _claim_source_for_ingestion(
+        session=session,
+        source=source,
+        allowed_statuses=allowed_statuses,
+        tenant_id=tenant_id,
+    )
     job_id = claim.job_id
     chunk_count = 0
 
@@ -117,6 +124,11 @@ async def ingest_source(
     )
 
 
+def validate_source_for_ingestion(source: Source, tenant_id: uuid.UUID | None) -> None:
+    if tenant_id is not None and source.tenant_id != tenant_id:
+        raise ValueError("Source not found for tenant")
+
+
 @dataclass(frozen=True)
 class _IngestionClaim:
     job_id: uuid.UUID
@@ -130,15 +142,20 @@ async def _claim_source_for_ingestion(
     session: AsyncSession,
     source: Source,
     allowed_statuses: set[SourceStatus],
+    tenant_id: uuid.UUID | None,
 ) -> _IngestionClaim:
-    tenant_id = source.tenant_id
+    source_tenant_id = source.tenant_id
     study_space_id = source.study_space_id
     object_key = source.object_key
     filename = source.filename
 
+    claim_conditions = [Source.id == source.id, Source.status.in_(allowed_statuses)]
+    if tenant_id is not None:
+        claim_conditions.append(Source.tenant_id == tenant_id)
+
     result = await session.execute(
         update(Source)
-        .where(Source.id == source.id, Source.status.in_(allowed_statuses))
+        .where(*claim_conditions)
         .values(status=SourceStatus.processing, error_message=None)
         .execution_options(synchronize_session=False)
     )
@@ -159,7 +176,7 @@ async def _claim_source_for_ingestion(
 
     return _IngestionClaim(
         job_id=job_id,
-        tenant_id=tenant_id,
+        tenant_id=source_tenant_id,
         study_space_id=study_space_id,
         object_key=object_key,
         filename=filename,
