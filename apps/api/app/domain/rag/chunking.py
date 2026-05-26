@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Any
 
 
 @dataclass(frozen=True)
@@ -16,12 +15,31 @@ class ExtractedDocument:
 
 
 @dataclass(frozen=True)
+class ChunkCitation:
+    source_id: str
+    filename: str
+    page_start: int
+    page_end: int
+
+    def __getitem__(self, key: str) -> str | int:
+        return self.to_dict()[key]
+
+    def to_dict(self) -> dict[str, str | int]:
+        return {
+            "source_id": self.source_id,
+            "filename": self.filename,
+            "page_start": self.page_start,
+            "page_end": self.page_end,
+        }
+
+
+@dataclass(frozen=True)
 class ChunkPayload:
     source_id: str
     text: str
     chunk_index: int
     token_count: int
-    citation: dict[str, Any]
+    citation: ChunkCitation
 
 
 @dataclass(frozen=True)
@@ -69,12 +87,12 @@ def chunk_document(
                     text=chunk_text,
                     chunk_index=len(chunks),
                     token_count=estimate_token_count(chunk_text),
-                    citation={
-                        "source_id": document.source_id,
-                        "filename": document.filename,
-                        "page_start": page_start,
-                        "page_end": page_end,
-                    },
+                    citation=ChunkCitation(
+                        source_id=document.source_id,
+                        filename=document.filename,
+                        page_start=page_start,
+                        page_end=page_end,
+                    ),
                 )
             )
 
