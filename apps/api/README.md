@@ -30,5 +30,18 @@ uv run pytest tests/test_rag_chunking.py tests/test_rag_embeddings.py tests/test
 Guarded Postgres tests require `RUN_POSTGRES_TESTS=1` and `DATABASE_URL`.
 
 Runtime RAG endpoints are intentionally guarded in this foundation. Ingestion returns
-`501` until object-storage text reading is configured, and retrieval returns `501`
-until authenticated tenant context exists.
+`501` until object-storage text reading is configured, and retrieval requires valid
+development auth headers backed by tenant membership.
+
+## Development auth
+
+Protected local endpoints use development headers:
+
+```powershell
+$headers = @{
+  "X-User-Id" = "<user uuid>"
+  "X-Tenant-Id" = "<tenant uuid>"
+}
+```
+
+The headers are temporary. Production auth will replace them with a proper session/JWT provider while keeping the same `CurrentUserContext` boundary.

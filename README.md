@@ -25,7 +25,16 @@ The API includes the first RAG foundation:
 - retrieval is scoped by tenant and study space;
 - deterministic embeddings are used for local development and tests.
 
-The first runtime ingestion endpoint exposes the API shape but returns `501` until object-storage text reading is configured. The runtime retrieval endpoint also returns `501` until authenticated tenant context is available, so source chunks are not returned based on caller-supplied tenant IDs. Domain tests cover ingestion and retrieval with local providers.
+Runtime ingestion returns `501` until object-storage text reading is configured. Runtime retrieval is enabled only when the request includes valid development auth headers and the user is a member of the tenant. Domain tests cover ingestion and retrieval with local providers.
+
+### Development auth headers
+
+Local protected API calls use development headers until the full login flow is implemented:
+
+- `X-User-Id`: existing user UUID
+- `X-Tenant-Id`: existing tenant UUID
+
+The API verifies membership before returning tenant-scoped data.
 
 ## Local Development
 
