@@ -33,6 +33,7 @@ async def test_list_sources_supplies_authorized_tenant_to_service(monkeypatch) -
         return [
             SimpleNamespace(
                 id=source_id,
+                tenant_id=tenant_id,
                 study_space_id=study_space_id,
                 filename="notes.pdf",
                 content_type="application/pdf",
@@ -59,6 +60,7 @@ async def test_list_sources_supplies_authorized_tenant_to_service(monkeypatch) -
         "sources": [
             {
                 "id": str(source_id),
+                "tenant_id": str(tenant_id),
                 "study_space_id": str(study_space_id),
                 "filename": "notes.pdf",
                 "content_type": "application/pdf",
