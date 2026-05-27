@@ -42,4 +42,14 @@ describe('App shell', () => {
     expect(wrapper.find('.primary-button').exists()).toBe(false)
     expect(wrapper.find('.runtime-pill').text()).toBe('Model Ready')
   })
+
+  it('links only implemented navigation destinations', () => {
+    const wrapper = mountShell()
+    const links = wrapper.findAll('.sidebar-nav a')
+    const disabledItems = wrapper.findAll('.sidebar-nav [aria-disabled="true"]')
+
+    expect(links.map(link => link.attributes('href'))).toEqual(['/'])
+    expect(disabledItems).toHaveLength(4)
+    expect(disabledItems.map(item => item.text())).toEqual(['Library', 'Reviews', 'Progress', 'Settings'])
+  })
 })

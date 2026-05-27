@@ -11,10 +11,10 @@
 
       <nav class="sidebar-nav">
         <NuxtLink class="nav-link" to="/">Spaces</NuxtLink>
-        <NuxtLink class="nav-link" to="/">Library</NuxtLink>
-        <NuxtLink class="nav-link" to="/">Reviews</NuxtLink>
-        <NuxtLink class="nav-link" to="/">Progress</NuxtLink>
-        <NuxtLink class="nav-link" to="/">Settings</NuxtLink>
+        <span class="nav-link disabled" aria-disabled="true">Library</span>
+        <span class="nav-link disabled" aria-disabled="true">Reviews</span>
+        <span class="nav-link disabled" aria-disabled="true">Progress</span>
+        <span class="nav-link disabled" aria-disabled="true">Settings</span>
       </nav>
     </aside>
 

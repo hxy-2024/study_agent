@@ -617,6 +617,7 @@ p {
   border-radius: 8px;
   padding: 14px;
   background: var(--color-surface);
+  min-width: 0;
 }
 
 .source-row.active {
@@ -651,6 +652,15 @@ p {
 
 .source-error {
   color: var(--color-error);
+  overflow-wrap: anywhere;
+}
+
+.source-main,
+.source-main > div,
+.source-row h3,
+.source-row p {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .chunk-list {
@@ -680,7 +690,7 @@ p {
   justify-items: start;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1120px) {
   .space-layout {
     grid-template-columns: 1fr;
   }

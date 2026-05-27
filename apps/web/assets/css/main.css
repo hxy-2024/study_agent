@@ -141,6 +141,16 @@ p {
   color: var(--color-primary);
 }
 
+.nav-link.disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.nav-link.disabled:hover {
+  background: transparent;
+  color: var(--color-muted);
+}
+
 .nav-link.router-link-active::before {
   position: absolute;
   left: 6px;
