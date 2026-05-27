@@ -9,7 +9,10 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     database_url: str = "postgresql+asyncpg://study_agent:study_agent@localhost:15432/study_agent"
     redis_url: str = "redis://localhost:6379/0"
-    api_cors_origins: list[AnyHttpUrl] = []
+    api_cors_origins: list[AnyHttpUrl] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
     s3_endpoint_url: str = "http://localhost:9000"
     s3_public_endpoint_url: str = "http://localhost:9000"
     s3_access_key_id: str = "minioadmin"
