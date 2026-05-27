@@ -443,6 +443,13 @@ onMounted(() => {
                 <p>{{ chapter.goal }}</p>
                 <small>{{ chapter.estimated_days }} days</small>
               </div>
+              <NuxtLink
+                data-testid="study-chapter"
+                class="secondary-button chapter-study-link"
+                :to="`/chapters/${chapter.id}`"
+              >
+                Study
+              </NuxtLink>
             </article>
           </div>
           <p v-else class="empty-state">No learning route yet. Generate a route after uploading or ingesting sources.</p>
@@ -656,7 +663,7 @@ onMounted(() => {
 
 .chapter-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
   align-items: start;
   border: 1px solid var(--color-border);
@@ -677,6 +684,11 @@ onMounted(() => {
 .chapter-row small {
   color: var(--color-primary);
   font-weight: 800;
+}
+
+.chapter-study-link {
+  align-self: start;
+  text-decoration: none;
 }
 
 .eyebrow {
