@@ -287,18 +287,27 @@ onMounted(() => {
 </script>
 
 <template>
-  <section>
-    <div class="topbar">
-      <div>
-        <h1>Study Space</h1>
-        <p>Space ID: {{ spaceId }}</p>
-      </div>
-    </div>
+  <section class="space-detail page-enter">
+    <div class="space-layout">
+      <div class="space-main">
+        <div class="topbar page-heading">
+          <div>
+            <p class="eyebrow">Study space</p>
+            <h1>Study Space</h1>
+            <p>Space ID: {{ spaceId }}</p>
+          </div>
+        </div>
 
-    <p v-if="errorMessage" class="error-alert">{{ errorMessage }}</p>
+        <section class="card route-overview">
+          <div>
+            <p class="eyebrow">Next action</p>
+            <h2>Learning route foundation</h2>
+            <p>Route generation will connect chapters, source chunks, and tutor sessions in the next product phase.</p>
+          </div>
+        </section>
 
-    <div class="workspace-grid">
-      <div class="source-column">
+        <p v-if="errorMessage" class="error-alert">{{ errorMessage }}</p>
+
         <section class="card source-upload-card">
           <div>
             <p class="eyebrow">Source library</p>
@@ -404,54 +413,67 @@ onMounted(() => {
         </section>
       </div>
 
-      <aside class="card chunk-preview">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">RAG preview</p>
-            <h2>Chunk preview</h2>
-          </div>
-          <span v-if="chunks.length" class="chunk-count">{{ chunks.length }} chunks</span>
-        </div>
+      <aside class="space-rail">
+        <section class="panel mentor-panel">
+          <p class="eyebrow">AI Mentor</p>
+          <h2>Ready for sources</h2>
+          <p>Upload text or Markdown material, run ingestion, then inspect chunks before route generation.</p>
+        </section>
 
-        <p v-if="loadingChunks" class="muted">Loading chunks...</p>
-        <div v-else-if="!hasSelectedSource" class="empty-state">Select a source to preview parsed chunks.</div>
-        <div v-else-if="chunks.length === 0" class="empty-state preview-empty">
-          <p>This source has no chunks yet.</p>
-          <button
-            v-if="selectedSource && canRunIngestion(selectedSource)"
-            data-testid="preview-run-ingestion"
-            type="button"
-            class="secondary-button"
-            :disabled="ingestingSourceId === selectedSource.id"
-            @click="runSelectedSourceIngestion"
-          >
-            {{ ingestingSourceId === selectedSource.id ? 'Running...' : ingestionActionLabel(selectedSource) }}
-          </button>
-        </div>
-        <div v-else class="chunk-list">
-          <p class="selected-source-name">{{ selectedSourceName || selectedSource?.filename }}</p>
-          <article v-for="chunk in chunks" :key="chunk.id" class="chunk-card">
-            <h3>Chunk #{{ chunk.chunk_index }}</h3>
-            <p>{{ chunk.text }}</p>
-            <small>{{ citationSummary(chunk.citation) }}</small>
-          </article>
-        </div>
+        <section class="card chunk-preview">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">RAG preview</p>
+              <h2>Chunk preview</h2>
+            </div>
+            <span v-if="chunks.length" class="chunk-count">{{ chunks.length }} chunks</span>
+          </div>
+
+          <p v-if="loadingChunks" class="muted">Loading chunks...</p>
+          <div v-else-if="!hasSelectedSource" class="empty-state">Select a source to preview parsed chunks.</div>
+          <div v-else-if="chunks.length === 0" class="empty-state preview-empty">
+            <p>This source has no chunks yet.</p>
+            <button
+              v-if="selectedSource && canRunIngestion(selectedSource)"
+              data-testid="preview-run-ingestion"
+              type="button"
+              class="secondary-button"
+              :disabled="ingestingSourceId === selectedSource.id"
+              @click="runSelectedSourceIngestion"
+            >
+              {{ ingestingSourceId === selectedSource.id ? 'Running...' : ingestionActionLabel(selectedSource) }}
+            </button>
+          </div>
+          <div v-else class="chunk-list">
+            <p class="selected-source-name">{{ selectedSourceName || selectedSource?.filename }}</p>
+            <article v-for="chunk in chunks" :key="chunk.id" class="chunk-card">
+              <h3>Chunk #{{ chunk.chunk_index }}</h3>
+              <p>{{ chunk.text }}</p>
+              <small>{{ citationSummary(chunk.citation) }}</small>
+            </article>
+          </div>
+        </section>
       </aside>
     </div>
   </section>
 </template>
 
 <style scoped>
-.workspace-grid {
+.space-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
   gap: 18px;
   align-items: start;
 }
 
-.source-column {
+.space-main,
+.space-rail {
   display: grid;
   gap: 18px;
+}
+
+.page-heading {
+  min-height: 0;
 }
 
 .source-upload-card,
@@ -461,11 +483,17 @@ onMounted(() => {
   gap: 16px;
 }
 
+.route-overview p,
+.page-heading p,
+.space-rail p {
+  color: var(--color-muted);
+}
+
 .eyebrow {
   margin: 0 0 4px;
-  color: #475569;
+  color: var(--color-primary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -480,27 +508,27 @@ p {
 .empty-state,
 .source-meta,
 .selected-file {
-  color: #64748b;
+  color: var(--color-muted);
 }
 
 .file-picker {
   display: grid;
   gap: 8px;
   padding: 14px;
-  border: 1px dashed #94a3b8;
+  border: 1px dashed var(--color-border-strong);
   border-radius: 8px;
-  background: #f8fafc;
+  background: var(--color-surface-muted);
 }
 
 .file-picker span {
-  color: #334155;
+  color: var(--color-text);
   font-weight: 700;
 }
 
 .selected-file-panel {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--color-surface);
   padding: 12px;
 }
 
@@ -516,7 +544,7 @@ p {
 }
 
 .file-meta dt {
-  color: #64748b;
+  color: var(--color-muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -527,7 +555,7 @@ p {
 }
 
 .upload-phase {
-  color: #1d4ed8;
+  color: var(--color-primary);
   font-weight: 700;
   margin: 10px 0 0;
 }
@@ -542,15 +570,6 @@ p {
   gap: 12px;
 }
 
-.secondary-button {
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 9px 12px;
-  background: #fff;
-  color: #172033;
-  cursor: pointer;
-}
-
 .primary-button,
 .secondary-button {
   min-height: 40px;
@@ -563,15 +582,6 @@ p {
   opacity: 0.55;
 }
 
-.error-alert {
-  margin-bottom: 16px;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
-  background: #fff1f2;
-  color: #b91c1c;
-  padding: 12px 14px;
-}
-
 .filter-bar {
   display: flex;
   flex-wrap: wrap;
@@ -579,10 +589,10 @@ p {
 }
 
 .filter-button {
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--color-border);
   border-radius: 999px;
-  background: #fff;
-  color: #334155;
+  background: var(--color-surface);
+  color: var(--color-muted);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -592,9 +602,9 @@ p {
 }
 
 .filter-button.active {
-  border-color: #2563eb;
-  color: #1d4ed8;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  border-color: var(--color-primary-bright);
+  color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.14);
 }
 
 .source-list {
@@ -603,23 +613,23 @@ p {
 }
 
 .source-row {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 14px;
-  background: #fff;
+  background: var(--color-surface);
 }
 
 .source-row.active {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: var(--color-primary-bright);
+  color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.14);
 }
 
-.status-badge,
 .chunk-count {
   border-radius: 999px;
   padding: 5px 8px;
-  background: #e2e8f0;
-  color: #334155;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
   font-size: 12px;
   font-weight: 700;
 }
@@ -640,7 +650,7 @@ p {
 }
 
 .source-error {
-  color: #b91c1c;
+  color: var(--color-error);
 }
 
 .chunk-list {
@@ -649,15 +659,15 @@ p {
 }
 
 .selected-source-name {
-  color: #334155;
+  color: var(--color-text);
   font-weight: 700;
 }
 
 .chunk-card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 12px;
-  background: #f8fafc;
+  background: var(--color-surface-muted);
 }
 
 .chunk-card p {
@@ -671,7 +681,7 @@ p {
 }
 
 @media (max-width: 900px) {
-  .workspace-grid {
+  .space-layout {
     grid-template-columns: 1fr;
   }
 
