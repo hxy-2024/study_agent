@@ -1,16 +1,38 @@
 <template>
   <div class="app-shell">
-    <aside class="sidebar">
-      <strong>study_agent</strong>
-      <nav style="display: grid; gap: 12px; margin-top: 24px;">
-        <NuxtLink to="/">学习空间</NuxtLink>
-        <NuxtLink to="/">待复习</NuxtLink>
-        <NuxtLink to="/">资料库</NuxtLink>
-        <NuxtLink to="/">学习画像</NuxtLink>
+    <aside class="sidebar" aria-label="Primary navigation">
+      <NuxtLink class="brand-mark" to="/">
+        <span class="brand-icon">S</span>
+        <span>
+          <strong>study_agent</strong>
+          <small>Learning workspace</small>
+        </span>
+      </NuxtLink>
+
+      <nav class="sidebar-nav">
+        <NuxtLink class="nav-link" to="/">Spaces</NuxtLink>
+        <span class="nav-link disabled" aria-disabled="true">Library</span>
+        <span class="nav-link disabled" aria-disabled="true">Reviews</span>
+        <span class="nav-link disabled" aria-disabled="true">Progress</span>
+        <span class="nav-link disabled" aria-disabled="true">Settings</span>
       </nav>
     </aside>
-    <main class="main">
-      <NuxtPage />
-    </main>
+
+    <div class="workspace-frame">
+      <header class="topbar app-topbar">
+        <label class="search-box">
+          <span class="sr-only">Search learning materials</span>
+          <input class="input search-input" type="search" placeholder="Search learning materials">
+        </label>
+        <div class="topbar-actions">
+          <span class="runtime-pill">Model Ready</span>
+          <button class="ghost-button" type="button">User</button>
+        </div>
+      </header>
+
+      <main class="main">
+        <NuxtPage />
+      </main>
+    </div>
   </div>
 </template>
