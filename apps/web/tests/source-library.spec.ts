@@ -500,6 +500,9 @@ describe('StudySpacePage source library', () => {
     )
     expect(wrapper.text()).toContain('Draft route')
     expect(wrapper.text()).toContain('Intro chapter')
+    const studyLink = wrapper.find('[data-testid="study-chapter"]')
+    expect(studyLink.exists()).toBe(true)
+    expect(studyLink.attributes('to')).toBe('/chapters/00000000-0000-0000-0000-000000000601')
   })
 
   it('activates a draft route from the route panel', async () => {
