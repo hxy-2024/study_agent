@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 
 type SourceStatus = 'pending_upload' | 'uploaded' | 'processing' | 'ready' | 'failed' | string
+type SourceFilter = 'all' | 'uploaded' | 'processing' | 'ready' | 'failed'
+type UploadPhase = 'idle' | 'creating_url' | 'uploading_file' | 'confirming_upload' | 'refreshing_sources'
 
 interface SourceItem {
   id: string
@@ -48,20 +50,55 @@ const config = useRuntimeConfig()
 const spaceId = computed(() => String(route.params.id))
 
 const sources = ref<SourceItem[]>([])
+const activeFilter = ref<SourceFilter>('all')
 const selectedFile = ref<File | null>(null)
 const selectedSourceId = ref<string | null>(null)
 const selectedSourceName = ref('')
 const chunks = ref<SourceChunk[]>([])
 const chunklessSourceIds = ref<Set<string>>(new Set())
 const loadingSources = ref(false)
-const uploading = ref(false)
+const uploadPhase = ref<UploadPhase>('idle')
 const ingestingSourceId = ref<string | null>(null)
 const loadingChunks = ref(false)
 const errorMessage = ref('')
 
+const uploading = computed(() => uploadPhase.value !== 'idle')
 const canUpload = computed(() => selectedFile.value !== null && !uploading.value)
 const selectedSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value) ?? null)
 const hasSelectedSource = computed(() => selectedSourceId.value !== null)
+const sourceFilters = computed(() => [
+  { key: 'all' as const, label: 'All', count: sources.value.length },
+  { key: 'uploaded' as const, label: 'Uploaded', count: sources.value.filter(source => source.status === 'uploaded').length },
+  {
+    key: 'processing' as const,
+    label: 'Processing',
+    count: sources.value.filter(source => source.status === 'processing').length
+  },
+  { key: 'ready' as const, label: 'Ready', count: sources.value.filter(source => source.status === 'ready').length },
+  { key: 'failed' as const, label: 'Failed', count: sources.value.filter(source => source.status === 'failed').length }
+])
+const filteredSources = computed(() => {
+  if (activeFilter.value === 'all') return sources.value
+  return sources.value.filter(source => source.status === activeFilter.value)
+})
+const inferredContentType = computed(() => {
+  if (!selectedFile.value) return ''
+  return contentTypeForFile(selectedFile.value) ?? 'Unsupported'
+})
+const selectedFileSize = computed(() => {
+  if (!selectedFile.value) return ''
+  return formatFileSize(selectedFile.value.size)
+})
+const uploadPhaseLabel = computed(() => {
+  const labels: Record<UploadPhase, string> = {
+    idle: 'Upload source',
+    creating_url: 'Creating upload URL...',
+    uploading_file: 'Uploading file...',
+    confirming_upload: 'Confirming upload...',
+    refreshing_sources: 'Refreshing sources...'
+  }
+  return labels[uploadPhase.value]
+})
 
 function protectedHeaders() {
   return DEV_AUTH_HEADERS
@@ -82,6 +119,12 @@ function canRunIngestion(source: SourceItem) {
   return ['uploaded', 'ready', 'failed'].includes(source.status)
 }
 
+function ingestionActionLabel(source: SourceItem) {
+  if (source.status === 'failed') return 'Retry ingestion'
+  if (source.status === 'ready') return 'Re-run ingestion'
+  return 'Run ingestion'
+}
+
 function contentTypeForFile(file: File) {
   const allowedMimeTypes = new Set([
     '',
@@ -96,6 +139,13 @@ function contentTypeForFile(file: File) {
   if (lowerName.endsWith('.md')) return 'text/markdown'
   if (lowerName.endsWith('.txt')) return 'text/plain'
   return null
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  const kib = bytes / 1024
+  if (kib < 1024) return `${kib.toFixed(1)} KB`
+  return `${(kib / 1024).toFixed(1)} MB`
 }
 
 function citationSummary(citation: Record<string, unknown>) {
@@ -140,7 +190,7 @@ async function uploadSource() {
     return
   }
 
-  uploading.value = true
+  uploadPhase.value = 'creating_url'
   errorMessage.value = ''
   let uploadErrorMessage = 'Failed to create upload URL.'
   try {
@@ -155,6 +205,7 @@ async function uploadSource() {
     })
 
     uploadErrorMessage = 'Failed to upload file to object storage.'
+    uploadPhase.value = 'uploading_file'
     await $fetch(presign.upload_url, {
       method: 'PUT',
       headers: {
@@ -164,17 +215,19 @@ async function uploadSource() {
     })
 
     uploadErrorMessage = 'Failed to confirm upload completion.'
+    uploadPhase.value = 'confirming_upload'
     await $fetch(`${config.public.apiBaseUrl}/sources/${presign.source_id}/uploaded`, {
       method: 'POST',
       headers: protectedHeaders()
     })
 
     selectedFile.value = null
+    uploadPhase.value = 'refreshing_sources'
     await loadSources()
   } catch (error) {
     errorMessage.value = appendBackendMessage(uploadErrorMessage, error)
   } finally {
-    uploading.value = false
+    uploadPhase.value = 'idle'
   }
 }
 
@@ -195,6 +248,11 @@ async function runIngestion(source: SourceItem) {
   } finally {
     ingestingSourceId.value = null
   }
+}
+
+async function runSelectedSourceIngestion() {
+  if (!selectedSource.value || !canRunIngestion(selectedSource.value)) return
+  await runIngestion(selectedSource.value)
 }
 
 async function loadChunks(source: SourceItem) {
@@ -253,10 +311,24 @@ onMounted(() => {
             <input type="file" accept=".txt,.md,text/plain,text/markdown" @change="onFileSelected">
           </label>
 
+          <div class="selected-file-panel">
+            <p class="selected-file">{{ selectedFile?.name || 'No file selected' }}</p>
+            <dl v-if="selectedFile" class="file-meta">
+              <div>
+                <dt>Type</dt>
+                <dd>{{ inferredContentType }}</dd>
+              </div>
+              <div>
+                <dt>Size</dt>
+                <dd>{{ selectedFileSize }}</dd>
+              </div>
+            </dl>
+            <p v-if="uploading" class="upload-phase">{{ uploadPhaseLabel }}</p>
+          </div>
+
           <div class="upload-actions">
-            <span class="selected-file">{{ selectedFile?.name || 'No file selected' }}</span>
             <button class="primary-button" type="button" :disabled="!canUpload" @click="uploadSource">
-              {{ uploading ? 'Uploading...' : 'Upload source' }}
+              {{ uploadPhaseLabel }}
             </button>
           </div>
         </section>
@@ -272,12 +344,27 @@ onMounted(() => {
             </button>
           </div>
 
+          <div class="filter-bar" aria-label="Source status filters">
+            <button
+              v-for="filter in sourceFilters"
+              :key="filter.key"
+              type="button"
+              class="filter-button"
+              :class="{ active: activeFilter === filter.key }"
+              :data-filter="filter.key"
+              @click="activeFilter = filter.key"
+            >
+              <span>{{ filter.label }} {{ filter.count }}</span>
+            </button>
+          </div>
+
           <p v-if="loadingSources" class="muted">Loading sources...</p>
           <p v-else-if="sources.length === 0" class="empty-state">No sources yet. Upload a Markdown or text file to start.</p>
+          <p v-else-if="filteredSources.length === 0" class="empty-state">No sources match this filter.</p>
 
           <div v-else class="source-list">
             <article
-              v-for="source in sources"
+              v-for="source in filteredSources"
               :key="source.id"
               class="source-row"
               :class="{ active: selectedSourceId === source.id }"
@@ -301,7 +388,7 @@ onMounted(() => {
                   :disabled="ingestingSourceId === source.id"
                   @click="runIngestion(source)"
                 >
-                  {{ ingestingSourceId === source.id ? 'Running...' : 'Run ingestion' }}
+                  {{ ingestingSourceId === source.id ? 'Running...' : ingestionActionLabel(source) }}
                 </button>
                 <button
                   type="button"
@@ -328,7 +415,19 @@ onMounted(() => {
 
         <p v-if="loadingChunks" class="muted">Loading chunks...</p>
         <div v-else-if="!hasSelectedSource" class="empty-state">Select a source to preview parsed chunks.</div>
-        <div v-else-if="chunks.length === 0" class="empty-state">This source has no chunks yet. Run ingestion first.</div>
+        <div v-else-if="chunks.length === 0" class="empty-state preview-empty">
+          <p>This source has no chunks yet.</p>
+          <button
+            v-if="selectedSource && canRunIngestion(selectedSource)"
+            data-testid="preview-run-ingestion"
+            type="button"
+            class="secondary-button"
+            :disabled="ingestingSourceId === selectedSource.id"
+            @click="runSelectedSourceIngestion"
+          >
+            {{ ingestingSourceId === selectedSource.id ? 'Running...' : ingestionActionLabel(selectedSource) }}
+          </button>
+        </div>
         <div v-else class="chunk-list">
           <p class="selected-source-name">{{ selectedSourceName || selectedSource?.filename }}</p>
           <article v-for="chunk in chunks" :key="chunk.id" class="chunk-card">
@@ -398,6 +497,41 @@ p {
   font-weight: 700;
 }
 
+.selected-file-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.file-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 10px 0 0;
+}
+
+.file-meta div {
+  min-width: 0;
+}
+
+.file-meta dt {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.file-meta dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.upload-phase {
+  color: #1d4ed8;
+  font-weight: 700;
+  margin: 10px 0 0;
+}
+
 .upload-actions,
 .section-heading,
 .source-main,
@@ -436,6 +570,31 @@ p {
   background: #fff1f2;
   color: #b91c1c;
   padding: 12px 14px;
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-button {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.filter-button.active {
+  border-color: #2563eb;
+  color: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .source-list {
@@ -503,6 +662,12 @@ p {
 
 .chunk-card p {
   white-space: pre-wrap;
+}
+
+.preview-empty {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
 }
 
 @media (max-width: 900px) {
