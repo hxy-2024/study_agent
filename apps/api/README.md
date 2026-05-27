@@ -78,9 +78,20 @@ postgresql+asyncpg://study_agent:study_agent@localhost:15432/study_agent
 When using development auth, seed the local tenant/user/membership once:
 
 ```powershell
-$env:PGPASSWORD = "study_agent"
-psql -h 127.0.0.1 -p 15432 -U study_agent -d study_agent -c "insert into tenants (id, name) values ('00000000-0000-0000-0000-000000000001', 'Local Tenant') on conflict (id) do nothing; insert into users (id, email, display_name) values ('00000000-0000-0000-0000-000000000002', 'local@example.com', 'Local User') on conflict (id) do nothing; insert into memberships (id, tenant_id, user_id, role) values ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'owner') on conflict (id) do nothing;"
+cd F:\AIproject\study_agent
+make api-seed-dev
 ```
+
+With the API and infrastructure running, execute the local API smoke flow:
+
+```powershell
+cd F:\AIproject\study_agent
+make api-smoke-local
+```
+
+The smoke flow creates a study space, uploads a Markdown source through MinIO,
+runs ingestion, generates a route, asks the chapter mentor, and completes the
+chapter.
 
 ## Development auth
 
