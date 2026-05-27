@@ -43,6 +43,30 @@ class ChapterStatus(str, enum.Enum):
     completed = "completed"
 
 
+class SessionStatus(str, enum.Enum):
+    active = "active"
+    archived = "archived"
+
+
+class MessageRole(str, enum.Enum):
+    user = "user"
+    assistant = "assistant"
+    system = "system"
+
+
+class AgentType(str, enum.Enum):
+    space_planner = "space_planner"
+    chapter_mentor = "chapter_mentor"
+    session_tutor = "session_tutor"
+
+
+class AgentRunStatus(str, enum.Enum):
+    pending = "pending"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+
+
 class Tenant(Base):
     __tablename__ = "tenants"
 
@@ -92,6 +116,7 @@ class StudySpace(Base):
     sources: Mapped[list["Source"]] = relationship(back_populates="study_space")
     learning_routes: Mapped[list["LearningRoute"]] = relationship(back_populates="study_space")
     chapters: Mapped[list["Chapter"]] = relationship(back_populates="study_space")
+    sessions: Mapped[list["Session"]] = relationship(back_populates="study_space")
 
 
 class Source(Base):
@@ -118,6 +143,7 @@ class Source(Base):
     study_space: Mapped[StudySpace] = relationship(back_populates="sources")
     ingestion_jobs: Mapped[list["IngestionJob"]] = relationship(back_populates="source")
     chunks: Mapped[list["SourceChunk"]] = relationship(back_populates="source")
+    message_citations: Mapped[list["MessageCitation"]] = relationship(back_populates="source")
 
 
 class IngestionJob(Base):
@@ -159,6 +185,7 @@ class SourceChunk(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     source: Mapped["Source"] = relationship(back_populates="chunks")
+    message_citations: Mapped[list["MessageCitation"]] = relationship(back_populates="source_chunk")
 
 
 class LearningRoute(Base):
@@ -211,3 +238,152 @@ class Chapter(Base):
 
     study_space: Mapped["StudySpace"] = relationship(back_populates="chapters")
     learning_route: Mapped["LearningRoute"] = relationship(back_populates="chapters")
+    sessions: Mapped[list["Session"]] = relationship(back_populates="chapter")
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )
+    study_space_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("study_spaces.id"),
+        nullable=False,
+        index=True,
+    )
+    chapter_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("chapters.id"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[SessionStatus] = mapped_column(
+        Enum(SessionStatus, name="session_status"),
+        nullable=False,
+        default=SessionStatus.active,
+    )
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    study_space: Mapped["StudySpace"] = relationship(back_populates="sessions")
+    chapter: Mapped["Chapter"] = relationship(back_populates="sessions")
+    messages: Mapped[list["Message"]] = relationship(back_populates="session")
+    agent_runs: Mapped[list["AgentRun"]] = relationship(back_populates="session")
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )
+    study_space_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("study_spaces.id"),
+        nullable=False,
+        index=True,
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("sessions.id"),
+        nullable=False,
+        index=True,
+    )
+    role: Mapped[MessageRole] = mapped_column(
+        Enum(MessageRole, name="message_role"),
+        nullable=False,
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    session: Mapped["Session"] = relationship(back_populates="messages")
+    citations: Mapped[list["MessageCitation"]] = relationship(back_populates="message")
+    agent_runs: Mapped[list["AgentRun"]] = relationship(back_populates="message")
+
+
+class MessageCitation(Base):
+    __tablename__ = "message_citations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("messages.id"),
+        nullable=False,
+        index=True,
+    )
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("sources.id"),
+        nullable=False,
+        index=True,
+    )
+    source_chunk_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("source_chunks.id"),
+        nullable=False,
+        index=True,
+    )
+    quote: Mapped[str] = mapped_column(Text, nullable=False)
+    citation: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    message: Mapped["Message"] = relationship(back_populates="citations")
+    source: Mapped["Source"] = relationship(back_populates="message_citations")
+    source_chunk: Mapped["SourceChunk"] = relationship(back_populates="message_citations")
+
+
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )
+    study_space_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("study_spaces.id"),
+        nullable=False,
+        index=True,
+    )
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sessions.id"),
+        nullable=True,
+        index=True,
+    )
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id"),
+        nullable=True,
+        index=True,
+    )
+    agent_type: Mapped[AgentType] = mapped_column(
+        Enum(AgentType, name="agent_type"),
+        nullable=False,
+    )
+    status: Mapped[AgentRunStatus] = mapped_column(
+        Enum(AgentRunStatus, name="agent_run_status"),
+        nullable=False,
+        default=AgentRunStatus.pending,
+    )
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    input_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    output_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    session: Mapped["Session"] = relationship(back_populates="agent_runs")
+    message: Mapped["Message"] = relationship(back_populates="agent_runs")
