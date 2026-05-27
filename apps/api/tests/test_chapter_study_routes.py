@@ -13,6 +13,7 @@ from app.domain.chapter_study.schemas import (
     ChapterStudyRouteResponse,
     ChapterStudySpaceResponse,
 )
+from app.domain.chapter_mentor.schemas import ChapterMentorResponse
 from app.main import app
 
 
@@ -124,3 +125,60 @@ async def test_chapter_not_found_maps_to_404(monkeypatch) -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_ask_chapter_mentor_uses_authorized_tenant(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    captured = {}
+
+    async def fake_context():
+        return CurrentUserContext(user_id=uuid.uuid4(), tenant_id=tenant_id)
+
+    async def fake_ask_chapter_mentor(**kwargs):
+        captured.update(kwargs)
+        return ChapterMentorResponse(
+            question="What matters most?",
+            answer="Focus on the key concept.",
+            citations=[],
+        )
+
+    monkeypatch.setattr(routes_chapter_study, "ask_chapter_mentor", fake_ask_chapter_mentor)
+    app.dependency_overrides[get_db_session] = fake_get_db_session
+    app.dependency_overrides[get_authorized_user_context] = fake_context
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/chapters/{chapter_id}/mentor/questions",
+                json={"question": "What matters most?"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert captured["tenant_id"] == tenant_id
+    assert captured["chapter_id"] == chapter_id
+    assert captured["question"] == "What matters most?"
+
+
+@pytest.mark.anyio
+async def test_ask_chapter_mentor_rejects_request_body_tenant_id() -> None:
+    async def fake_context():
+        return CurrentUserContext(user_id=uuid.uuid4(), tenant_id=uuid.uuid4())
+
+    app.dependency_overrides[get_db_session] = fake_get_db_session
+    app.dependency_overrides[get_authorized_user_context] = fake_context
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/chapters/{uuid.uuid4()}/mentor/questions",
+                json={
+                    "tenant_id": str(uuid.uuid4()),
+                    "question": "What matters most?",
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
