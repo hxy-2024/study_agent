@@ -1,33 +1,34 @@
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import StudySpace
+from app.domain.learning_routes.generator import DeterministicRouteGenerator, RouteGenerationRequest
 from app.domain.study_spaces.schemas import StudySpaceCreate
 
 
 def create_route_outline(goal: str, target_days: int) -> list[dict]:
-    first_block = max(1, target_days // 4)
-    middle_block = max(1, target_days // 2)
-    final_block = max(1, target_days - first_block - middle_block)
+    request = RouteGenerationRequest(
+        tenant_id=uuid.uuid4(),
+        study_space_id=uuid.uuid4(),
+        study_space_name="Study space",
+        goal=goal,
+        level="beginner",
+        intensity="normal",
+        target_days=target_days,
+        max_chapters=5,
+        chunks=[],
+    )
+    chapters = DeterministicRouteGenerator()._fallback_chapters(request)
     return [
         {
-            "order": 1,
-            "title": "学习目标梳理",
-            "description": f"明确 {goal} 的学习范围、已有基础和完成标准。",
-            "estimated_days": first_block,
-        },
-        {
-            "order": 2,
-            "title": "核心概念学习",
-            "description": "围绕资料和目标拆解关键概念，建立基础知识结构。",
-            "estimated_days": middle_block,
-        },
-        {
-            "order": 3,
-            "title": "综合复习与测评",
-            "description": "通过小测、错题和复习卡片检查掌握情况。",
-            "estimated_days": final_block,
-        },
+            "order": index,
+            "title": chapter.title,
+            "description": chapter.summary,
+            "estimated_days": chapter.estimated_days,
+        }
+        for index, chapter in enumerate(chapters, start=1)
     ]
 
 
