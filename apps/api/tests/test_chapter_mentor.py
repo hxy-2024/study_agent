@@ -48,5 +48,5 @@ def test_compose_grounded_answer_handles_empty_retrieval() -> None:
         source_filenames={},
     )
 
-    assert "没有找到足够的资料" in response.answer
+    assert "could not find enough source material" in response.answer
     assert response.citations == []

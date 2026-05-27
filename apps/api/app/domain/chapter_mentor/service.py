@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Sequence
+from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,16 @@ from app.domain.rag.retrieval import RetrievedChunk, retrieve_chunks
 
 ANSWER_EXCERPT_CHARS = 220
 CITATION_EXCERPT_CHARS = 320
+
+
+class AnswerProvider(Protocol):
+    async def answer(
+        self,
+        question: str,
+        chunks: list[RetrievedChunk],
+        source_filenames: dict[uuid.UUID, str],
+    ) -> ChapterMentorResponse:
+        """Generate a grounded chapter answer."""
 
 
 def _clip_text(text: str, max_chars: int) -> str:
@@ -44,7 +55,10 @@ def compose_grounded_answer(
     if not chunks:
         return ChapterMentorResponse(
             question=question,
-            answer="没有找到足够的资料来可靠回答这个问题。建议先上传或重新处理与本章节相关的学习材料。",
+            answer=(
+                "I could not find enough source material to answer reliably. "
+                "Upload or reprocess material related to this chapter first."
+            ),
             citations=[],
         )
 
@@ -53,9 +67,9 @@ def compose_grounded_answer(
         for index, chunk in enumerate(chunks[:3], start=1)
     ]
     answer = (
-        "基于当前章节的资料，可以这样理解：\n"
+        "Based on the current chapter evidence, focus on these points:\n"
         + "\n".join(evidence_lines)
-        + "\n\n你可以先围绕这些证据复述概念，再回到章节目标检查是否掌握。"
+        + "\n\nRestate these ideas in your own words, then compare them with the chapter goal."
     )
     return ChapterMentorResponse(question=question, answer=answer, citations=citations)
 
@@ -85,6 +99,7 @@ async def ask_chapter_mentor(
     chapter_id: uuid.UUID,
     question: str,
     embedding_provider: EmbeddingProvider,
+    answer_provider: AnswerProvider,
     limit: int = 5,
 ) -> ChapterMentorResponse:
     chapter, _route, _study_space, _route_chapters, _evidence = await load_chapter_context(
@@ -107,9 +122,8 @@ async def ask_chapter_mentor(
         study_space_id=chapter.study_space_id,
         source_ids=[chunk.source_id for chunk in chunks],
     )
-    return compose_grounded_answer(
+    return await answer_provider.answer(
         question=question,
         chunks=chunks,
         source_filenames=source_filenames,
     )
-

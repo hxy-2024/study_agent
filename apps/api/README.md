@@ -33,6 +33,25 @@ Guarded Postgres tests require `RUN_POSTGRES_TESTS=1` and `DATABASE_URL`.
 Runtime RAG endpoints are guarded by development auth headers backed by tenant
 membership.
 
+## Chapter mentor LLM provider
+
+`POST /api/v1/chapters/{chapter_id}/mentor/questions` retrieves tenant-scoped
+chapter evidence first, then asks the configured answer provider to compose the
+final response. The default provider is deterministic and does not call the
+network.
+
+OpenAI-compatible runtime configuration:
+
+```env
+LLM_PROVIDER=openai-compatible
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=your-api-key
+LLM_MODEL=gpt-4.1-mini
+LLM_TIMEOUT_SECONDS=30
+```
+
+When `LLM_API_KEY` is empty, the API falls back to the deterministic provider.
+
 ## Runtime source ingestion
 
 Local text/Markdown ingestion flow:

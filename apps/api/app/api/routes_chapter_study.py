@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import CurrentUserContext, get_authorized_user_context
 from app.core.config import get_settings
 from app.db.session import get_db_session
+from app.domain.chapter_mentor.providers import create_answer_provider
 from app.domain.chapter_mentor.schemas import ChapterMentorQuestionRequest, ChapterMentorResponse
 from app.domain.chapter_mentor.service import ask_chapter_mentor
 from app.domain.chapter_study.schemas import ChapterStudyDetailResponse
@@ -70,6 +71,7 @@ async def ask_chapter_mentor_question(
             chapter_id=chapter_id,
             question=payload.question,
             embedding_provider=embedding_provider,
+            answer_provider=create_answer_provider(settings),
         )
     except ValueError as exc:
         raise map_chapter_error(exc) from exc
