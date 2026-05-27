@@ -68,6 +68,34 @@ function chapterDetail(overrides = {}) {
   }
 }
 
+function mentorSession(overrides = {}) {
+  return {
+    id: '00000000-0000-0000-0000-000000000701',
+    chapter_id: '00000000-0000-0000-0000-000000000601',
+    title: 'Intro chapter mentor',
+    ...overrides
+  }
+}
+
+function mentorMessage(overrides = {}) {
+  return {
+    id: '00000000-0000-0000-0000-000000000801',
+    session_id: '00000000-0000-0000-0000-000000000701',
+    role: 'assistant',
+    content: 'RAG retrieves relevant evidence before answering.',
+    citations: [
+      {
+        chunk_id: '00000000-0000-0000-0000-000000000301',
+        source_id: '00000000-0000-0000-0000-000000000201',
+        source_filename: 'rag.md',
+        chunk_index: 2,
+        text: 'RAG retrieves relevant evidence.'
+      }
+    ],
+    ...overrides
+  }
+}
+
 async function flushPromises() {
   await new Promise(resolve => setTimeout(resolve, 0))
 }
@@ -75,7 +103,15 @@ async function flushPromises() {
 describe('ChapterStudyPage', () => {
   beforeEach(() => {
     fetchMock.mockReset()
-    fetchMock.mockResolvedValue(chapterDetail())
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
+        return Promise.resolve([mentorSession()])
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
+        return Promise.resolve([])
+      }
+      return Promise.resolve(chapterDetail())
+    })
   })
 
   it('renders chapter details and active mentor panel', async () => {
@@ -149,22 +185,55 @@ describe('ChapterStudyPage', () => {
     expect(wrapper.html()).toContain('/chapters/00000000-0000-0000-0000-000000000602')
   })
 
-  it('asks the chapter mentor and renders answer citations', async () => {
+  it('loads existing mentor session messages', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
+        return Promise.resolve([mentorSession()])
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
+        return Promise.resolve([
+          mentorMessage({
+            id: '00000000-0000-0000-0000-000000000800',
+            role: 'user',
+            content: 'How does RAG work?',
+            citations: []
+          }),
+          mentorMessage()
+        ])
+      }
+      return Promise.resolve(chapterDetail())
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/chapters/00000000-0000-0000-0000-000000000601/sessions',
+      expect.objectContaining({ headers: expect.any(Object) })
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
+      expect.objectContaining({ headers: expect.any(Object) })
+    )
+    expect(wrapper.text()).toContain('How does RAG work?')
+    expect(wrapper.text()).toContain('RAG retrieves relevant evidence before answering.')
+    expect(wrapper.text()).toContain('rag.md')
+    expect(wrapper.text()).toContain('Chunk #2')
+  })
+
+  it('creates a mentor session before sending the first message', async () => {
     fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
-      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/mentor/questions') && options?.method === 'POST') {
-        return Promise.resolve({
-          question: 'How does RAG work?',
-          answer: 'RAG retrieves relevant evidence before answering.',
-          citations: [
-            {
-              chunk_id: '00000000-0000-0000-0000-000000000301',
-              source_id: '00000000-0000-0000-0000-000000000201',
-              source_filename: 'rag.md',
-              chunk_index: 2,
-              text: 'RAG retrieves relevant evidence.'
-            }
-          ]
-        })
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions') && options?.method === 'POST') {
+        return Promise.resolve(mentorSession())
+      }
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
+        return Promise.resolve([])
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages') && options?.method === 'POST') {
+        return Promise.resolve(mentorMessage())
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
+        return Promise.resolve([])
       }
       return Promise.resolve(chapterDetail())
     })
@@ -178,10 +247,14 @@ describe('ChapterStudyPage', () => {
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/api/v1/chapters/00000000-0000-0000-0000-000000000601/mentor/questions',
+      'http://localhost:8000/api/v1/chapters/00000000-0000-0000-0000-000000000601/sessions',
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
       expect.objectContaining({
         method: 'POST',
-        body: { question: 'How does RAG work?' }
+        body: { content: 'How does RAG work?' }
       })
     )
     expect(wrapper.text()).toContain('RAG retrieves relevant evidence before answering.')

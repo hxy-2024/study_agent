@@ -52,9 +52,17 @@ interface MentorCitation {
   text: string
 }
 
-interface MentorAnswer {
-  question: string
-  answer: string
+interface MentorSession {
+  id: string
+  chapter_id: string
+  title?: string
+}
+
+interface MentorMessage {
+  id: string
+  session_id: string
+  role: 'user' | 'assistant'
+  content: string
   citations: MentorCitation[]
 }
 
@@ -71,10 +79,12 @@ const detail = ref<ChapterStudyDetail | null>(null)
 const loading = ref(false)
 const completing = ref(false)
 const askingMentor = ref(false)
+const loadingMentor = ref(false)
 const errorMessage = ref('')
 const mentorErrorMessage = ref('')
 const mentorQuestion = ref('')
-const mentorAnswers = ref<MentorAnswer[]>([])
+const mentorSession = ref<MentorSession | null>(null)
+const mentorMessages = ref<MentorMessage[]>([])
 
 const chapter = computed(() => detail.value?.chapter ?? null)
 const evidence = computed(() => detail.value?.evidence ?? [])
@@ -95,6 +105,24 @@ function citationSummary(citation: Record<string, unknown>) {
   return Object.keys(citation).length ? JSON.stringify(citation) : 'No citation metadata'
 }
 
+function normalizeSessions(response: MentorSession[] | { sessions?: MentorSession[] }) {
+  return Array.isArray(response) ? response : response.sessions ?? []
+}
+
+function normalizeMessages(response: MentorMessage[] | { messages?: MentorMessage[] }) {
+  return Array.isArray(response) ? response : response.messages ?? []
+}
+
+function localUserMessage(sessionId: string, content: string): MentorMessage {
+  return {
+    id: `local-user-${Date.now()}`,
+    session_id: sessionId,
+    role: 'user',
+    content,
+    citations: []
+  }
+}
+
 async function loadChapter() {
   loading.value = true
   errorMessage.value = ''
@@ -108,6 +136,49 @@ async function loadChapter() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadMentorMessages(sessionId: string) {
+  const response = await $fetch<MentorMessage[] | { messages?: MentorMessage[] }>(
+    `${config.public.apiBaseUrl}/sessions/${sessionId}/messages`,
+    { headers: protectedHeaders() }
+  )
+  mentorMessages.value = normalizeMessages(response)
+}
+
+async function loadMentorSession() {
+  loadingMentor.value = true
+  mentorErrorMessage.value = ''
+  try {
+    const response = await $fetch<MentorSession[] | { sessions?: MentorSession[] }>(
+      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/sessions`,
+      { headers: protectedHeaders() }
+    )
+    mentorSession.value = normalizeSessions(response)[0] ?? null
+    if (mentorSession.value) {
+      await loadMentorMessages(mentorSession.value.id)
+    } else {
+      mentorMessages.value = []
+    }
+  } catch (error) {
+    mentorErrorMessage.value = appendBackendMessage('Failed to load mentor session.', error)
+  } finally {
+    loadingMentor.value = false
+  }
+}
+
+async function ensureMentorSession() {
+  if (mentorSession.value) return mentorSession.value
+
+  const session = await $fetch<MentorSession>(
+    `${config.public.apiBaseUrl}/chapters/${chapterId.value}/sessions`,
+    {
+      method: 'POST',
+      headers: protectedHeaders()
+    }
+  )
+  mentorSession.value = session
+  return session
 }
 
 async function completeCurrentChapter() {
@@ -136,15 +207,16 @@ async function askMentor() {
   askingMentor.value = true
   mentorErrorMessage.value = ''
   try {
-    const answer = await $fetch<MentorAnswer>(
-      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/mentor/questions`,
+    const session = await ensureMentorSession()
+    const answer = await $fetch<MentorMessage>(
+      `${config.public.apiBaseUrl}/sessions/${session.id}/messages`,
       {
         method: 'POST',
         headers: protectedHeaders(),
-        body: { question }
+        body: { content: question }
       }
     )
-    mentorAnswers.value = [...mentorAnswers.value, answer]
+    mentorMessages.value = [...mentorMessages.value, localUserMessage(session.id, question), answer]
     mentorQuestion.value = ''
   } catch (error) {
     mentorErrorMessage.value = appendBackendMessage('Failed to ask mentor.', error)
@@ -155,6 +227,7 @@ async function askMentor() {
 
 onMounted(() => {
   loadChapter()
+  loadMentorSession()
 })
 </script>
 
@@ -227,18 +300,21 @@ onMounted(() => {
           </div>
 
           <div class="mentor-thread" aria-live="polite">
-            <article v-if="!mentorAnswers.length" class="mentor-empty">
+            <article v-if="loadingMentor" class="mentor-empty">
+              <p>Loading mentor session...</p>
+            </article>
+            <article v-else-if="!mentorMessages.length" class="mentor-empty">
               <p>Ask a question about this chapter.</p>
             </article>
 
-            <article v-for="answer in mentorAnswers" :key="answer.question" class="mentor-exchange">
-              <p class="mentor-question">{{ answer.question }}</p>
-              <div class="mentor-answer">
-                <p>{{ answer.answer }}</p>
-                <div v-if="answer.citations.length" class="mentor-citations">
+            <article v-for="message in mentorMessages" :key="message.id" class="mentor-exchange">
+              <p v-if="message.role === 'user'" class="mentor-question">{{ message.content }}</p>
+              <div v-else class="mentor-answer">
+                <p>{{ message.content }}</p>
+                <div v-if="message.citations?.length" class="mentor-citations">
                   <p class="eyebrow">Citations</p>
                   <article
-                    v-for="citation in answer.citations"
+                    v-for="citation in message.citations"
                     :key="citation.chunk_id"
                     class="mentor-citation"
                   >
