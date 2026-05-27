@@ -4,7 +4,11 @@ import pytest
 
 from app.db.models import IngestionJob, IngestionJobStatus, Source, SourceChunk, SourceStatus
 from app.domain.rag.embeddings import DeterministicEmbeddingProvider
-from app.domain.rag.ingestion import InMemoryTextSourceReader, ingest_source
+from app.domain.rag.ingestion import (
+    InMemoryTextSourceReader,
+    ingest_source,
+    validate_source_for_ingestion,
+)
 
 
 def test_rag_models_are_importable() -> None:
@@ -24,6 +28,13 @@ def test_deterministic_embedding_provider_is_usable_by_ingestion() -> None:
     provider = DeterministicEmbeddingProvider(dimension=16)
 
     assert len(provider.embed_text("chapter content")) == 16
+
+
+def test_validate_source_for_ingestion_rejects_tenant_mismatch() -> None:
+    source = _source_with_status(SourceStatus.uploaded)
+
+    with pytest.raises(ValueError, match="Source not found for tenant"):
+        validate_source_for_ingestion(source=source, tenant_id=uuid.uuid4())
 
 
 @pytest.mark.anyio

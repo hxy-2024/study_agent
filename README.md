@@ -25,7 +25,7 @@ The API includes the first RAG foundation:
 - retrieval is scoped by tenant and study space;
 - deterministic embeddings are used for local development and tests.
 
-Runtime ingestion returns `501` until object-storage text reading is configured. Runtime retrieval is enabled only when the request includes valid development auth headers and the user is a member of the tenant. Domain tests cover ingestion and retrieval with local providers.
+Runtime ingestion supports text and Markdown objects in S3-compatible storage after a source is marked uploaded. PDF, OCR, and webpage ingestion remain later phases. Runtime retrieval is enabled only when the request includes valid development auth headers and the user is a member of the tenant. Domain tests cover ingestion and retrieval with local providers.
 
 ### Development auth headers
 
