@@ -12,8 +12,6 @@ class RouteChapter(BaseModel):
 
 
 class StudySpaceCreate(BaseModel):
-    tenant_id: uuid.UUID
-    owner_user_id: uuid.UUID
     name: str = Field(min_length=1, max_length=160)
     goal: str = Field(min_length=1, max_length=4000)
     level: str = Field(default="beginner", max_length=60)

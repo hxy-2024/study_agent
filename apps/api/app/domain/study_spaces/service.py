@@ -32,10 +32,15 @@ def create_route_outline(goal: str, target_days: int) -> list[dict]:
     ]
 
 
-async def create_study_space(session: AsyncSession, payload: StudySpaceCreate) -> StudySpace:
+async def create_study_space(
+    session: AsyncSession,
+    payload: StudySpaceCreate,
+    tenant_id: uuid.UUID,
+    owner_user_id: uuid.UUID,
+) -> StudySpace:
     study_space = StudySpace(
-        tenant_id=payload.tenant_id,
-        owner_user_id=payload.owner_user_id,
+        tenant_id=tenant_id,
+        owner_user_id=owner_user_id,
         name=payload.name,
         goal=payload.goal,
         level=payload.level,

@@ -9,6 +9,11 @@ const form = reactive({
   target_days: 30
 })
 
+const DEV_AUTH_HEADERS = {
+  'X-User-Id': '00000000-0000-0000-0000-000000000002',
+  'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
+}
+
 const routeOutline = ref<Array<{ order: number; title: string; description: string; estimated_days: number }>>([])
 const submitting = ref(false)
 const errorMessage = ref('')
@@ -47,9 +52,8 @@ async function createSpace() {
   try {
     const created = await $fetch<{ id: string }>(`${config.public.apiBaseUrl}/study-spaces`, {
       method: 'POST',
+      headers: DEV_AUTH_HEADERS,
       body: {
-        tenant_id: '00000000-0000-0000-0000-000000000001',
-        owner_user_id: '00000000-0000-0000-0000-000000000002',
         ...form
       }
     })

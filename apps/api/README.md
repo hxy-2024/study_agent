@@ -45,6 +45,16 @@ Local text/Markdown ingestion flow:
 Runtime ingestion currently supports `text/plain` and `text/markdown` objects. PDF,
 OCR, images, and webpage ingestion are intentionally out of scope for this phase.
 
+## Local infrastructure
+
+The Docker Compose Postgres service publishes container port `5432` on host port
+`15432` to avoid conflicts with a locally installed PostgreSQL server. The default
+`DATABASE_URL` is:
+
+```text
+postgresql+asyncpg://study_agent:study_agent@localhost:15432/study_agent
+```
+
 ## Development auth
 
 Protected local endpoints use development headers:

@@ -21,6 +21,7 @@ study_space_status = postgresql.ENUM(
     "active",
     "archived",
     name="study_space_status",
+    create_type=False,
 )
 source_status = postgresql.ENUM(
     "pending_upload",
@@ -29,6 +30,7 @@ source_status = postgresql.ENUM(
     "ready",
     "failed",
     name="source_status",
+    create_type=False,
 )
 
 

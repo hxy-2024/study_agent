@@ -1,5 +1,6 @@
 .superpowers/
 .worktrees/
+.codex-runtime-logs/
 .env
 .venv/
 __pycache__/

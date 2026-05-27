@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "study-agent-api"
     api_v1_prefix: str = "/api/v1"
-    database_url: str = "postgresql+asyncpg://study_agent:study_agent@localhost:5432/study_agent"
+    database_url: str = "postgresql+asyncpg://study_agent:study_agent@localhost:15432/study_agent"
     redis_url: str = "redis://localhost:6379/0"
     api_cors_origins: list[AnyHttpUrl] = []
     s3_endpoint_url: str = "http://localhost:9000"

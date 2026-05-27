@@ -19,7 +19,10 @@ export const useStudySpacesStore = defineStore('studySpaces', {
       this.loading = true
       try {
         this.spaces = await $fetch<StudySpace[]>(`${config.public.apiBaseUrl}/study-spaces`, {
-          query: { tenant_id: '00000000-0000-0000-0000-000000000001' }
+          headers: {
+            'X-User-Id': '00000000-0000-0000-0000-000000000002',
+            'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
+          }
         })
       } finally {
         this.loading = false
