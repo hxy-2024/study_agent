@@ -66,6 +66,18 @@ interface MentorMessage {
   citations: MentorCitation[]
 }
 
+interface ChapterMentorState {
+  id: string
+  chapter_id: string
+  summary: string
+  weak_points: string[]
+  next_actions: string[]
+  evidence: Record<string, unknown>[]
+  source_session_count: number
+  source_message_count: number
+  updated_at?: string
+}
+
 const DEV_AUTH_HEADERS = {
   'X-User-Id': '00000000-0000-0000-0000-000000000002',
   'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
@@ -85,10 +97,19 @@ const mentorErrorMessage = ref('')
 const mentorQuestion = ref('')
 const mentorSession = ref<MentorSession | null>(null)
 const mentorMessages = ref<MentorMessage[]>([])
+const mentorState = ref<ChapterMentorState | null>(null)
+const updatingMentorState = ref(false)
 
 const chapter = computed(() => detail.value?.chapter ?? null)
 const evidence = computed(() => detail.value?.evidence ?? [])
 const isCompleted = computed(() => chapter.value?.status === 'completed')
+const hasMentorState = computed(() => {
+  return Boolean(
+    mentorState.value?.summary ||
+      mentorState.value?.weak_points?.length ||
+      mentorState.value?.next_actions?.length
+  )
+})
 
 function protectedHeaders() {
   return DEV_AUTH_HEADERS
@@ -167,6 +188,17 @@ async function loadMentorSession() {
   }
 }
 
+async function loadMentorState() {
+  try {
+    mentorState.value = await $fetch<ChapterMentorState>(
+      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/mentor-state`,
+      { headers: protectedHeaders() }
+    )
+  } catch {
+    mentorState.value = null
+  }
+}
+
 async function ensureMentorSession() {
   if (mentorSession.value) return mentorSession.value
 
@@ -200,6 +232,25 @@ async function completeCurrentChapter() {
   }
 }
 
+async function runChapterSummary() {
+  updatingMentorState.value = true
+  mentorErrorMessage.value = ''
+  try {
+    mentorState.value = await $fetch<ChapterMentorState>(
+      `${config.public.apiBaseUrl}/agents/chapter-summary/run`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: { chapter_id: chapterId.value }
+      }
+    )
+  } catch (error) {
+    mentorErrorMessage.value = appendBackendMessage('Failed to update chapter mentor state.', error)
+  } finally {
+    updatingMentorState.value = false
+  }
+}
+
 async function askMentor() {
   const question = mentorQuestion.value.trim()
   if (!chapter.value || !question) return
@@ -228,6 +279,7 @@ async function askMentor() {
 onMounted(() => {
   loadChapter()
   loadMentorSession()
+  loadMentorState()
 })
 </script>
 
@@ -266,6 +318,61 @@ onMounted(() => {
             </div>
           </dl>
         </div>
+      </section>
+
+      <section class="card chapter-state-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Chapter state</p>
+            <h2>Mentor assessment</h2>
+          </div>
+          <button
+            data-testid="run-chapter-summary"
+            class="secondary-button"
+            type="button"
+            :disabled="updatingMentorState"
+            @click="runChapterSummary"
+          >
+            {{ updatingMentorState ? 'Updating...' : 'Update assessment' }}
+          </button>
+        </div>
+
+        <template v-if="hasMentorState && mentorState">
+          <p v-if="mentorState.summary" class="state-summary">{{ mentorState.summary }}</p>
+
+          <div class="state-grid">
+            <section class="state-column">
+              <h3>Weak points</h3>
+              <ul v-if="mentorState.weak_points?.length" class="state-list">
+                <li v-for="point in mentorState.weak_points" :key="point">{{ point }}</li>
+              </ul>
+              <p v-else class="empty-state">No weak points found.</p>
+            </section>
+
+            <section class="state-column">
+              <h3>Next actions</h3>
+              <ul v-if="mentorState.next_actions?.length" class="state-list">
+                <li v-for="action in mentorState.next_actions" :key="action">{{ action }}</li>
+              </ul>
+              <p v-else class="empty-state">No next actions yet.</p>
+            </section>
+          </div>
+
+          <dl class="state-meta">
+            <div>
+              <dt>Sessions</dt>
+              <dd>{{ mentorState.source_session_count ?? 0 }}</dd>
+            </div>
+            <div>
+              <dt>Messages</dt>
+              <dd>{{ mentorState.source_message_count ?? 0 }}</dd>
+            </div>
+          </dl>
+        </template>
+
+        <p v-else class="empty-state">
+          No chapter mentor state yet. Update after asking the mentor a few questions.
+        </p>
       </section>
 
       <div class="study-grid">
@@ -406,10 +513,74 @@ onMounted(() => {
 }
 
 .chapter-summary,
+.chapter-state-panel,
 .evidence-panel,
 .mentor-panel {
   display: grid;
   gap: 16px;
+}
+
+.state-summary {
+  color: var(--color-text);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.state-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.state-column {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.state-column h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.state-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--color-text);
+}
+
+.state-list li::marker {
+  color: var(--color-primary);
+}
+
+.state-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+}
+
+.state-meta div {
+  border: 1px solid rgba(20, 184, 166, 0.18);
+  border-radius: 8px;
+  background: var(--color-primary-soft);
+  padding: 8px 10px;
+}
+
+.state-meta dt {
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.state-meta dd {
+  margin: 2px 0 0;
+  color: var(--color-primary);
+  font-weight: 800;
 }
 
 .chapter-meta {
@@ -554,7 +725,8 @@ onMounted(() => {
 
 @media (max-width: 960px) {
   .study-grid,
-  .summary-grid {
+  .summary-grid,
+  .state-grid {
     grid-template-columns: 1fr;
   }
 
