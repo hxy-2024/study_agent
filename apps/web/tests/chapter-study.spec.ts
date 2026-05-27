@@ -78,7 +78,7 @@ describe('ChapterStudyPage', () => {
     fetchMock.mockResolvedValue(chapterDetail())
   })
 
-  it('renders chapter details and reserved mentor panel', async () => {
+  it('renders chapter details and active mentor panel', async () => {
     const wrapper = mountPage()
     await flushPromises()
 
@@ -87,7 +87,8 @@ describe('ChapterStudyPage', () => {
     expect(wrapper.text()).toContain('Start with the basics.')
     expect(wrapper.text()).toContain('Draft route')
     expect(wrapper.text()).toContain('AI Mentor')
-    expect(wrapper.find('textarea[disabled]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="mentor-question"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ask-mentor"]').exists()).toBe(true)
   })
 
   it('renders source evidence cards', async () => {
@@ -146,5 +147,45 @@ describe('ChapterStudyPage', () => {
     )
     expect(wrapper.text()).toContain('completed')
     expect(wrapper.html()).toContain('/chapters/00000000-0000-0000-0000-000000000602')
+  })
+
+  it('asks the chapter mentor and renders answer citations', async () => {
+    fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/mentor/questions') && options?.method === 'POST') {
+        return Promise.resolve({
+          question: 'How does RAG work?',
+          answer: 'RAG retrieves relevant evidence before answering.',
+          citations: [
+            {
+              chunk_id: '00000000-0000-0000-0000-000000000301',
+              source_id: '00000000-0000-0000-0000-000000000201',
+              source_filename: 'rag.md',
+              chunk_index: 2,
+              text: 'RAG retrieves relevant evidence.'
+            }
+          ]
+        })
+      }
+      return Promise.resolve(chapterDetail())
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="mentor-question"]').setValue('How does RAG work?')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('form.mentor-form').trigger('submit')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/chapters/00000000-0000-0000-0000-000000000601/mentor/questions',
+      expect.objectContaining({
+        method: 'POST',
+        body: { question: 'How does RAG work?' }
+      })
+    )
+    expect(wrapper.text()).toContain('RAG retrieves relevant evidence before answering.')
+    expect(wrapper.text()).toContain('rag.md')
+    expect(wrapper.text()).toContain('Chunk #2')
   })
 })
