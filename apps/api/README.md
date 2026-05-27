@@ -52,6 +52,21 @@ LLM_TIMEOUT_SECONDS=30
 
 When `LLM_API_KEY` is empty, the API falls back to the deterministic provider.
 
+## Chapter mentor state
+
+The Chapter Mentor State Agent aggregates tutor sessions for one chapter into a
+durable chapter-level assessment.
+
+Endpoints:
+
+- `GET /api/v1/chapters/{chapter_id}/mentor-state`
+- `POST /api/v1/agents/chapter-summary/run`
+
+The run endpoint uses `CurrentUserContext` for tenant scope and rejects
+client-supplied tenant IDs. Each run records an `agent_runs` row with
+`agent_type=chapter_mentor`. Local generation is deterministic for repeatable
+tests and can be replaced behind the domain service boundary later.
+
 ## Runtime source ingestion
 
 Local text/Markdown ingestion flow:

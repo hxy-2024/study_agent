@@ -117,6 +117,7 @@ class StudySpace(Base):
     learning_routes: Mapped[list["LearningRoute"]] = relationship(back_populates="study_space")
     chapters: Mapped[list["Chapter"]] = relationship(back_populates="study_space")
     sessions: Mapped[list["Session"]] = relationship(back_populates="study_space")
+    chapter_mentor_states: Mapped[list["ChapterMentorState"]] = relationship(back_populates="study_space")
 
 
 class Source(Base):
@@ -239,6 +240,30 @@ class Chapter(Base):
     study_space: Mapped["StudySpace"] = relationship(back_populates="chapters")
     learning_route: Mapped["LearningRoute"] = relationship(back_populates="chapters")
     sessions: Mapped[list["Session"]] = relationship(back_populates="chapter")
+    mentor_state: Mapped["ChapterMentorState"] = relationship(back_populates="chapter")
+
+
+class ChapterMentorState(Base):
+    __tablename__ = "chapter_mentor_states"
+    __table_args__ = (
+        UniqueConstraint("chapter_id", name="uq_chapter_mentor_states_chapter"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
+    chapter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chapters.id"), nullable=False, index=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    weak_points: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    next_actions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    evidence: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    source_session_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    study_space: Mapped["StudySpace"] = relationship(back_populates="chapter_mentor_states")
+    chapter: Mapped["Chapter"] = relationship(back_populates="mentor_state")
 
 
 class Session(Base):

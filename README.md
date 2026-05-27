@@ -11,10 +11,14 @@ The current foundation includes:
 - Tenant-aware study space and source metadata models.
 - Study space creation API.
 - Upload presign API.
+- Runtime Markdown/text source ingestion and RAG retrieval.
+- Learning route generation and chapter study workflow.
+- Session Tutor messages with citations.
+- Chapter Mentor State Agent for chapter summaries, weak points, and next actions.
 - Nuxt app shell.
-- Dashboard and create-space UI.
+- Dashboard, create-space, source library, study space, and chapter study UI.
 
-LangGraph agents, streaming chat, quizzes, mastery tracking, and import/export are planned as separate implementation phases.
+LangGraph durable workflows, quizzes, mastery tracking, and import/export are planned as separate implementation phases.
 
 ### RAG foundation
 
@@ -124,4 +128,5 @@ Manual browser smoke test:
 4. Generate a route.
 5. Open a chapter with `Study`.
 6. Ask AI Mentor a question.
-7. Mark the chapter complete.
+7. Click `Update assessment` in the Chapter state panel.
+8. Mark the chapter complete.
