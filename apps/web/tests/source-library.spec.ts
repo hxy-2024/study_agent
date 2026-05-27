@@ -68,6 +68,36 @@ function sourceListFixture() {
   ]
 }
 
+function routeItem(overrides = {}) {
+  return {
+    id: '00000000-0000-0000-0000-000000000501',
+    study_space_id: '00000000-0000-0000-0000-000000000101',
+    version: 1,
+    status: 'draft',
+    title: 'Draft route',
+    summary: 'A generated route.',
+    generation_strategy: 'deterministic',
+    created_at: null,
+    activated_at: null,
+    ...overrides
+  }
+}
+
+function chapterItem(overrides = {}) {
+  return {
+    id: '00000000-0000-0000-0000-000000000601',
+    learning_route_id: '00000000-0000-0000-0000-000000000501',
+    order_index: 1,
+    title: 'Intro chapter',
+    goal: 'Learn the foundations.',
+    summary: 'Start with the basics.',
+    estimated_days: 3,
+    status: 'not_started',
+    source_chunk_refs: [],
+    ...overrides
+  }
+}
+
 async function flushPromises() {
   await new Promise(resolve => setTimeout(resolve, 0))
 }
@@ -84,7 +114,12 @@ async function selectFile(wrapper: ReturnType<typeof mountPage>, file: File) {
 describe('StudySpacePage source library', () => {
   beforeEach(() => {
     fetchMock.mockReset()
-    fetchMock.mockResolvedValue({ sources: [] })
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/routes')) {
+        return Promise.resolve({ routes: [] })
+      }
+      return Promise.resolve({ sources: [] })
+    })
   })
 
   it('renders the source upload control and upload button', async () => {
@@ -125,7 +160,7 @@ describe('StudySpacePage source library', () => {
     await wrapper.find('button.primary-button').trigger('click')
 
     expect(wrapper.text()).toContain('This phase supports only .txt and .md files.')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:8000/api/v1/study-spaces/00000000-0000-0000-0000-000000000101/sources',
       expect.any(Object)
@@ -140,11 +175,14 @@ describe('StudySpacePage source library', () => {
     await wrapper.find('button.primary-button').trigger('click')
 
     expect(wrapper.text()).toContain('This phase supports only .txt and .md files.')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('uploads markdown through presign, storage PUT, confirmation, and source reload', async () => {
     fetchMock.mockImplementation((url: string, options?: { method?: string }) => {
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/routes')) {
+        return Promise.resolve({ routes: [] })
+      }
       if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/sources')) {
         return Promise.resolve({ sources: [] })
       }
@@ -172,7 +210,7 @@ describe('StudySpacePage source library', () => {
     await wrapper.find('button.primary-button').trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, 'http://localhost:8000/api/v1/uploads/presign', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, 'http://localhost:8000/api/v1/uploads/presign', {
       method: 'POST',
       headers: {
         'X-User-Id': '00000000-0000-0000-0000-000000000002',
@@ -184,18 +222,18 @@ describe('StudySpacePage source library', () => {
         content_type: 'text/markdown'
       }
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, 'http://object-storage.local/upload/notes.md', {
+    expect(fetchMock).toHaveBeenNthCalledWith(4, 'http://object-storage.local/upload/notes.md', {
       method: 'PUT',
       headers: {
         'Content-Type': 'text/markdown'
       },
       body: expect.any(File)
     })
-    const putHeaders = (fetchMock.mock.calls[2]?.[1] as { headers?: Record<string, string> } | undefined)?.headers
+    const putHeaders = (fetchMock.mock.calls[3]?.[1] as { headers?: Record<string, string> } | undefined)?.headers
     expect(putHeaders).not.toHaveProperty('X-User-Id')
     expect(putHeaders).not.toHaveProperty('X-Tenant-Id')
     expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
+      5,
       'http://localhost:8000/api/v1/sources/00000000-0000-0000-0000-000000000201/uploaded',
       {
         method: 'POST',
@@ -205,11 +243,14 @@ describe('StudySpacePage source library', () => {
         }
       }
     )
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(fetchMock).toHaveBeenCalledTimes(6)
   })
 
   it('runs ingestion then loads and renders chunks with citation page', async () => {
     fetchMock.mockImplementation((url: string, options?: { method?: string }) => {
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/routes')) {
+        return Promise.resolve({ routes: [] })
+      }
       if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/sources')) {
         return Promise.resolve({ sources: [sourceItem({ status: options?.method ? 'ready' : 'uploaded' })] })
       }
@@ -260,6 +301,9 @@ describe('StudySpacePage source library', () => {
     ]
   ])('shows a specific error when %s fails', async (_phase, failingUrl, expectedMessage) => {
     fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/routes')) {
+        return Promise.resolve({ routes: [] })
+      }
       if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/sources')) {
         return Promise.resolve({ sources: [] })
       }
@@ -344,6 +388,9 @@ describe('StudySpacePage source library', () => {
   it('shows upload phase text while creating the upload URL', async () => {
     let resolvePresign: (value: unknown) => void = () => {}
     fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/routes')) {
+        return Promise.resolve({ routes: [] })
+      }
       if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/sources')) {
         return Promise.resolve({ sources: [] })
       }
@@ -375,6 +422,9 @@ describe('StudySpacePage source library', () => {
 
   it('keeps the selected file after upload failure', async () => {
     fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/routes')) {
+        return Promise.resolve({ routes: [] })
+      }
       if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/sources')) {
         return Promise.resolve({ sources: [] })
       }
@@ -397,6 +447,9 @@ describe('StudySpacePage source library', () => {
 
   it('shows preview-level run ingestion action when selected source has no chunks', async () => {
     fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/routes')) {
+        return Promise.resolve({ routes: [] })
+      }
       if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/sources')) {
         return Promise.resolve({ sources: [sourceItem({ status: 'uploaded' })] })
       }
@@ -414,5 +467,79 @@ describe('StudySpacePage source library', () => {
 
     expect(wrapper.text()).toContain('This source has no chunks yet.')
     expect(wrapper.find('[data-testid="preview-run-ingestion"]').exists()).toBe(true)
+  })
+
+  it('renders route empty state and generates a draft route', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/sources')) {
+        return Promise.resolve({ sources: [] })
+      }
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/routes')) {
+        return Promise.resolve({ routes: [] })
+      }
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/route-drafts')) {
+        return Promise.resolve({
+          route: routeItem({ status: 'draft' }),
+          chapters: [chapterItem()]
+        })
+      }
+      return Promise.resolve({})
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('No learning route yet.')
+
+    await wrapper.find('[data-testid="generate-route"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/study-spaces/00000000-0000-0000-0000-000000000101/route-drafts',
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(wrapper.text()).toContain('Draft route')
+    expect(wrapper.text()).toContain('Intro chapter')
+    const studyLink = wrapper.find('[data-testid="study-chapter"]')
+    expect(studyLink.exists()).toBe(true)
+    expect(studyLink.attributes('to')).toBe('/chapters/00000000-0000-0000-0000-000000000601')
+  })
+
+  it('activates a draft route from the route panel', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/sources')) {
+        return Promise.resolve({ sources: [] })
+      }
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/routes')) {
+        return Promise.resolve({
+          routes: [
+            {
+              route: routeItem({ status: 'draft' }),
+              chapters: [chapterItem()]
+            }
+          ]
+        })
+      }
+      if (url.endsWith('/routes/00000000-0000-0000-0000-000000000501/activate')) {
+        return Promise.resolve({
+          route: routeItem({ status: 'active' }),
+          chapters: [chapterItem({ status: 'active' })]
+        })
+      }
+      return Promise.resolve({})
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="activate-route"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/routes/00000000-0000-0000-0000-000000000501/activate',
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(wrapper.text()).toContain('Active route')
+    expect(wrapper.text()).toContain('Draft route')
   })
 })
