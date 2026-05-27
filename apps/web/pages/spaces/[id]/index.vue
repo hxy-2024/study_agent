@@ -40,6 +40,39 @@ interface SourceChunkListResponse {
   chunks: SourceChunk[]
 }
 
+interface LearningRoute {
+  id: string
+  study_space_id: string
+  version: number
+  status: 'draft' | 'active' | 'archived' | string
+  title: string
+  summary: string
+  generation_strategy: string
+  created_at: string | null
+  activated_at: string | null
+}
+
+interface RouteChapter {
+  id: string
+  learning_route_id: string
+  order_index: number
+  title: string
+  goal: string
+  summary: string
+  estimated_days: number
+  status: string
+  source_chunk_refs: Array<Record<string, unknown>>
+}
+
+interface RouteWithChapters {
+  route: LearningRoute
+  chapters: RouteChapter[]
+}
+
+interface RoutesListResponse {
+  routes: RouteWithChapters[]
+}
+
 const DEV_AUTH_HEADERS = {
   'X-User-Id': '00000000-0000-0000-0000-000000000002',
   'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
@@ -55,8 +88,12 @@ const selectedFile = ref<File | null>(null)
 const selectedSourceId = ref<string | null>(null)
 const selectedSourceName = ref('')
 const chunks = ref<SourceChunk[]>([])
+const routes = ref<RouteWithChapters[]>([])
 const chunklessSourceIds = ref<Set<string>>(new Set())
 const loadingSources = ref(false)
+const loadingRoutes = ref(false)
+const generatingRoute = ref(false)
+const activatingRouteId = ref<string | null>(null)
 const uploadPhase = ref<UploadPhase>('idle')
 const ingestingSourceId = ref<string | null>(null)
 const loadingChunks = ref(false)
@@ -66,6 +103,9 @@ const uploading = computed(() => uploadPhase.value !== 'idle')
 const canUpload = computed(() => selectedFile.value !== null && !uploading.value)
 const selectedSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value) ?? null)
 const hasSelectedSource = computed(() => selectedSourceId.value !== null)
+const activeRoute = computed(() => routes.value.find(item => item.route.status === 'active') ?? null)
+const latestDraftRoute = computed(() => routes.value.find(item => item.route.status === 'draft') ?? null)
+const visibleRoute = computed(() => activeRoute.value ?? latestDraftRoute.value ?? null)
 const sourceFilters = computed(() => [
   { key: 'all' as const, label: 'All', count: sources.value.length },
   { key: 'uploaded' as const, label: 'Uploaded', count: sources.value.filter(source => source.status === 'uploaded').length },
@@ -181,6 +221,69 @@ async function loadSources() {
   }
 }
 
+async function loadRoutes() {
+  loadingRoutes.value = true
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<RoutesListResponse>(
+      `${config.public.apiBaseUrl}/study-spaces/${spaceId.value}/routes`,
+      { headers: protectedHeaders() }
+    )
+    routes.value = response.routes ?? []
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to load learning routes.', error)
+  } finally {
+    loadingRoutes.value = false
+  }
+}
+
+async function generateRouteDraft() {
+  generatingRoute.value = true
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<RouteWithChapters>(
+      `${config.public.apiBaseUrl}/study-spaces/${spaceId.value}/route-drafts`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: { max_chapters: 5 }
+      }
+    )
+    routes.value = [response, ...routes.value.filter(item => item.route.id !== response.route.id)]
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to generate learning route.', error)
+  } finally {
+    generatingRoute.value = false
+  }
+}
+
+async function activateRoute(routeId: string) {
+  activatingRouteId.value = routeId
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<RouteWithChapters>(
+      `${config.public.apiBaseUrl}/routes/${routeId}/activate`,
+      {
+        method: 'POST',
+        headers: protectedHeaders()
+      }
+    )
+    routes.value = [
+      response,
+      ...routes.value
+        .filter(item => item.route.id !== routeId)
+        .map(item => ({
+          ...item,
+          route: item.route.status === 'active' ? { ...item.route, status: 'archived' } : item.route
+        }))
+    ]
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to activate learning route.', error)
+  } finally {
+    activatingRouteId.value = null
+  }
+}
+
 async function uploadSource() {
   if (!selectedFile.value) return
 
@@ -283,6 +386,7 @@ async function loadChunks(source: SourceItem) {
 
 onMounted(() => {
   loadSources()
+  loadRoutes()
 })
 </script>
 
@@ -299,11 +403,49 @@ onMounted(() => {
         </div>
 
         <section class="card route-overview">
-          <div>
-            <p class="eyebrow">Next action</p>
-            <h2>Learning route foundation</h2>
-            <p>Route generation will connect chapters, source chunks, and tutor sessions in the next product phase.</p>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Learning route</p>
+              <h2>{{ visibleRoute?.route.status === 'active' ? 'Active route' : visibleRoute ? 'Draft route' : 'No learning route yet.' }}</h2>
+              <h3 v-if="visibleRoute" class="route-title">{{ visibleRoute.route.title }}</h3>
+              <p v-if="visibleRoute">{{ visibleRoute.route.summary }}</p>
+              <p v-else>Generate a route from your goal and ingested source chunks.</p>
+            </div>
+            <div class="route-actions">
+              <button
+                data-testid="generate-route"
+                type="button"
+                class="secondary-button"
+                :disabled="generatingRoute"
+                @click="generateRouteDraft"
+              >
+                {{ generatingRoute ? 'Generating...' : visibleRoute ? 'Regenerate draft' : 'Generate route' }}
+              </button>
+              <button
+                v-if="latestDraftRoute"
+                data-testid="activate-route"
+                type="button"
+                class="primary-button"
+                :disabled="activatingRouteId === latestDraftRoute.route.id"
+                @click="activateRoute(latestDraftRoute.route.id)"
+              >
+                {{ activatingRouteId === latestDraftRoute.route.id ? 'Activating...' : 'Activate route' }}
+              </button>
+            </div>
           </div>
+
+          <p v-if="loadingRoutes" class="muted">Loading learning routes...</p>
+          <div v-else-if="visibleRoute" class="chapter-list">
+            <article v-for="chapter in visibleRoute.chapters" :key="chapter.id" class="chapter-row">
+              <span class="status-badge">{{ chapter.status }}</span>
+              <div>
+                <h3>{{ chapter.order_index }}. {{ chapter.title }}</h3>
+                <p>{{ chapter.goal }}</p>
+                <small>{{ chapter.estimated_days }} days</small>
+              </div>
+            </article>
+          </div>
+          <p v-else class="empty-state">No learning route yet. Generate a route after uploading or ingesting sources.</p>
         </section>
 
         <p v-if="errorMessage" class="error-alert">{{ errorMessage }}</p>
@@ -487,6 +629,54 @@ onMounted(() => {
 .page-heading p,
 .space-rail p {
   color: var(--color-muted);
+}
+
+.route-overview {
+  display: grid;
+  gap: 16px;
+}
+
+.route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.route-title {
+  color: var(--color-text);
+  font-size: 18px;
+  line-height: 1.3;
+  margin-bottom: 6px;
+}
+
+.chapter-list {
+  display: grid;
+  gap: 12px;
+}
+
+.chapter-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  padding: 12px;
+}
+
+.chapter-row h3,
+.chapter-row p {
+  overflow-wrap: anywhere;
+}
+
+.chapter-row p {
+  color: var(--color-muted);
+}
+
+.chapter-row small {
+  color: var(--color-primary);
+  font-weight: 800;
 }
 
 .eyebrow {
@@ -696,11 +886,16 @@ p {
   }
 
   .upload-actions,
+  .route-actions,
   .section-heading,
   .source-main,
   .row-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .chapter-row {
+    grid-template-columns: 1fr;
   }
 }
 </style>

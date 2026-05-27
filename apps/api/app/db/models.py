@@ -31,6 +31,18 @@ class IngestionJobStatus(str, enum.Enum):
     failed = "failed"
 
 
+class LearningRouteStatus(str, enum.Enum):
+    draft = "draft"
+    active = "active"
+    archived = "archived"
+
+
+class ChapterStatus(str, enum.Enum):
+    not_started = "not_started"
+    active = "active"
+    completed = "completed"
+
+
 class Tenant(Base):
     __tablename__ = "tenants"
 
@@ -78,6 +90,8 @@ class StudySpace(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     sources: Mapped[list["Source"]] = relationship(back_populates="study_space")
+    learning_routes: Mapped[list["LearningRoute"]] = relationship(back_populates="study_space")
+    chapters: Mapped[list["Chapter"]] = relationship(back_populates="study_space")
 
 
 class Source(Base):
@@ -145,3 +159,55 @@ class SourceChunk(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     source: Mapped["Source"] = relationship(back_populates="chunks")
+
+
+class LearningRoute(Base):
+    __tablename__ = "learning_routes"
+    __table_args__ = (
+        UniqueConstraint("study_space_id", "version", name="uq_learning_routes_space_version"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[LearningRouteStatus] = mapped_column(
+        Enum(LearningRouteStatus, name="learning_route_status"),
+        nullable=False,
+        default=LearningRouteStatus.draft,
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    generation_strategy: Mapped[str] = mapped_column(String(80), nullable=False, default="deterministic")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    study_space: Mapped["StudySpace"] = relationship(back_populates="learning_routes")
+    chapters: Mapped[list["Chapter"]] = relationship(back_populates="learning_route")
+
+
+class Chapter(Base):
+    __tablename__ = "chapters"
+    __table_args__ = (
+        UniqueConstraint("learning_route_id", "order_index", name="uq_chapters_route_order"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
+    learning_route_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("learning_routes.id"), nullable=False, index=True)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    goal: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    estimated_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[ChapterStatus] = mapped_column(
+        Enum(ChapterStatus, name="chapter_status"),
+        nullable=False,
+        default=ChapterStatus.not_started,
+    )
+    source_chunk_refs: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    study_space: Mapped["StudySpace"] = relationship(back_populates="chapters")
+    learning_route: Mapped["LearningRoute"] = relationship(back_populates="chapters")

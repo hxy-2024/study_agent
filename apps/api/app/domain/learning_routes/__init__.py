@@ -1,0 +1,1 @@
+"""Learning route domain."""
