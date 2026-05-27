@@ -38,19 +38,65 @@ The API verifies membership before returning tenant-scoped data.
 
 ## Local Development
 
-```bash
-cp .env.example apps/api/.env
-make infra-up
-cd apps/api && uv sync && uv run alembic upgrade head
-make api-run
+Prerequisites:
+
+- Docker Desktop running.
+- Python 3.12 with `uv`.
+- Node.js 20+.
+
+The local stack uses these ports:
+
+- Web: `http://127.0.0.1:3000`
+- API: `http://127.0.0.1:8000`
+- Postgres: `localhost:15432`
+- Redis: `localhost:6379`
+- MinIO API: `http://localhost:9000`
+- MinIO console: `http://localhost:9001`
+
+Start infrastructure:
+
+```powershell
+cd F:\AIproject\study_agent
+docker compose -f infra/docker-compose.yml up -d postgres redis minio
 ```
 
-In another terminal:
+Prepare the API database:
 
-```bash
+```powershell
+cd F:\AIproject\study_agent\apps\api
+uv sync
+uv run alembic upgrade head
+```
+
+Seed the temporary development auth identity:
+
+```powershell
+$env:PGPASSWORD = "study_agent"
+psql -h 127.0.0.1 -p 15432 -U study_agent -d study_agent -c "insert into tenants (id, name) values ('00000000-0000-0000-0000-000000000001', 'Local Tenant') on conflict (id) do nothing; insert into users (id, email, display_name) values ('00000000-0000-0000-0000-000000000002', 'local@example.com', 'Local User') on conflict (id) do nothing; insert into memberships (id, tenant_id, user_id, role) values ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'owner') on conflict (id) do nothing;"
+```
+
+Start the API:
+
+```powershell
+cd F:\AIproject\study_agent\apps\api
+uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Start the web app in another terminal:
+
+```powershell
 cd apps/web
 npm install
-NUXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1 npm run dev
+npm run dev -- --host 127.0.0.1 --port 3000
 ```
 
-Open `http://localhost:3000`.
+Open `http://127.0.0.1:3000`.
+
+Manual smoke test:
+
+1. Create a study space.
+2. Upload a `.md` source.
+3. Run ingestion.
+4. Generate a route.
+5. Open a chapter with `Study`.
+6. Mark the chapter complete.

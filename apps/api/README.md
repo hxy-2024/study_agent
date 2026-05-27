@@ -6,6 +6,7 @@ FastAPI service for study_agent.
 
 ```bash
 uv sync
+uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
 uv run pytest -q
 ```
@@ -53,6 +54,13 @@ The Docker Compose Postgres service publishes container port `5432` on host port
 
 ```text
 postgresql+asyncpg://study_agent:study_agent@localhost:15432/study_agent
+```
+
+When using development auth, seed the local tenant/user/membership once:
+
+```powershell
+$env:PGPASSWORD = "study_agent"
+psql -h 127.0.0.1 -p 15432 -U study_agent -d study_agent -c "insert into tenants (id, name) values ('00000000-0000-0000-0000-000000000001', 'Local Tenant') on conflict (id) do nothing; insert into users (id, email, display_name) values ('00000000-0000-0000-0000-000000000002', 'local@example.com', 'Local User') on conflict (id) do nothing; insert into memberships (id, tenant_id, user_id, role) values ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'owner') on conflict (id) do nothing;"
 ```
 
 ## Development auth

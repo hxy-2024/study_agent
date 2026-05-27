@@ -10,13 +10,13 @@ api-test:
 	cd apps/api && uv run pytest -q
 
 api-run:
-	cd apps/api && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	cd apps/api && uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 web-install:
 	cd apps/web && npm install
 
 web-dev:
-	cd apps/web && npm run dev
+	cd apps/web && npm run dev -- --host 127.0.0.1 --port 3000
 
 web-test:
 	cd apps/web && npm run test
