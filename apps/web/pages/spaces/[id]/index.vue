@@ -83,6 +83,15 @@ function canRunIngestion(source: SourceItem) {
 }
 
 function contentTypeForFile(file: File) {
+  const allowedMimeTypes = new Set([
+    '',
+    'text/plain',
+    'text/markdown',
+    'text/x-markdown',
+    'application/octet-stream'
+  ])
+  if (!allowedMimeTypes.has(file.type)) return null
+
   const lowerName = file.name.toLowerCase()
   if (lowerName.endsWith('.md')) return 'text/markdown'
   if (lowerName.endsWith('.txt')) return 'text/plain'
@@ -133,6 +142,7 @@ async function uploadSource() {
 
   uploading.value = true
   errorMessage.value = ''
+  let uploadErrorMessage = 'Failed to create upload URL.'
   try {
     const presign = await $fetch<UploadPresignResponse>(`${config.public.apiBaseUrl}/uploads/presign`, {
       method: 'POST',
@@ -144,6 +154,7 @@ async function uploadSource() {
       }
     })
 
+    uploadErrorMessage = 'Failed to upload file to object storage.'
     await $fetch(presign.upload_url, {
       method: 'PUT',
       headers: {
@@ -152,6 +163,7 @@ async function uploadSource() {
       body: selectedFile.value
     })
 
+    uploadErrorMessage = 'Failed to confirm upload completion.'
     await $fetch(`${config.public.apiBaseUrl}/sources/${presign.source_id}/uploaded`, {
       method: 'POST',
       headers: protectedHeaders()
@@ -160,7 +172,7 @@ async function uploadSource() {
     selectedFile.value = null
     await loadSources()
   } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to upload source.', error)
+    errorMessage.value = appendBackendMessage(uploadErrorMessage, error)
   } finally {
     uploading.value = false
   }
