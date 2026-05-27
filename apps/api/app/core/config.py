@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     dev_auth_enabled: bool = True
     auth_user_header: str = "X-User-Id"
     auth_tenant_header: str = "X-Tenant-Id"
+    llm_provider: str = "deterministic"
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_api_key: str = ""
+    llm_model: str = "gpt-4.1-mini"
+    llm_timeout_seconds: int = 30
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

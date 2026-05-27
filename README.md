@@ -27,6 +27,23 @@ The API includes the first RAG foundation:
 
 Runtime ingestion supports text and Markdown objects in S3-compatible storage after a source is marked uploaded. PDF, OCR, and webpage ingestion remain later phases. Runtime retrieval is enabled only when the request includes valid development auth headers and the user is a member of the tenant. Domain tests cover ingestion and retrieval with local providers.
 
+### AI Mentor answer provider
+
+Chapter AI Mentor uses RAG retrieval for grounding. By default it uses a deterministic
+local answer provider, so the app works without an external LLM key. To use an
+OpenAI-compatible chat completion API, set:
+
+```env
+LLM_PROVIDER=openai-compatible
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=your-api-key
+LLM_MODEL=gpt-4.1-mini
+LLM_TIMEOUT_SECONDS=30
+```
+
+The same interface can point at other OpenAI-compatible providers by changing
+`LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`.
+
 ### Development auth headers
 
 Local protected API calls use development headers until the full login flow is implemented:
