@@ -108,6 +108,22 @@ interface PlannerAction {
   updated_at?: string | null
 }
 
+interface AgentRunLearningSignal {
+  kind: string
+  [key: string]: unknown
+}
+
+interface AgentRunTimelineItem {
+  id?: string
+  agent_type: string
+  status: string
+  summary: string
+  node_trace: string[]
+  learning_signals: AgentRunLearningSignal[]
+  thread_id: string | null
+  checkpoint_backend: string | null
+}
+
 const DEV_AUTH_HEADERS = {
   'X-User-Id': '00000000-0000-0000-0000-000000000002',
   'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
@@ -134,6 +150,8 @@ const generatingQuiz = ref(false)
 const plannerActions = ref<PlannerAction[]>([])
 const loadingPlannerActions = ref(false)
 const updatingPlannerActionId = ref<string | null>(null)
+const agentRuns = ref<AgentRunTimelineItem[]>([])
+const loadingAgentRuns = ref(false)
 
 const chapter = computed(() => detail.value?.chapter ?? null)
 const evidence = computed(() => detail.value?.evidence ?? [])
@@ -188,6 +206,31 @@ function normalizePlannerActions(response: PlannerAction[] | { actions?: Planner
   return Array.isArray(response) ? response : response.actions ?? []
 }
 
+function normalizeAgentRuns(response: { runs?: AgentRunTimelineItem[] } | null | undefined): AgentRunTimelineItem[] {
+  return (response?.runs ?? [])
+    .filter(run => ['chapter_mentor', 'session_tutor'].includes(run?.agent_type) && run.status)
+    .map(run => ({
+      ...run,
+      summary: run.summary || 'No summary recorded.',
+      node_trace: Array.isArray(run.node_trace) ? run.node_trace.filter(Boolean).map(String) : [],
+      learning_signals: Array.isArray(run.learning_signals)
+        ? run.learning_signals
+            .map(signal => (typeof signal === 'string' ? { kind: signal } : signal))
+            .filter((signal): signal is AgentRunLearningSignal => Boolean(signal?.kind))
+        : [],
+      thread_id: run.thread_id ?? null,
+      checkpoint_backend: run.checkpoint_backend ?? null
+    }))
+}
+
+function agentTypeLabel(agentType: string) {
+  const labels: Record<string, string> = {
+    chapter_mentor: 'L2 Mentor',
+    session_tutor: 'L3 Tutor'
+  }
+  return labels[agentType] ?? agentType
+}
+
 function isMasteryRecord(response: unknown): response is MasteryRecord {
   if (!response || typeof response !== 'object') return false
   const candidate = response as Partial<MasteryRecord>
@@ -233,6 +276,21 @@ async function loadPlannerActions(studySpaceId: string) {
     plannerActions.value = []
   } finally {
     loadingPlannerActions.value = false
+  }
+}
+
+async function loadAgentRuns() {
+  loadingAgentRuns.value = true
+  try {
+    const response = await $fetch<{ runs: AgentRunTimelineItem[] }>(
+      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/agent-runs?limit=8`,
+      { headers: protectedHeaders() }
+    )
+    agentRuns.value = normalizeAgentRuns(response)
+  } catch {
+    agentRuns.value = []
+  } finally {
+    loadingAgentRuns.value = false
   }
 }
 
@@ -414,6 +472,7 @@ onMounted(() => {
   loadMentorSession()
   loadMentorState()
   loadMastery()
+  loadAgentRuns()
 })
 </script>
 
@@ -507,6 +566,54 @@ onMounted(() => {
         <p v-else class="empty-state">
           No chapter mentor state yet. Update after asking the mentor a few questions.
         </p>
+      </section>
+
+      <section class="card chapter-runtime-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Chapter runtime</p>
+            <h2>Recent agent runs</h2>
+            <p class="muted">Latest L2 Mentor and L3 Tutor traces for this chapter.</p>
+          </div>
+          <button
+            data-testid="refresh-chapter-agent-runs"
+            class="secondary-button"
+            type="button"
+            :disabled="loadingAgentRuns"
+            @click="loadAgentRuns"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <p v-if="loadingAgentRuns" class="muted">Loading runtime...</p>
+        <p v-else-if="agentRuns.length === 0" class="empty-state">No chapter runtime yet.</p>
+        <div v-else class="chapter-runtime-list">
+          <article
+            v-for="run in agentRuns"
+            :key="run.id ?? `${run.agent_type}-${run.thread_id}`"
+            class="chapter-runtime-row"
+          >
+            <div class="chapter-runtime-meta">
+              <span class="status-badge">{{ agentTypeLabel(run.agent_type) }}</span>
+              <span class="runtime-status">{{ run.status }}</span>
+            </div>
+            <div class="chapter-runtime-body">
+              <h3>{{ run.summary }}</h3>
+              <p v-if="run.node_trace.length" class="runtime-trace">{{ run.node_trace.join(' -> ') }}</p>
+              <p v-else class="runtime-trace">No node trace recorded.</p>
+              <div v-if="run.learning_signals.length" class="signal-list" aria-label="Learning signals">
+                <span
+                  v-for="signal in run.learning_signals"
+                  :key="signal.kind"
+                  class="signal-chip"
+                >
+                  {{ signal.kind }}
+                </span>
+              </div>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section class="card quiz-panel">
@@ -736,6 +843,7 @@ onMounted(() => {
 
 .chapter-summary,
 .chapter-state-panel,
+.chapter-runtime-panel,
 .quiz-panel,
 .review-callout,
 .evidence-panel,
@@ -783,6 +891,75 @@ onMounted(() => {
 
 .quiz-action {
   flex: 0 0 auto;
+}
+
+.chapter-runtime-list {
+  display: grid;
+  gap: 12px;
+}
+
+.chapter-runtime-row {
+  display: grid;
+  grid-template-columns: minmax(124px, 0.24fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  border: 1px solid rgba(20, 184, 166, 0.28);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 10px 26px rgba(15, 118, 110, 0.08);
+  min-width: 0;
+  padding: 13px;
+}
+
+.chapter-runtime-meta,
+.chapter-runtime-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chapter-runtime-body h3 {
+  color: var(--color-text);
+  font-size: 16px;
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.runtime-status {
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.runtime-trace {
+  border-left: 3px solid var(--color-primary-bright);
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding-left: 10px;
+}
+
+.signal-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.signal-chip {
+  border: 1px solid rgba(20, 184, 166, 0.28);
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
 }
 
 .review-callout {
@@ -1071,6 +1248,10 @@ onMounted(() => {
   }
 
   .review-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .chapter-runtime-row {
     grid-template-columns: 1fr;
   }
 
