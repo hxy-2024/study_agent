@@ -128,12 +128,21 @@ interface AgentRunLearningSignal {
 interface AgentRunTimelineItem {
   id?: string
   agent_type: string
+  graph_name?: string | null
   status: string
   summary: string
   node_trace: string[]
   learning_signals: AgentRunLearningSignal[]
   thread_id: string | null
   checkpoint_backend: string | null
+  state_schema_version?: number | null
+  created_at?: string | null
+  completed_at?: string | null
+  latency_ms?: number | null
+  prompt_tokens?: number | null
+  completion_tokens?: number | null
+  total_tokens?: number | null
+  error_message?: string | null
 }
 
 const DEV_AUTH_HEADERS = {
@@ -155,6 +164,7 @@ const routes = ref<RouteWithChapters[]>([])
 const plannerState = ref<SpacePlannerState | null>(null)
 const plannerActions = ref<PlannerAction[]>([])
 const agentRuns = ref<AgentRunTimelineItem[]>([])
+const selectedAgentRunId = ref<string | null>(null)
 const chunklessSourceIds = ref<Set<string>>(new Set())
 const loadingSources = ref(false)
 const loadingRoutes = ref(false)
@@ -218,6 +228,10 @@ const uploadPhaseLabel = computed(() => {
     refreshing_sources: 'Refreshing sources...'
   }
   return labels[uploadPhase.value]
+})
+const selectedAgentRun = computed(() => {
+  if (!selectedAgentRunId.value) return null
+  return agentRuns.value.find(run => runtimeRunKey(run) === selectedAgentRunId.value) ?? null
 })
 
 function protectedHeaders() {
@@ -303,8 +317,38 @@ function normalizeAgentRuns(response: { runs?: AgentRunTimelineItem[] } | null |
             .filter((signal): signal is AgentRunLearningSignal => Boolean(signal?.kind))
         : [],
       thread_id: run.thread_id ?? null,
-      checkpoint_backend: run.checkpoint_backend ?? null
+      checkpoint_backend: run.checkpoint_backend ?? null,
+      graph_name: run.graph_name ?? null,
+      state_schema_version: run.state_schema_version ?? null,
+      created_at: run.created_at ?? null,
+      completed_at: run.completed_at ?? null,
+      latency_ms: run.latency_ms ?? null,
+      prompt_tokens: run.prompt_tokens ?? null,
+      completion_tokens: run.completion_tokens ?? null,
+      total_tokens: run.total_tokens ?? null,
+      error_message: run.error_message ?? null
     }))
+}
+
+function runtimeRunKey(run: AgentRunTimelineItem) {
+  return run.id ?? `${run.agent_type}-${run.thread_id ?? 'no-thread'}`
+}
+
+function toggleAgentRun(run: AgentRunTimelineItem) {
+  const runKey = runtimeRunKey(run)
+  selectedAgentRunId.value = selectedAgentRunId.value === runKey ? null : runKey
+}
+
+function formatRuntimeMetric(value: number | string | null | undefined, suffix = '') {
+  if (value === null || value === undefined || value === '') return 'Not recorded'
+  return `${value}${suffix}`
+}
+
+function formatRuntimeDate(value: string | null | undefined) {
+  if (!value) return 'Not recorded'
+  const runtimeDate = new Date(value)
+  if (Number.isNaN(runtimeDate.getTime())) return 'Not recorded'
+  return runtimeDate.toLocaleString()
 }
 
 function agentTypeLabel(agentType: string) {
@@ -832,18 +876,91 @@ onMounted(() => {
           <p v-else-if="agentRuns.length === 0" class="empty-state">No agent runs recorded yet.</p>
           <div v-else class="agent-runtime-list">
             <article v-for="run in agentRuns" :key="run.id ?? `${run.agent_type}-${run.thread_id}`" class="agent-runtime-row">
-              <div class="agent-runtime-meta">
-                <span class="status-badge">{{ agentTypeLabel(run.agent_type) }}</span>
-                <span class="runtime-status">{{ run.status }}</span>
-              </div>
-              <div class="agent-runtime-body">
-                <h3>{{ run.summary }}</h3>
-                <p v-if="run.node_trace.length" class="runtime-trace">{{ run.node_trace.join(' -> ') }}</p>
-                <p v-else class="runtime-trace">No node trace recorded.</p>
-                <div v-if="run.learning_signals.length" class="signal-list" aria-label="Learning signals">
-                  <span v-for="signal in run.learning_signals" :key="signal.kind" class="signal-chip">{{ signal.kind }}</span>
+              <button
+                data-testid="agent-runtime-row-button"
+                type="button"
+                class="agent-runtime-header"
+                :aria-expanded="selectedAgentRunId === runtimeRunKey(run)"
+                @click="toggleAgentRun(run)"
+              >
+                <span class="agent-runtime-meta">
+                  <span class="status-badge">{{ agentTypeLabel(run.agent_type) }}</span>
+                  <span class="runtime-status">{{ run.status }}</span>
+                </span>
+                <span class="agent-runtime-body">
+                  <span class="runtime-summary">{{ run.summary }}</span>
+                  <span v-if="run.node_trace.length" class="runtime-trace">{{ run.node_trace.join(' -> ') }}</span>
+                  <span v-else class="runtime-trace">No node trace recorded.</span>
+                  <span v-if="run.learning_signals.length" class="signal-list" aria-label="Learning signals">
+                    <span v-for="signal in run.learning_signals" :key="signal.kind" class="signal-chip">{{ signal.kind }}</span>
+                  </span>
+                  <span v-else class="muted">No learning signals.</span>
+                </span>
+              </button>
+              <div
+                v-if="selectedAgentRun && selectedAgentRunId === runtimeRunKey(run)"
+                class="agent-runtime-detail"
+              >
+                <dl class="runtime-detail-grid">
+                  <div>
+                    <dt>Thread</dt>
+                    <dd>{{ run.thread_id || 'Not recorded' }}</dd>
+                  </div>
+                  <div>
+                    <dt>Graph</dt>
+                    <dd>{{ run.graph_name || run.agent_type }}</dd>
+                  </div>
+                  <div>
+                    <dt>Checkpoint</dt>
+                    <dd>{{ run.checkpoint_backend || 'Not recorded' }}</dd>
+                  </div>
+                  <div>
+                    <dt>Schema</dt>
+                    <dd>{{ formatRuntimeMetric(run.state_schema_version) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Created</dt>
+                    <dd>{{ formatRuntimeDate(run.created_at) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Completed</dt>
+                    <dd>{{ formatRuntimeDate(run.completed_at) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Latency</dt>
+                    <dd>{{ formatRuntimeMetric(run.latency_ms, ' ms') }}</dd>
+                  </div>
+                  <div>
+                    <dt>Tokens</dt>
+                    <dd>
+                      {{ formatRuntimeMetric(run.total_tokens) }}
+                      <span v-if="run.prompt_tokens != null || run.completion_tokens != null" class="runtime-token-breakdown">
+                        ({{ formatRuntimeMetric(run.prompt_tokens, ' prompt') }},
+                        {{ formatRuntimeMetric(run.completion_tokens, ' completion') }})
+                      </span>
+                    </dd>
+                  </div>
+                </dl>
+
+                <div class="runtime-detail-section">
+                  <h4>Node trace</h4>
+                  <ol v-if="run.node_trace.length" class="runtime-node-list">
+                    <li v-for="node in run.node_trace" :key="node">{{ node }}</li>
+                  </ol>
+                  <p v-else class="muted">No node trace recorded.</p>
                 </div>
-                <p v-else class="muted">No learning signals.</p>
+
+                <div class="runtime-detail-section">
+                  <h4>Learning signals</h4>
+                  <div v-if="run.learning_signals.length" class="signal-list" aria-label="Learning signals detail">
+                    <span v-for="signal in run.learning_signals" :key="`detail-${signal.kind}`" class="signal-chip">
+                      {{ signal.kind }}
+                    </span>
+                  </div>
+                  <p v-else class="muted">No learning signals.</p>
+                </div>
+
+                <p v-if="run.error_message" class="runtime-error">{{ run.error_message }}</p>
               </div>
             </article>
           </div>
@@ -1148,16 +1265,36 @@ onMounted(() => {
 }
 
 .agent-runtime-row {
-  display: grid;
-  grid-template-columns: minmax(128px, 0.28fr) minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
   border: 1px solid rgba(20, 184, 166, 0.28);
   border-radius: 8px;
   background: var(--color-surface);
   box-shadow: 0 10px 28px rgba(15, 118, 110, 0.08);
-  padding: 13px;
   min-width: 0;
+  overflow: hidden;
+}
+
+.agent-runtime-header {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: minmax(128px, 0.28fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 13px;
+  text-align: left;
+  width: 100%;
+}
+
+.agent-runtime-header:hover,
+.agent-runtime-header:focus-visible {
+  background: rgba(240, 253, 250, 0.8);
+}
+
+.agent-runtime-header:focus-visible {
+  outline: 2px solid var(--color-primary-bright);
+  outline-offset: -2px;
 }
 
 .agent-runtime-meta,
@@ -1167,12 +1304,13 @@ onMounted(() => {
   min-width: 0;
 }
 
-.agent-runtime-body h3 {
+.runtime-summary {
   font-size: 16px;
+  font-weight: 800;
   line-height: 1.35;
 }
 
-.agent-runtime-body h3,
+.runtime-summary,
 .runtime-trace {
   overflow-wrap: anywhere;
 }
@@ -1185,12 +1323,80 @@ onMounted(() => {
 }
 
 .runtime-trace {
+  display: block;
   border-left: 3px solid var(--color-primary-bright);
   color: var(--color-muted);
   font-size: 13px;
   line-height: 1.5;
   margin: 0;
   padding-left: 10px;
+}
+
+.agent-runtime-detail {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid rgba(20, 184, 166, 0.2);
+  background: #ffffff;
+  padding: 14px;
+}
+
+.runtime-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.runtime-detail-grid div {
+  min-width: 0;
+}
+
+.runtime-detail-grid dt {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.runtime-detail-grid dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.runtime-token-breakdown {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.runtime-detail-section {
+  display: grid;
+  gap: 8px;
+}
+
+.runtime-detail-section h4 {
+  font-size: 13px;
+  margin: 0;
+}
+
+.runtime-node-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.runtime-node-list li {
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+.runtime-error {
+  border: 1px solid rgba(220, 38, 38, 0.24);
+  border-radius: 8px;
+  background: #fef2f2;
+  color: var(--color-error);
+  margin: 0;
+  padding: 10px;
+  overflow-wrap: anywhere;
 }
 
 .signal-list {
@@ -1487,7 +1693,8 @@ p {
     grid-template-columns: 1fr;
   }
 
-  .agent-runtime-row {
+  .agent-runtime-header,
+  .runtime-detail-grid {
     grid-template-columns: 1fr;
   }
 }

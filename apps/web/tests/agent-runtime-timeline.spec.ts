@@ -167,7 +167,15 @@ describe('StudySpacePage agent runtime timeline', () => {
                 }
               ],
               thread_id: 'thread-runtime-1',
-              checkpoint_backend: 'postgres'
+              graph_name: 'session_tutor',
+              checkpoint_backend: 'memory',
+              state_schema_version: 1,
+              created_at: '2026-05-28T08:00:00.000Z',
+              completed_at: '2026-05-28T08:00:00.320Z',
+              latency_ms: 320,
+              prompt_tokens: 40,
+              completion_tokens: 80,
+              total_tokens: 120
             }
           ]
         })
@@ -184,6 +192,20 @@ describe('StudySpacePage agent runtime timeline', () => {
     expect(wrapper.text()).toContain('Session tutor completed with 2 citations.')
     expect(wrapper.text()).toContain('load_session_context')
     expect(wrapper.text()).toContain('weak_point')
+  })
+
+  it('expands a runtime row with operational details', async () => {
+    const wrapper = mountSpacePage()
+    await flushPromises()
+
+    const runtimeButton = wrapper.get('[data-testid="agent-runtime-row-button"]')
+    await runtimeButton.trigger('click')
+
+    expect(runtimeButton.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.text()).toContain('thread-runtime-1')
+    expect(wrapper.text()).toContain('memory')
+    expect(wrapper.text()).toContain('Latency')
+    expect(wrapper.text()).toContain('Tokens')
   })
 })
 
