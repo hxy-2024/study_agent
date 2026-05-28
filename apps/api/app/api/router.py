@@ -10,6 +10,7 @@ from app.api import (
     routes_retrieval,
     routes_sessions,
     routes_sources,
+    routes_space_planner,
     routes_study_spaces,
     routes_uploads,
 )
@@ -24,5 +25,6 @@ api_router.include_router(routes_quizzes.router)
 api_router.include_router(routes_retrieval.router)
 api_router.include_router(routes_sessions.router)
 api_router.include_router(routes_sources.router)
+api_router.include_router(routes_space_planner.router)
 api_router.include_router(routes_study_spaces.router)
 api_router.include_router(routes_uploads.router)
