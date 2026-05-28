@@ -12,17 +12,13 @@ from app.db.models import (
     Chapter,
     Message,
     MessageCitation,
-    MessageRole,
     Session,
     SessionStatus,
 )
 from app.domain.chapter_mentor.providers import AnswerProvider
-from app.domain.chapter_mentor.service import load_source_filenames
 from app.domain.rag.embeddings import EmbeddingProvider
-from app.domain.rag.retrieval import retrieve_chunks
 from app.domain.sessions.schemas import (
     MessageCreate,
-    MessageCitationCreate,
     MessageCitationResponse,
     MessageResponse,
     SessionCreate,
@@ -319,72 +315,20 @@ async def record_agent_run(
 async def answer_session_message(
     session: AsyncSession,
     tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
     session_id: uuid.UUID,
     content: str,
     embedding_provider: EmbeddingProvider,
     answer_provider: AnswerProvider,
 ) -> MessageResponse:
-    tutor_session = await ensure_session_in_tenant(
+    from app.domain.session_tutor_graph.service import run_session_tutor_graph
+
+    return await run_session_tutor_graph(
         session=session,
         tenant_id=tenant_id,
+        user_id=user_id,
         session_id=session_id,
-    )
-    user_message = await create_message(
-        session=session,
-        tenant_id=tenant_id,
-        session_id=session_id,
-        payload=MessageCreate(role=MessageRole.user, content=content),
-    )
-    chunks = await retrieve_chunks(
-        session=session,
-        tenant_id=tenant_id,
-        study_space_id=tutor_session.study_space_id,
-        query=content,
-        limit=5,
+        content=content,
         embedding_provider=embedding_provider,
+        answer_provider=answer_provider,
     )
-    source_filenames = await load_source_filenames(
-        session=session,
-        tenant_id=tenant_id,
-        study_space_id=tutor_session.study_space_id,
-        source_ids=[chunk.source_id for chunk in chunks],
-    )
-    answer = await answer_provider.answer(
-        question=content,
-        chunks=chunks,
-        source_filenames=source_filenames,
-    )
-    assistant_response = await create_message_with_response(
-        session=session,
-        tenant_id=tenant_id,
-        session_id=session_id,
-        payload=MessageCreate(
-            role=MessageRole.assistant,
-            content=answer.answer,
-            citations=[
-                MessageCitationCreate(
-                    source_id=citation.source_id,
-                    source_chunk_id=citation.chunk_id,
-                    quote=citation.text,
-                    citation={
-                        "source_filename": citation.source_filename,
-                        "chunk_index": citation.chunk_index,
-                    },
-                )
-                for citation in answer.citations
-            ],
-        ),
-    )
-    await record_agent_run(
-        session=session,
-        tenant_id=tenant_id,
-        session_id=session_id,
-        message_id=assistant_response.id,
-        input_payload={"content": content, "user_message_id": str(user_message.id)},
-        output_payload={
-            "assistant_message_id": str(assistant_response.id),
-            "citation_count": len(assistant_response.citations),
-        },
-        model="deterministic",
-    )
-    return assistant_response
