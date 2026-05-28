@@ -277,7 +277,6 @@ import uuid
 from typing import NotRequired, TypedDict
 
 from app.domain.agent_runtime.state import LearningSignal
-from app.domain.chapter_mentor.schemas import ChapterMentorCitationResponse
 
 
 class ChapterSupervision(TypedDict):
@@ -294,6 +293,15 @@ class RetrievedEvidence(TypedDict):
     score: float
 
 
+class AnswerCitation(TypedDict):
+    source_id: str
+    chunk_id: str
+    source_filename: str
+    chunk_index: int
+    text: str
+    score: float
+
+
 class SessionTutorGraphState(TypedDict):
     tenant_id: uuid.UUID
     user_id: uuid.UUID
@@ -304,9 +312,9 @@ class SessionTutorGraphState(TypedDict):
     user_message_id: NotRequired[uuid.UUID]
     assistant_message_id: NotRequired[uuid.UUID]
     retrieved_chunks: NotRequired[list[RetrievedEvidence]]
-    source_filenames: NotRequired[dict[uuid.UUID, str]]
+    source_filenames: NotRequired[dict[str, str]]
     answer: NotRequired[str]
-    citations: NotRequired[list[ChapterMentorCitationResponse]]
+    citations: NotRequired[list[AnswerCitation]]
     chapter_supervision: NotRequired[ChapterSupervision | None]
     learning_signals: list[LearningSignal]
     node_trace: list[str]
@@ -526,6 +534,8 @@ Expected: fail because graph runner does not exist.
 Create `apps/api/app/domain/session_tutor_graph/nodes.py` with node functions:
 
 ```python
+import uuid
+
 from app.db.models import AgentRunStatus, MessageRole
 from app.domain.chapter_mentor.service import load_source_filenames
 from app.domain.chapter_mentor_state.service import get_chapter_mentor_state
@@ -623,7 +633,7 @@ async def retrieve_evidence(
         study_space_id=state["study_space_id"],
         source_ids=[chunk.source_id for chunk in chunks],
     )
-    state["source_filenames"] = source_filenames
+    state["source_filenames"] = {str(source_id): filename for source_id, filename in source_filenames.items()}
     state["_raw_chunks"] = chunks  # type: ignore[typeddict-unknown-key]
     return state
 
@@ -633,10 +643,20 @@ async def generate_answer(state: SessionTutorGraphState, *, answer_provider) -> 
     answer = await answer_provider.answer(
         question=state["content"],
         chunks=state.get("_raw_chunks", []),  # type: ignore[typeddict-item]
-        source_filenames=state.get("source_filenames", {}),
+        source_filenames={uuid.UUID(source_id): filename for source_id, filename in state.get("source_filenames", {}).items()},
     )
     state["answer"] = answer.answer
-    state["citations"] = answer.citations
+    state["citations"] = [
+        {
+            "source_id": str(citation.source_id),
+            "chunk_id": str(citation.chunk_id),
+            "source_filename": citation.source_filename,
+            "chunk_index": citation.chunk_index,
+            "text": citation.text,
+            "score": citation.score,
+        }
+        for citation in answer.citations
+    ]
     return state
 
 
@@ -651,12 +671,12 @@ async def persist_assistant_message(state: SessionTutorGraphState, *, db_session
             content=state["answer"],
             citations=[
                 MessageCitationCreate(
-                    source_id=citation.source_id,
-                    source_chunk_id=citation.chunk_id,
-                    quote=citation.text,
+                    source_id=uuid.UUID(citation["source_id"]),
+                    source_chunk_id=uuid.UUID(citation["chunk_id"]),
+                    quote=citation["text"],
                     citation={
-                        "source_filename": citation.source_filename,
-                        "chunk_index": citation.chunk_index,
+                        "source_filename": citation["source_filename"],
+                        "chunk_index": citation["chunk_index"],
                     },
                 )
                 for citation in state.get("citations", [])
