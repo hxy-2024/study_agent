@@ -28,25 +28,67 @@ def test_build_learning_signals_detects_confusion_and_evidence() -> None:
 
 
 def test_session_tutor_graph_state_accepts_required_ids() -> None:
+    tenant_id = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
     state = SessionTutorGraphState(
-        tenant_id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
-        session_id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
         content="Explain grounded answers.",
         node_trace=[],
         learning_signals=[],
     )
 
+    assert state["tenant_id"] == tenant_id
+    assert state["user_id"] == user_id
+    assert state["session_id"] == session_id
     assert state["content"] == "Explain grounded answers."
     assert state["node_trace"] == []
+    assert SessionTutorGraphState.__annotations__["tenant_id"] is str
+    assert SessionTutorGraphState.__annotations__["user_id"] is str
+    assert SessionTutorGraphState.__annotations__["session_id"] is str
+
+
+def test_session_tutor_graph_state_uses_string_optional_ids_and_evidence_ids() -> None:
+    source_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+    state = SessionTutorGraphState(
+        tenant_id=str(uuid.uuid4()),
+        user_id=str(uuid.uuid4()),
+        session_id=str(uuid.uuid4()),
+        study_space_id=str(uuid.uuid4()),
+        chapter_id=str(uuid.uuid4()),
+        user_message_id=str(uuid.uuid4()),
+        assistant_message_id=str(uuid.uuid4()),
+        content="Explain grounded answers.",
+        retrieved_chunks=[
+            {
+                "source_id": source_id,
+                "chunk_id": chunk_id,
+                "chunk_index": 1,
+                "text": "Evidence",
+                "score": 0.8,
+            }
+        ],
+        node_trace=[],
+        learning_signals=[],
+    )
+
+    assert state["retrieved_chunks"][0]["source_id"] == source_id
+    assert state["retrieved_chunks"][0]["chunk_id"] == chunk_id
+    assert get_args(SessionTutorGraphState.__annotations__["study_space_id"])[0] is str
+    assert get_args(SessionTutorGraphState.__annotations__["chapter_id"])[0] is str
+    assert get_args(SessionTutorGraphState.__annotations__["user_message_id"])[0] is str
+    assert get_args(SessionTutorGraphState.__annotations__["assistant_message_id"])[0] is str
 
 
 def test_session_tutor_graph_state_uses_string_source_filename_keys() -> None:
     source_id = str(uuid.uuid4())
     state = SessionTutorGraphState(
-        tenant_id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
-        session_id=uuid.uuid4(),
+        tenant_id=str(uuid.uuid4()),
+        user_id=str(uuid.uuid4()),
+        session_id=str(uuid.uuid4()),
         content="Explain grounded answers.",
         source_filenames={source_id: "vectors.md"},
         node_trace=[],
@@ -70,9 +112,9 @@ def test_session_tutor_graph_state_uses_json_safe_citation_ids() -> None:
         score=0.87,
     )
     state = SessionTutorGraphState(
-        tenant_id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
-        session_id=uuid.uuid4(),
+        tenant_id=str(uuid.uuid4()),
+        user_id=str(uuid.uuid4()),
+        session_id=str(uuid.uuid4()),
         content="Explain grounded answers.",
         citations=[citation],
         node_trace=[],

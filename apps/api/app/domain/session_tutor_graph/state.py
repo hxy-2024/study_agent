@@ -1,4 +1,3 @@
-import uuid
 from typing import NotRequired, TypedDict
 
 from app.domain.agent_runtime.state import LearningSignal
@@ -11,8 +10,8 @@ class ChapterSupervision(TypedDict):
 
 
 class RetrievedEvidence(TypedDict):
-    source_id: uuid.UUID
-    chunk_id: uuid.UUID
+    source_id: str
+    chunk_id: str
     chunk_index: int
     text: str
     score: float
@@ -51,14 +50,14 @@ class MessageResponsePayload(TypedDict):
 
 
 class SessionTutorGraphState(TypedDict):
-    tenant_id: uuid.UUID
-    user_id: uuid.UUID
-    session_id: uuid.UUID
+    tenant_id: str
+    user_id: str
+    session_id: str
     content: str
-    study_space_id: NotRequired[uuid.UUID]
-    chapter_id: NotRequired[uuid.UUID]
-    user_message_id: NotRequired[uuid.UUID]
-    assistant_message_id: NotRequired[uuid.UUID]
+    study_space_id: NotRequired[str]
+    chapter_id: NotRequired[str]
+    user_message_id: NotRequired[str]
+    assistant_message_id: NotRequired[str]
     retrieved_chunks: NotRequired[list[RetrievedEvidence]]
     source_filenames: NotRequired[dict[str, str]]
     answer: NotRequired[str]

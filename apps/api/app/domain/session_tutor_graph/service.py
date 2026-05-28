@@ -58,9 +58,9 @@ async def run_session_tutor_graph(
         answer_provider=answer_provider,
     )
     initial_state = SessionTutorGraphState(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        session_id=session_id,
+        tenant_id=str(tenant_id),
+        user_id=str(user_id),
+        session_id=str(session_id),
         content=content,
         node_trace=[],
         learning_signals=[],

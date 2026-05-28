@@ -51,10 +51,10 @@ def _retrieved_chunks_from_state(state: SessionTutorGraphState) -> list[Retrieve
     source_filenames = state.get("source_filenames", {})
     return [
         RetrievedChunk(
-            id=evidence["chunk_id"],
-            tenant_id=state["tenant_id"],
-            study_space_id=state["study_space_id"],
-            source_id=evidence["source_id"],
+            id=uuid.UUID(evidence["chunk_id"]),
+            tenant_id=uuid.UUID(state["tenant_id"]),
+            study_space_id=uuid.UUID(state["study_space_id"]),
+            source_id=uuid.UUID(evidence["source_id"]),
             chunk_index=evidence["chunk_index"],
             text=evidence["text"],
             citation={
@@ -79,11 +79,11 @@ async def load_session_context(
     _trace(state, "load_session_context")
     tutor_session = await ensure_session_in_tenant(
         session=db_session,
-        tenant_id=state["tenant_id"],
-        session_id=state["session_id"],
+        tenant_id=uuid.UUID(state["tenant_id"]),
+        session_id=uuid.UUID(state["session_id"]),
     )
-    state["study_space_id"] = tutor_session.study_space_id
-    state["chapter_id"] = tutor_session.chapter_id
+    state["study_space_id"] = str(tutor_session.study_space_id)
+    state["chapter_id"] = str(tutor_session.chapter_id)
     return state
 
 
@@ -95,11 +95,11 @@ async def persist_user_message(
     _trace(state, "persist_user_message")
     message = await create_message(
         session=db_session,
-        tenant_id=state["tenant_id"],
-        session_id=state["session_id"],
+        tenant_id=uuid.UUID(state["tenant_id"]),
+        session_id=uuid.UUID(state["session_id"]),
         payload=MessageCreate(role=MessageRole.user, content=state["content"]),
     )
-    state["user_message_id"] = message.id
+    state["user_message_id"] = str(message.id)
     return state
 
 
@@ -111,8 +111,8 @@ async def load_chapter_supervision(
     _trace(state, "load_chapter_supervision")
     mentor_state = await get_chapter_mentor_state(
         session=db_session,
-        tenant_id=state["tenant_id"],
-        chapter_id=state["chapter_id"],
+        tenant_id=uuid.UUID(state["tenant_id"]),
+        chapter_id=uuid.UUID(state["chapter_id"]),
     )
     state["chapter_supervision"] = (
         ChapterSupervision(
@@ -135,22 +135,22 @@ async def retrieve_evidence(
     _trace(state, "retrieve_evidence")
     chunks = await retrieve_chunks(
         session=db_session,
-        tenant_id=state["tenant_id"],
-        study_space_id=state["study_space_id"],
+        tenant_id=uuid.UUID(state["tenant_id"]),
+        study_space_id=uuid.UUID(state["study_space_id"]),
         query=state["content"],
         limit=5,
         embedding_provider=embedding_provider,
     )
     source_filenames = await load_source_filenames(
         session=db_session,
-        tenant_id=state["tenant_id"],
-        study_space_id=state["study_space_id"],
+        tenant_id=uuid.UUID(state["tenant_id"]),
+        study_space_id=uuid.UUID(state["study_space_id"]),
         source_ids=[chunk.source_id for chunk in chunks],
     )
     state["retrieved_chunks"] = [
         RetrievedEvidence(
-            source_id=chunk.source_id,
-            chunk_id=chunk.id,
+            source_id=str(chunk.source_id),
+            chunk_id=str(chunk.id),
             chunk_index=chunk.chunk_index,
             text=chunk.text,
             score=chunk.score,
@@ -224,8 +224,8 @@ async def persist_assistant_message(
     _trace(state, "persist_assistant_message")
     response = await create_message_with_response(
         session=db_session,
-        tenant_id=state["tenant_id"],
-        session_id=state["session_id"],
+        tenant_id=uuid.UUID(state["tenant_id"]),
+        session_id=uuid.UUID(state["session_id"]),
         payload=MessageCreate(
             role=MessageRole.assistant,
             content=state["answer"],
@@ -243,7 +243,7 @@ async def persist_assistant_message(
             ],
         ),
     )
-    state["assistant_message_id"] = response.id
+    state["assistant_message_id"] = str(response.id)
     state["assistant_response"] = _message_response_payload(response)
     return state
 
@@ -264,11 +264,12 @@ async def record_graph_agent_run(
     db_session,
 ) -> SessionTutorGraphState:
     _trace(state, "record_agent_run")
+    assistant_message_id = state.get("assistant_message_id")
     await record_agent_run(
         session=db_session,
-        tenant_id=state["tenant_id"],
-        session_id=state["session_id"],
-        message_id=state.get("assistant_message_id"),
+        tenant_id=uuid.UUID(state["tenant_id"]),
+        session_id=uuid.UUID(state["session_id"]),
+        message_id=uuid.UUID(assistant_message_id) if assistant_message_id else None,
         input_payload={
             "content": state["content"],
             "user_message_id": str(state.get("user_message_id")),

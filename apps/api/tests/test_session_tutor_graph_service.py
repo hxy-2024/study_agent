@@ -85,15 +85,8 @@ async def test_graph_records_messages_agent_run_and_supervision(monkeypatch) -> 
     ]
 
     class FakeSession:
-        async def scalar(self, _statement):
-            if not hasattr(self, "scalar_calls"):
-                self.scalar_calls = 0
-            self.scalar_calls += 1
-            if self.scalar_calls == 1:
-                return tutor_session
-            if self.scalar_calls == 2:
-                return tutor_session
-            if self.scalar_calls == 3:
+        async def scalar(self, statement):
+            if "chapter_mentor_states" in str(statement):
                 return mentor_state
             return tutor_session
 
@@ -112,10 +105,14 @@ async def test_graph_records_messages_agent_run_and_supervision(monkeypatch) -> 
             if getattr(obj, "id", None) is None:
                 obj.id = uuid.uuid4()
 
-    async def fake_retrieve_chunks(**_kwargs):
+    async def fake_retrieve_chunks(**kwargs):
+        assert kwargs["tenant_id"] == tenant_id
+        assert kwargs["study_space_id"] == study_space_id
         return retrieved
 
-    async def fake_load_source_filenames(**_kwargs):
+    async def fake_load_source_filenames(**kwargs):
+        assert kwargs["tenant_id"] == tenant_id
+        assert kwargs["study_space_id"] == study_space_id
         return {source_id: "notes.md"}
 
     monkeypatch.setattr(
