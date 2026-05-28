@@ -27,6 +27,29 @@ class AnswerCitation(TypedDict):
     score: float
 
 
+class MessageCitationPayload(TypedDict):
+    id: str
+    message_id: str
+    source_id: str
+    source_chunk_id: str
+    chunk_id: str
+    source_filename: str
+    chunk_index: int
+    text: str
+    quote: str
+    citation: dict
+
+
+class MessageResponsePayload(TypedDict):
+    id: str
+    session_id: str
+    role: str
+    content: str
+    metadata: dict
+    citations: list[MessageCitationPayload]
+    created_at: str | None
+
+
 class SessionTutorGraphState(TypedDict):
     tenant_id: uuid.UUID
     user_id: uuid.UUID
@@ -40,6 +63,7 @@ class SessionTutorGraphState(TypedDict):
     source_filenames: NotRequired[dict[str, str]]
     answer: NotRequired[str]
     citations: NotRequired[list[AnswerCitation]]
+    assistant_response: NotRequired[MessageResponsePayload]
     chapter_supervision: NotRequired[ChapterSupervision | None]
     learning_signals: list[LearningSignal]
     node_trace: list[str]
