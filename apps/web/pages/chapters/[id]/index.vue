@@ -94,6 +94,20 @@ interface QuizSummary {
   question_count: number
 }
 
+interface PlannerAction {
+  id: string
+  study_space_id: string
+  chapter_id: string | null
+  source_planner_state_id?: string | null
+  action_type: string
+  status: string
+  title: string
+  rationale: string
+  payload: Record<string, unknown>
+  created_at?: string | null
+  updated_at?: string | null
+}
+
 const DEV_AUTH_HEADERS = {
   'X-User-Id': '00000000-0000-0000-0000-000000000002',
   'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
@@ -117,6 +131,9 @@ const mentorState = ref<ChapterMentorState | null>(null)
 const updatingMentorState = ref(false)
 const mastery = ref<MasteryRecord | null>(null)
 const generatingQuiz = ref(false)
+const plannerActions = ref<PlannerAction[]>([])
+const loadingPlannerActions = ref(false)
+const updatingPlannerActionId = ref<string | null>(null)
 
 const chapter = computed(() => detail.value?.chapter ?? null)
 const evidence = computed(() => detail.value?.evidence ?? [])
@@ -133,6 +150,16 @@ const masteryLabel = computed(() => {
   return `Mastery: ${mastery.value.level} ${mastery.value.score_percent}%`
 })
 const quizWeakPoint = computed(() => mastery.value?.weak_points?.[0] ?? null)
+const activeReviewActions = computed(() => {
+  return plannerActions.value.filter(action => {
+    return (
+      action.chapter_id === chapterId.value &&
+      action.action_type === 'review_chapter' &&
+      action.status !== 'completed' &&
+      action.status !== 'dismissed'
+    )
+  })
+})
 
 function protectedHeaders() {
   return DEV_AUTH_HEADERS
@@ -155,6 +182,10 @@ function normalizeSessions(response: MentorSession[] | { sessions?: MentorSessio
 
 function normalizeMessages(response: MentorMessage[] | { messages?: MentorMessage[] }) {
   return Array.isArray(response) ? response : response.messages ?? []
+}
+
+function normalizePlannerActions(response: PlannerAction[] | { actions?: PlannerAction[] }) {
+  return Array.isArray(response) ? response : response.actions ?? []
 }
 
 function isMasteryRecord(response: unknown): response is MasteryRecord {
@@ -181,10 +212,27 @@ async function loadChapter() {
       `${config.public.apiBaseUrl}/chapters/${chapterId.value}`,
       { headers: protectedHeaders() }
     )
+    await loadPlannerActions(detail.value.chapter.study_space_id)
   } catch (error) {
     errorMessage.value = appendBackendMessage('Failed to load chapter.', error)
+    plannerActions.value = []
   } finally {
     loading.value = false
+  }
+}
+
+async function loadPlannerActions(studySpaceId: string) {
+  loadingPlannerActions.value = true
+  try {
+    const response = await $fetch<PlannerAction[] | { actions?: PlannerAction[] }>(
+      `${config.public.apiBaseUrl}/study-spaces/${studySpaceId}/planner-actions`,
+      { headers: protectedHeaders() }
+    )
+    plannerActions.value = normalizePlannerActions(response)
+  } catch {
+    plannerActions.value = []
+  } finally {
+    loadingPlannerActions.value = false
   }
 }
 
@@ -311,6 +359,28 @@ async function generateQuiz() {
     errorMessage.value = appendBackendMessage('Failed to generate quiz.', error)
   } finally {
     generatingQuiz.value = false
+  }
+}
+
+async function updatePlannerAction(action: PlannerAction, status: string) {
+  updatingPlannerActionId.value = action.id
+  errorMessage.value = ''
+  try {
+    const updatedAction = await $fetch<PlannerAction>(
+      `${config.public.apiBaseUrl}/planner-actions/${action.id}/status`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: { status }
+      }
+    )
+    plannerActions.value = plannerActions.value.map(existingAction =>
+      existingAction.id === updatedAction.id ? updatedAction : existingAction
+    )
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to update planner action.', error)
+  } finally {
+    updatingPlannerActionId.value = null
   }
 }
 
@@ -467,6 +537,66 @@ onMounted(() => {
         </div>
       </section>
 
+      <section class="card review-callout">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Planner review</p>
+            <h2>Queued review actions</h2>
+          </div>
+          <span v-if="activeReviewActions.length" class="review-count">
+            {{ activeReviewActions.length }} queued
+          </span>
+        </div>
+
+        <p v-if="loadingPlannerActions" class="muted">Loading review actions...</p>
+        <div v-else-if="activeReviewActions.length" class="review-action-list">
+          <article
+            v-for="action in activeReviewActions"
+            :key="action.id"
+            class="review-action-row"
+          >
+            <div class="review-action-copy">
+              <div class="review-action-title">
+                <h3>{{ action.title }}</h3>
+                <span class="status-badge">{{ action.status }}</span>
+              </div>
+              <p>{{ action.rationale }}</p>
+            </div>
+            <div class="review-action-buttons">
+              <button
+                v-if="action.status === 'proposed'"
+                data-testid="accept-review-action"
+                class="primary-button"
+                type="button"
+                :disabled="updatingPlannerActionId === action.id"
+                @click="updatePlannerAction(action, 'accepted')"
+              >
+                Accept
+              </button>
+              <button
+                v-if="action.status !== 'completed'"
+                class="secondary-button"
+                type="button"
+                :disabled="updatingPlannerActionId === action.id"
+                @click="updatePlannerAction(action, 'completed')"
+              >
+                Complete
+              </button>
+              <button
+                v-if="action.status === 'proposed'"
+                class="secondary-button"
+                type="button"
+                :disabled="updatingPlannerActionId === action.id"
+                @click="updatePlannerAction(action, 'dismissed')"
+              >
+                Dismiss
+              </button>
+            </div>
+          </article>
+        </div>
+        <p v-else class="empty-state">No queued review actions for this chapter.</p>
+      </section>
+
       <div class="study-grid">
         <section class="card evidence-panel">
           <div class="section-heading">
@@ -607,6 +737,7 @@ onMounted(() => {
 .chapter-summary,
 .chapter-state-panel,
 .quiz-panel,
+.review-callout,
 .evidence-panel,
 .mentor-panel {
   display: grid;
@@ -652,6 +783,71 @@ onMounted(() => {
 
 .quiz-action {
   flex: 0 0 auto;
+}
+
+.review-callout {
+  border-color: rgba(20, 184, 166, 0.24);
+  background:
+    linear-gradient(135deg, rgba(204, 251, 241, 0.46), rgba(255, 255, 255, 0.82)),
+    var(--color-card);
+}
+
+.review-count {
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.review-action-list {
+  display: grid;
+  gap: 12px;
+}
+
+.review-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid rgba(20, 184, 166, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+  padding: 14px;
+}
+
+.review-action-copy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.review-action-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.review-action-title h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.review-action-copy p {
+  margin: 0;
+  color: var(--color-muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.review-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .state-summary {
@@ -868,9 +1064,22 @@ onMounted(() => {
   .chapter-actions,
   .section-heading,
   .evidence-header,
-  .quiz-content {
+  .quiz-content,
+  .review-action-title {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .review-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .review-action-buttons {
+    justify-content: stretch;
+  }
+
+  .review-action-buttons button {
+    flex: 1 1 120px;
   }
 
   .mentor-panel {
