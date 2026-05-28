@@ -309,9 +309,9 @@ function normalizeAgentRuns(response: { runs?: AgentRunTimelineItem[] } | null |
 
 function agentTypeLabel(agentType: string) {
   const labels: Record<string, string> = {
-    l1_planner: 'L1 Planner',
-    l2_mentor: 'L2 Mentor',
-    l3_tutor: 'L3 Tutor'
+    space_planner: 'L1 Planner',
+    chapter_mentor: 'L2 Mentor',
+    session_tutor: 'L3 Tutor'
   }
   return labels[agentType] ?? agentType
 }

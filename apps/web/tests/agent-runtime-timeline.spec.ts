@@ -97,7 +97,7 @@ describe('StudySpacePage agent runtime timeline', () => {
           runs: [
             {
               id: '00000000-0000-0000-0000-000000000901',
-              agent_type: 'l3_tutor',
+              agent_type: 'session_tutor',
               status: 'completed',
               summary: 'Session tutor completed with 2 citations.',
               node_trace: ['load_session_context', 'retrieve_evidence', 'answer_with_citations'],
