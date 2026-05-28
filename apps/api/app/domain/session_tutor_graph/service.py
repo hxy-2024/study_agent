@@ -63,6 +63,13 @@ async def _try_record_failed_agent_run(
     if user_message_id is None:
         return
 
+    rollback = getattr(session, "rollback", None)
+    if rollback is not None:
+        try:
+            await rollback()
+        except Exception:
+            LOGGER.exception("Failed to roll back before recording graph failure")
+
     try:
         await record_agent_run(
             session=session,
