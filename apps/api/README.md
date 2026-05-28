@@ -85,6 +85,11 @@ The endpoints use `CurrentUserContext` for tenant scope. They are intended for
 debugging and product visibility into the three-layer agent design: L1 Space
 Planner, L2 Chapter Mentor, and L3 Session Tutor.
 
+Timeline rows include drilldown fields for graph metadata, node trace, learning
+signals, error messages, completion time, latency, and token counts. Raw prompts
+and full input/output payloads are intentionally not exposed in this UI-facing
+contract.
+
 ## Chapter mentor state
 
 The Chapter Mentor State Agent aggregates tutor sessions for one chapter into a
