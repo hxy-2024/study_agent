@@ -41,6 +41,16 @@ class FakeAnswerProvider:
         )
 
 
+class FailingAnswerProvider:
+    async def answer(
+        self,
+        question: str,
+        chunks: list[RetrievedChunk],
+        source_filenames: dict[uuid.UUID, str],
+    ) -> ChapterMentorResponse:
+        raise RuntimeError("provider unavailable")
+
+
 @pytest.mark.anyio
 async def test_graph_records_messages_agent_run_and_supervision(monkeypatch) -> None:
     tenant_id = uuid.uuid4()
@@ -147,3 +157,84 @@ async def test_graph_records_messages_agent_run_and_supervision(monkeypatch) -> 
         signal["type"] == "confusion_detected"
         for signal in runs[0].output_payload["learning_signals"]
     )
+
+
+@pytest.mark.anyio
+async def test_graph_records_failed_agent_run_after_user_message(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    added = []
+
+    tutor_session = SimpleNamespace(
+        id=session_id,
+        tenant_id=tenant_id,
+        study_space_id=study_space_id,
+        chapter_id=chapter_id,
+    )
+
+    class FakeSession:
+        async def scalar(self, statement):
+            if "chapter_mentor_states" in str(statement):
+                return None
+            return tutor_session
+
+        def add(self, obj) -> None:
+            added.append(obj)
+
+        async def flush(self) -> None:
+            for obj in added:
+                if getattr(obj, "id", None) is None:
+                    obj.id = uuid.uuid4()
+
+        async def commit(self) -> None:
+            pass
+
+        async def refresh(self, obj) -> None:
+            if getattr(obj, "id", None) is None:
+                obj.id = uuid.uuid4()
+
+    async def fake_retrieve_chunks(**_kwargs):
+        return []
+
+    async def fake_load_source_filenames(**_kwargs):
+        return {}
+
+    monkeypatch.setattr(
+        "app.domain.session_tutor_graph.nodes.retrieve_chunks",
+        fake_retrieve_chunks,
+    )
+    monkeypatch.setattr(
+        "app.domain.session_tutor_graph.nodes.load_source_filenames",
+        fake_load_source_filenames,
+    )
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await run_session_tutor_graph(
+            session=FakeSession(),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id,
+            content="Explain failure handling.",
+            embedding_provider=FakeEmbeddingProvider(),
+            answer_provider=FailingAnswerProvider(),
+        )
+
+    messages = [obj for obj in added if isinstance(obj, Message)]
+    runs = [obj for obj in added if isinstance(obj, AgentRun)]
+    assert len(messages) == 1
+    assert messages[0].role == MessageRole.user
+    assert len(runs) == 1
+    assert runs[0].status.value == "failed"
+    assert runs[0].error_message == "provider unavailable"
+    assert runs[0].input_payload["content"] == "Explain failure handling."
+    assert runs[0].input_payload["user_message_id"] == str(messages[0].id)
+    assert runs[0].input_payload["node_trace"] == [
+        "load_session_context",
+        "persist_user_message",
+        "load_chapter_supervision",
+        "retrieve_evidence",
+        "generate_answer",
+    ]

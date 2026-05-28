@@ -52,6 +52,20 @@ LLM_TIMEOUT_SECONDS=30
 
 When `LLM_API_KEY` is empty, the API falls back to the deterministic provider.
 
+## Session Tutor LangGraph
+
+The session tutor message endpoint is backed by a LangGraph workflow. The route
+contract remains unchanged: clients post a learner message and receive an
+assistant `MessageResponse` with citations. Internally the graph loads session
+context, stores the user message, reads optional Chapter Mentor state, retrieves
+RAG evidence, generates a grounded answer, stores the assistant message, emits
+learning signals, and records an `agent_runs` row.
+
+The graph is the L3 execution agent in the three-layer design. It does not
+mutate learning routes or planner actions. L1/L2 supervision is represented
+through Chapter Mentor context and `learning_signals` in
+`agent_runs.output_payload`.
+
 ## Chapter mentor state
 
 The Chapter Mentor State Agent aggregates tutor sessions for one chapter into a
