@@ -66,6 +66,12 @@ mutate learning routes or planner actions. L1/L2 supervision is represented
 through Chapter Mentor context and `learning_signals` in
 `agent_runs.output_payload`.
 
+Graph-backed Session Tutor runs include standardized runtime metadata in
+`agent_runs`: `graph_name`, `thread_id`, `checkpoint_backend`,
+`state_schema_version`, and `node_trace`. The default checkpoint backend is
+`memory`; `postgres` is reserved and fails closed until production checkpoint
+storage is configured.
+
 ## Chapter mentor state
 
 The Chapter Mentor State Agent aggregates tutor sessions for one chapter into a
