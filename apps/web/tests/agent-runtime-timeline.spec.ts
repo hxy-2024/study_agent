@@ -256,7 +256,15 @@ describe('ChapterPage agent runtime timeline', () => {
                 }
               ],
               thread_id: 'thread-runtime-chapter',
-              checkpoint_backend: 'postgres'
+              graph_name: 'chapter_mentor',
+              checkpoint_backend: 'memory',
+              state_schema_version: 1,
+              created_at: '2026-05-28T08:05:00.000Z',
+              completed_at: '2026-05-28T08:05:00.410Z',
+              latency_ms: 410,
+              prompt_tokens: 30,
+              completion_tokens: 60,
+              total_tokens: 90
             },
             {
               id: '00000000-0000-0000-0000-000000000905',
@@ -284,5 +292,18 @@ describe('ChapterPage agent runtime timeline', () => {
     expect(wrapper.text()).toContain('L3 Tutor')
     expect(wrapper.text()).toContain('Chapter mentor state refreshed.')
     expect(wrapper.text()).toContain('retrieve_evidence')
+  })
+
+  it('expands a chapter runtime row with operational details', async () => {
+    const wrapper = mountChapterPage()
+    await flushPromises()
+
+    const runtimeButton = wrapper.get('[data-testid="chapter-runtime-row-button"]')
+    await runtimeButton.trigger('click')
+
+    expect(runtimeButton.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.text()).toContain('thread-runtime-chapter')
+    expect(wrapper.text()).toContain('retrieve_evidence')
+    expect(wrapper.text()).toContain('Tokens')
   })
 })
