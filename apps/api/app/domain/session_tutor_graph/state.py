@@ -2,7 +2,6 @@ import uuid
 from typing import NotRequired, TypedDict
 
 from app.domain.agent_runtime.state import LearningSignal
-from app.domain.chapter_mentor.schemas import ChapterMentorCitationResponse
 
 
 class ChapterSupervision(TypedDict):
@@ -19,6 +18,15 @@ class RetrievedEvidence(TypedDict):
     score: float
 
 
+class AnswerCitation(TypedDict):
+    source_id: str
+    chunk_id: str
+    source_filename: str
+    chunk_index: int
+    text: str
+    score: float
+
+
 class SessionTutorGraphState(TypedDict):
     tenant_id: uuid.UUID
     user_id: uuid.UUID
@@ -29,9 +37,9 @@ class SessionTutorGraphState(TypedDict):
     user_message_id: NotRequired[uuid.UUID]
     assistant_message_id: NotRequired[uuid.UUID]
     retrieved_chunks: NotRequired[list[RetrievedEvidence]]
-    source_filenames: NotRequired[dict[uuid.UUID, str]]
+    source_filenames: NotRequired[dict[str, str]]
     answer: NotRequired[str]
-    citations: NotRequired[list[ChapterMentorCitationResponse]]
+    citations: NotRequired[list[AnswerCitation]]
     chapter_supervision: NotRequired[ChapterSupervision | None]
     learning_signals: list[LearningSignal]
     node_trace: list[str]
