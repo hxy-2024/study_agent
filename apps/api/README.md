@@ -67,6 +67,22 @@ client-supplied tenant IDs. Each run records an `agent_runs` row with
 `agent_type=chapter_mentor`. Local generation is deterministic for repeatable
 tests and can be replaced behind the domain service boundary later.
 
+## Quiz + mastery
+
+The quiz domain adds deterministic user-scoped chapter quizzes and mastery records.
+
+Endpoints:
+
+- `POST /api/v1/chapters/{chapter_id}/quizzes/generate`
+- `GET /api/v1/quizzes/{quiz_id}`
+- `POST /api/v1/quizzes/{quiz_id}/submit`
+- `GET /api/v1/quizzes/{quiz_id}/result`
+- `GET /api/v1/chapters/{chapter_id}/mastery`
+
+Generation is deterministic in this phase. Quiz submissions update the current
+user's latest chapter mastery record; review cards, spaced repetition, and LLM
+quiz generation are separate later phases.
+
 ## Runtime source ingestion
 
 Local text/Markdown ingestion flow:

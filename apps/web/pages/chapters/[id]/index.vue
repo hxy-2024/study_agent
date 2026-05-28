@@ -78,6 +78,22 @@ interface ChapterMentorState {
   updated_at?: string
 }
 
+interface MasteryRecord {
+  id: string
+  chapter_id: string
+  level: string
+  score_percent: number
+  weak_points: string[]
+  last_quiz_submission_id?: string
+  updated_at?: string
+}
+
+interface QuizSummary {
+  id: string
+  chapter_id: string
+  question_count: number
+}
+
 const DEV_AUTH_HEADERS = {
   'X-User-Id': '00000000-0000-0000-0000-000000000002',
   'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
@@ -99,6 +115,8 @@ const mentorSession = ref<MentorSession | null>(null)
 const mentorMessages = ref<MentorMessage[]>([])
 const mentorState = ref<ChapterMentorState | null>(null)
 const updatingMentorState = ref(false)
+const mastery = ref<MasteryRecord | null>(null)
+const generatingQuiz = ref(false)
 
 const chapter = computed(() => detail.value?.chapter ?? null)
 const evidence = computed(() => detail.value?.evidence ?? [])
@@ -110,6 +128,11 @@ const hasMentorState = computed(() => {
       mentorState.value?.next_actions?.length
   )
 })
+const masteryLabel = computed(() => {
+  if (!mastery.value) return 'Mastery: not started'
+  return `Mastery: ${mastery.value.level} ${mastery.value.score_percent}%`
+})
+const quizWeakPoint = computed(() => mastery.value?.weak_points?.[0] ?? null)
 
 function protectedHeaders() {
   return DEV_AUTH_HEADERS
@@ -134,6 +157,12 @@ function normalizeMessages(response: MentorMessage[] | { messages?: MentorMessag
   return Array.isArray(response) ? response : response.messages ?? []
 }
 
+function isMasteryRecord(response: unknown): response is MasteryRecord {
+  if (!response || typeof response !== 'object') return false
+  const candidate = response as Partial<MasteryRecord>
+  return typeof candidate.level === 'string' && typeof candidate.score_percent === 'number'
+}
+
 function localUserMessage(sessionId: string, content: string): MentorMessage {
   return {
     id: `local-user-${Date.now()}`,
@@ -156,6 +185,18 @@ async function loadChapter() {
     errorMessage.value = appendBackendMessage('Failed to load chapter.', error)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadMastery() {
+  try {
+    const response = await $fetch<MasteryRecord>(
+      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/mastery`,
+      { headers: protectedHeaders() }
+    )
+    mastery.value = isMasteryRecord(response) ? response : null
+  } catch {
+    mastery.value = null
   }
 }
 
@@ -251,6 +292,28 @@ async function runChapterSummary() {
   }
 }
 
+async function generateQuiz() {
+  if (!chapter.value) return
+
+  generatingQuiz.value = true
+  errorMessage.value = ''
+  try {
+    const quiz = await $fetch<QuizSummary>(
+      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/quizzes/generate`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: { question_count: 3 }
+      }
+    )
+    await navigateTo(`/quizzes/${quiz.id}`)
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to generate quiz.', error)
+  } finally {
+    generatingQuiz.value = false
+  }
+}
+
 async function askMentor() {
   const question = mentorQuestion.value.trim()
   if (!chapter.value || !question) return
@@ -280,6 +343,7 @@ onMounted(() => {
   loadChapter()
   loadMentorSession()
   loadMentorState()
+  loadMastery()
 })
 </script>
 
@@ -373,6 +437,34 @@ onMounted(() => {
         <p v-else class="empty-state">
           No chapter mentor state yet. Update after asking the mentor a few questions.
         </p>
+      </section>
+
+      <section class="card quiz-panel">
+        <div class="section-heading quiz-heading">
+          <div>
+            <p class="eyebrow">Quiz</p>
+            <h2>Check understanding</h2>
+          </div>
+          <span class="mastery-badge">{{ masteryLabel }}</span>
+        </div>
+
+        <div class="quiz-content">
+          <p v-if="quizWeakPoint" class="quiz-prompt">
+            Focus this quiz on the current weak point: <strong>{{ quizWeakPoint }}</strong>
+          </p>
+          <p v-else class="quiz-prompt">
+            Generate a short check-in quiz for this chapter when you are ready to test recall.
+          </p>
+          <button
+            data-testid="generate-quiz"
+            class="primary-button quiz-action"
+            type="button"
+            :disabled="generatingQuiz"
+            @click="generateQuiz"
+          >
+            {{ generatingQuiz ? 'Generating...' : 'Generate quiz' }}
+          </button>
+        </div>
       </section>
 
       <div class="study-grid">
@@ -514,10 +606,52 @@ onMounted(() => {
 
 .chapter-summary,
 .chapter-state-panel,
+.quiz-panel,
 .evidence-panel,
 .mentor-panel {
   display: grid;
   gap: 16px;
+}
+
+.quiz-panel {
+  border-color: rgba(20, 184, 166, 0.22);
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.1), rgba(240, 253, 250, 0.64)),
+    var(--color-card);
+}
+
+.quiz-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.quiz-prompt {
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.quiz-prompt strong {
+  color: var(--color-primary);
+  overflow-wrap: anywhere;
+}
+
+.mastery-badge {
+  border: 1px solid rgba(20, 184, 166, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--color-primary);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.quiz-action {
+  flex: 0 0 auto;
 }
 
 .state-summary {
@@ -733,7 +867,8 @@ onMounted(() => {
   .chapter-heading,
   .chapter-actions,
   .section-heading,
-  .evidence-header {
+  .evidence-header,
+  .quiz-content {
     align-items: stretch;
     flex-direction: column;
   }

@@ -43,6 +43,19 @@ class ChapterStatus(str, enum.Enum):
     completed = "completed"
 
 
+class QuizStatus(str, enum.Enum):
+    draft = "draft"
+    active = "active"
+    submitted = "submitted"
+
+
+class MasteryLevel(str, enum.Enum):
+    new = "new"
+    developing = "developing"
+    proficient = "proficient"
+    mastered = "mastered"
+
+
 class SessionStatus(str, enum.Enum):
     active = "active"
     archived = "archived"
@@ -118,6 +131,8 @@ class StudySpace(Base):
     chapters: Mapped[list["Chapter"]] = relationship(back_populates="study_space")
     sessions: Mapped[list["Session"]] = relationship(back_populates="study_space")
     chapter_mentor_states: Mapped[list["ChapterMentorState"]] = relationship(back_populates="study_space")
+    quizzes: Mapped[list["Quiz"]] = relationship(back_populates="study_space")
+    mastery_records: Mapped[list["MasteryRecord"]] = relationship(back_populates="study_space")
 
 
 class Source(Base):
@@ -241,6 +256,8 @@ class Chapter(Base):
     learning_route: Mapped["LearningRoute"] = relationship(back_populates="chapters")
     sessions: Mapped[list["Session"]] = relationship(back_populates="chapter")
     mentor_state: Mapped["ChapterMentorState"] = relationship(back_populates="chapter")
+    quizzes: Mapped[list["Quiz"]] = relationship(back_populates="chapter")
+    mastery_records: Mapped[list["MasteryRecord"]] = relationship(back_populates="chapter")
 
 
 class ChapterMentorState(Base):
@@ -264,6 +281,102 @@ class ChapterMentorState(Base):
 
     study_space: Mapped["StudySpace"] = relationship(back_populates="chapter_mentor_states")
     chapter: Mapped["Chapter"] = relationship(back_populates="mentor_state")
+
+
+class Quiz(Base):
+    __tablename__ = "quizzes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
+    chapter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chapters.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[QuizStatus] = mapped_column(
+        Enum(QuizStatus, name="quiz_status"),
+        nullable=False,
+        default=QuizStatus.active,
+    )
+    generation_strategy: Mapped[str] = mapped_column(String(80), nullable=False, default="deterministic")
+    question_count: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    study_space: Mapped["StudySpace"] = relationship(back_populates="quizzes")
+    chapter: Mapped["Chapter"] = relationship(back_populates="quizzes")
+    questions: Mapped[list["QuizQuestion"]] = relationship(back_populates="quiz")
+    submissions: Mapped[list["QuizSubmission"]] = relationship(back_populates="quiz")
+
+
+class QuizQuestion(Base):
+    __tablename__ = "quiz_questions"
+    __table_args__ = (
+        UniqueConstraint("quiz_id", "order_index", name="uq_quiz_questions_quiz_order"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    quiz_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("quizzes.id"), nullable=False, index=True)
+    chapter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chapters.id"), nullable=False, index=True)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    options: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    correct_option_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    quiz: Mapped["Quiz"] = relationship(back_populates="questions")
+
+
+class QuizSubmission(Base):
+    __tablename__ = "quiz_submissions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    quiz_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("quizzes.id"), nullable=False, index=True)
+    chapter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chapters.id"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    answers: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list)
+    score_percent: Mapped[int] = mapped_column(Integer, nullable=False)
+    correct_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    question_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    results: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    weak_points: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    quiz: Mapped["Quiz"] = relationship(back_populates="submissions")
+    mastery_records: Mapped[list["MasteryRecord"]] = relationship(back_populates="last_quiz_submission")
+
+
+class MasteryRecord(Base):
+    __tablename__ = "mastery_records"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "chapter_id", "user_id", name="uq_mastery_records_tenant_chapter_user"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
+    chapter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chapters.id"), nullable=False, index=True)
+    score_percent: Mapped[int] = mapped_column(Integer, nullable=False)
+    level: Mapped[MasteryLevel] = mapped_column(
+        Enum(MasteryLevel, name="mastery_level"),
+        nullable=False,
+        default=MasteryLevel.new,
+    )
+    weak_points: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    last_quiz_submission_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("quiz_submissions.id"),
+        nullable=False,
+        index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    study_space: Mapped["StudySpace"] = relationship(back_populates="mastery_records")
+    chapter: Mapped["Chapter"] = relationship(back_populates="mastery_records")
+    last_quiz_submission: Mapped["QuizSubmission"] = relationship(back_populates="mastery_records")
 
 
 class Session(Base):
