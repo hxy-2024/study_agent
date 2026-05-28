@@ -133,6 +133,7 @@ class StudySpace(Base):
     chapter_mentor_states: Mapped[list["ChapterMentorState"]] = relationship(back_populates="study_space")
     quizzes: Mapped[list["Quiz"]] = relationship(back_populates="study_space")
     mastery_records: Mapped[list["MasteryRecord"]] = relationship(back_populates="study_space")
+    space_planner_states: Mapped[list["SpacePlannerState"]] = relationship(back_populates="study_space")
 
 
 class Source(Base):
@@ -377,6 +378,33 @@ class MasteryRecord(Base):
     study_space: Mapped["StudySpace"] = relationship(back_populates="mastery_records")
     chapter: Mapped["Chapter"] = relationship(back_populates="mastery_records")
     last_quiz_submission: Mapped["QuizSubmission"] = relationship(back_populates="mastery_records")
+
+
+class SpacePlannerState(Base):
+    __tablename__ = "space_planner_states"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "study_space_id",
+            "user_id",
+            name="uq_space_planner_states_tenant_space_user",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    next_chapter_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chapters.id"), nullable=True, index=True)
+    risk_chapters: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    review_recommendations: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    route_adjustments: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    evidence: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    study_space: Mapped["StudySpace"] = relationship(back_populates="space_planner_states")
 
 
 class Session(Base):
