@@ -1,3 +1,5 @@
+import pytest
+
 from app.core.config import Settings
 from app.domain.agent_runtime.config import graph_runtime_config_from_settings
 
@@ -17,3 +19,10 @@ def test_graph_runtime_config_accepts_none_checkpoint_backend() -> None:
     config = graph_runtime_config_from_settings(settings)
 
     assert config.checkpoint_backend == "none"
+
+
+def test_graph_runtime_config_rejects_unknown_checkpoint_backend() -> None:
+    settings = Settings(session_tutor_graph_checkpoint_backend="bad")
+
+    with pytest.raises(ValueError):
+        graph_runtime_config_from_settings(settings)
