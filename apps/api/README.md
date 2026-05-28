@@ -81,6 +81,10 @@ client-supplied tenant IDs. Each run records an `agent_runs` row with
 `agent_type=chapter_mentor`. Local generation is deterministic for repeatable
 tests and can be replaced behind the domain service boundary later.
 
+Chapter Mentor state generation also reads Session Tutor `learning_signals`
+from completed graph-backed tutor runs. Those signals enrich weak points,
+next actions, and evidence without changing the public API response shape.
+
 ## Quiz + mastery
 
 The quiz domain adds deterministic user-scoped chapter quizzes and mastery records.
