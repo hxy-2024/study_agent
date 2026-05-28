@@ -137,4 +137,5 @@ Manual browser smoke test:
 10. Return to the study space and run the Space planner.
 11. Confirm the planner panel shows next action, risks, reviews, and route proposals.
 12. Create planner actions and accept one queued review.
-13. Mark the chapter complete.
+13. Open that chapter again and confirm the Planner review callout shows the accepted review.
+14. Mark the chapter complete.
