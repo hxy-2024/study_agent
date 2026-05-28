@@ -1,8 +1,15 @@
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+from fastapi.testclient import TestClient
+
+from app.api import routes_agent_runtime
+from app.core.auth import CurrentUserContext, get_authorized_user_context
 from app.db.models import AgentRunStatus, AgentType
+from app.db.session import get_db_session
+from app.domain.agent_runtime.schemas import AgentRunTimelineItem, AgentRunTimelineResponse
 from app.domain.agent_runtime.service import (
     _bounded_limit,
     _build_timeline_item,
@@ -11,6 +18,38 @@ from app.domain.agent_runtime.service import (
     _extract_learning_signals,
     _summarize_agent_run,
 )
+from app.main import app
+
+
+TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
+
+async def fake_db() -> AsyncGenerator[object, None]:
+    yield object()
+
+
+async def fake_context() -> CurrentUserContext:
+    return CurrentUserContext(user_id=USER_ID, tenant_id=TENANT_ID)
+
+
+def _timeline_item(
+    *,
+    agent_type: str,
+    study_space_id: uuid.UUID,
+    chapter_id: uuid.UUID | None = None,
+    session_id: uuid.UUID | None = None,
+) -> AgentRunTimelineItem:
+    return AgentRunTimelineItem(
+        id=uuid.uuid4(),
+        agent_type=agent_type,
+        status="completed",
+        model="gpt-test",
+        study_space_id=study_space_id,
+        chapter_id=chapter_id,
+        session_id=session_id,
+        summary=f"{agent_type} completed.",
+    )
 
 
 def test_extract_graph_metadata_prefers_output_payload_and_sanitizes_node_trace() -> None:
@@ -167,3 +206,97 @@ def test_bounded_limit_clamps_to_supported_range() -> None:
     assert _bounded_limit(0) == 1
     assert _bounded_limit(20) == 20
     assert _bounded_limit(250) == 100
+
+
+def test_study_space_agent_runs_uses_authorized_tenant_and_limit(monkeypatch) -> None:
+    captured = {}
+    study_space_id = uuid.uuid4()
+
+    async def fake_list_agent_runs_for_study_space(**kwargs):
+        captured.update(kwargs)
+        return AgentRunTimelineResponse(
+            runs=[
+                _timeline_item(
+                    agent_type="space_planner",
+                    study_space_id=study_space_id,
+                )
+            ]
+        )
+
+    monkeypatch.setattr(
+        routes_agent_runtime,
+        "list_agent_runs_for_study_space",
+        fake_list_agent_runs_for_study_space,
+    )
+    app.dependency_overrides[get_db_session] = fake_db
+    app.dependency_overrides[get_authorized_user_context] = fake_context
+    try:
+        with TestClient(app) as client:
+            response = client.get(f"/api/v1/study-spaces/{study_space_id}/agent-runs?limit=7")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert captured["tenant_id"] == TENANT_ID
+    assert captured["study_space_id"] == study_space_id
+    assert captured["limit"] == 7
+    assert response.json()["runs"][0]["agent_type"] == "space_planner"
+
+
+def test_chapter_agent_runs_maps_value_error_to_404(monkeypatch) -> None:
+    chapter_id = uuid.uuid4()
+
+    async def fake_list_agent_runs_for_chapter(**kwargs):
+        raise ValueError("Chapter not found for tenant")
+
+    monkeypatch.setattr(
+        routes_agent_runtime,
+        "list_agent_runs_for_chapter",
+        fake_list_agent_runs_for_chapter,
+    )
+    app.dependency_overrides[get_db_session] = fake_db
+    app.dependency_overrides[get_authorized_user_context] = fake_context
+    try:
+        with TestClient(app) as client:
+            response = client.get(f"/api/v1/chapters/{chapter_id}/agent-runs")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Chapter not found for tenant"
+
+
+def test_session_agent_runs_returns_session_tutor_run(monkeypatch) -> None:
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+
+    async def fake_list_agent_runs_for_session(**kwargs):
+        return AgentRunTimelineResponse(
+            runs=[
+                _timeline_item(
+                    agent_type="session_tutor",
+                    study_space_id=study_space_id,
+                    chapter_id=chapter_id,
+                    session_id=session_id,
+                )
+            ]
+        )
+
+    monkeypatch.setattr(
+        routes_agent_runtime,
+        "list_agent_runs_for_session",
+        fake_list_agent_runs_for_session,
+    )
+    app.dependency_overrides[get_db_session] = fake_db
+    app.dependency_overrides[get_authorized_user_context] = fake_context
+    try:
+        with TestClient(app) as client:
+            response = client.get(f"/api/v1/sessions/{session_id}/agent-runs")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    run = response.json()["runs"][0]
+    assert run["agent_type"] == "session_tutor"
+    assert run["session_id"] == str(session_id)
