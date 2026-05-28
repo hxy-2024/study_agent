@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "gpt-4.1-mini"
     llm_timeout_seconds: int = 30
+    session_tutor_graph_enabled: bool = True
+    session_tutor_graph_checkpoint_backend: str = "memory"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
