@@ -38,6 +38,13 @@ def _mastery_level(record: Any) -> str:
     return _enum_value(getattr(record, "level", "new"))
 
 
+def _mentor_signal_count(mentor: Any) -> int:
+    evidence = getattr(mentor, "evidence", None)
+    if not isinstance(evidence, list):
+        return 0
+    return sum(1 for item in evidence if isinstance(item, dict) and item.get("kind") == "learning_signal")
+
+
 def choose_next_chapter(chapters: list[Any], mastery_records: dict[uuid.UUID, Any]) -> uuid.UUID | None:
     ordered_chapters = sorted(chapters, key=lambda chapter: getattr(chapter, "order_index", 0))
     for chapter in ordered_chapters:
@@ -57,6 +64,7 @@ def build_risk_chapters(chapters: list[Any], mastery_records: dict[uuid.UUID, An
         mastery = mastery_records.get(chapter.id)
         mentor = mentor_states.get(chapter.id)
         weak_points = list(getattr(mastery, "weak_points", []) or []) + list(getattr(mentor, "weak_points", []) or [])
+        mentor_signal_count = _mentor_signal_count(mentor)
         score = getattr(mastery, "score_percent", None)
         if score is not None and score < 70:
             risks.append(
@@ -76,6 +84,15 @@ def build_risk_chapters(chapters: list[Any], mastery_records: dict[uuid.UUID, An
                     "score_percent": score,
                 }
             )
+        elif mentor_signal_count:
+            risks.append(
+                {
+                    "chapter_id": str(chapter.id),
+                    "title": chapter.title,
+                    "reason": "Recent tutor signals indicate this chapter needs attention.",
+                    "score_percent": score,
+                }
+            )
     return risks[:5]
 
 
@@ -90,6 +107,7 @@ def build_review_recommendations(
         mentor = mentor_states.get(chapter.id)
         score = getattr(mastery, "score_percent", None)
         weak_points = list(getattr(mastery, "weak_points", []) or []) + list(getattr(mentor, "weak_points", []) or [])
+        mentor_signal_count = _mentor_signal_count(mentor)
         if score is not None and score < 70:
             recommendations.append(
                 {
@@ -106,6 +124,15 @@ def build_review_recommendations(
                     "title": chapter.title,
                     "action": "Review weak point with the chapter mentor.",
                     "reason": weak_points[0],
+                }
+            )
+        elif mentor_signal_count:
+            recommendations.append(
+                {
+                    "chapter_id": str(chapter.id),
+                    "title": chapter.title,
+                    "action": "Review recent tutor confusion signals with the chapter mentor.",
+                    "reason": "Recent tutor signals indicate this chapter needs attention.",
                 }
             )
     return recommendations[:5]
@@ -162,6 +189,7 @@ def build_evidence(chapters: list[Any], mastery_records: dict[uuid.UUID, Any], m
             "mastery_score": getattr(mastery_records.get(chapter.id), "score_percent", None),
             "mastery_level": _mastery_level(mastery_records[chapter.id]) if chapter.id in mastery_records else None,
             "mentor_weak_points": list(getattr(mentor_states.get(chapter.id), "weak_points", []) or []),
+            "mentor_signal_count": _mentor_signal_count(mentor_states.get(chapter.id)),
         }
         for chapter in sorted(chapters, key=lambda item: getattr(item, "order_index", 0))
     ]

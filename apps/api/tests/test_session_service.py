@@ -6,6 +6,7 @@ import pytest
 from app.db.models import AgentRunStatus, AgentType, Chapter, MessageRole, SessionStatus
 from app.domain.sessions.schemas import MessageCreate, MessageCitationCreate, SessionCreate
 from app.domain.sessions.service import (
+    answer_session_message,
     build_message_response,
     create_message,
     create_session_for_chapter,
@@ -185,3 +186,42 @@ def test_build_message_response_includes_citations() -> None:
 
     assert response.role == "assistant"
     assert response.citations[0].quote == "Quoted evidence"
+
+
+@pytest.mark.anyio
+async def test_answer_session_message_delegates_to_graph(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    captured = {}
+
+    async def fake_run_session_tutor_graph(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            id=uuid.uuid4(),
+            session_id=session_id,
+            role="assistant",
+            content="Graph answer",
+            metadata={},
+            citations=[],
+            created_at=None,
+        )
+
+    monkeypatch.setattr(
+        "app.domain.session_tutor_graph.service.run_session_tutor_graph",
+        fake_run_session_tutor_graph,
+    )
+
+    response = await answer_session_message(
+        session=object(),
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        content="Explain graph orchestration.",
+        embedding_provider=object(),
+        answer_provider=object(),
+    )
+
+    assert response.content == "Graph answer"
+    assert captured["tenant_id"] == tenant_id
+    assert captured["user_id"] == user_id

@@ -14,6 +14,7 @@ The current foundation includes:
 - Runtime Markdown/text source ingestion and RAG retrieval.
 - Learning route generation and chapter study workflow.
 - Session Tutor messages with citations.
+- Session Tutor uses a LangGraph-backed L3 workflow while preserving the existing message API.
 - Chapter Mentor State Agent for chapter summaries, weak points, and next actions.
 - Deterministic user-scoped chapter quizzes and mastery records.
 - Space Planner Agent for study-space-level next actions and route proposals.

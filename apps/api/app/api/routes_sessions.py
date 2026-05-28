@@ -93,6 +93,7 @@ async def create_tutor_message(
         return await answer_session_message(
             session=session,
             tenant_id=context.tenant_id,
+            user_id=context.user_id,
             session_id=session_id,
             content=payload.content,
             embedding_provider=DeterministicEmbeddingProvider(settings.rag_embedding_dimension),

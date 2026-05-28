@@ -5,6 +5,7 @@ import pytest
 
 from app.db.models import AgentRun, AgentType, ChapterStatus, MasteryLevel, SpacePlannerState, StudySpace
 from app.domain.space_planner.service import (
+    build_evidence,
     build_review_recommendations,
     build_risk_chapters,
     build_route_adjustments,
@@ -52,6 +53,91 @@ def test_risk_review_and_adjustment_builders_use_mastery_and_mentor_state() -> N
     assert risks[0]["score_percent"] == 35
     assert reviews[0]["action"] == "Retake chapter quiz after evidence review."
     assert adjustments[0]["kind"] == "insert_review"
+
+
+def test_build_evidence_counts_learning_signal_mentor_evidence() -> None:
+    chapter = make_chapter("Citations", ChapterStatus.active, 1)
+    mentor_states = {
+        chapter.id: SimpleNamespace(
+            weak_points=[],
+            evidence=[
+                {"kind": "learning_signal", "summary": "Confused by citations"},
+                {"kind": "quiz_result", "summary": "Passed review"},
+                {"kind": "learning_signal", "summary": "Needs examples"},
+            ],
+        )
+    }
+
+    evidence = build_evidence([chapter], {}, mentor_states)
+
+    assert evidence[0]["mentor_signal_count"] == 2
+
+
+def test_signal_evidence_creates_risk_and_review_without_low_mastery() -> None:
+    chapter = make_chapter("Citations", ChapterStatus.active, 1)
+    mastery = {chapter.id: SimpleNamespace(score_percent=85, level=MasteryLevel.proficient, weak_points=[])}
+    mentor_states = {
+        chapter.id: SimpleNamespace(
+            weak_points=[],
+            evidence=[{"kind": "learning_signal", "summary": "Confused by citations"}],
+        )
+    }
+
+    risks = build_risk_chapters([chapter], mastery, mentor_states)
+    reviews = build_review_recommendations([chapter], mastery, mentor_states)
+
+    assert risks == [
+        {
+            "chapter_id": str(chapter.id),
+            "title": "Citations",
+            "reason": "Recent tutor signals indicate this chapter needs attention.",
+            "score_percent": 85,
+        }
+    ]
+    assert reviews == [
+        {
+            "chapter_id": str(chapter.id),
+            "title": "Citations",
+            "action": "Review recent tutor confusion signals with the chapter mentor.",
+            "reason": "Recent tutor signals indicate this chapter needs attention.",
+        }
+    ]
+
+
+def test_low_mastery_reason_and_action_take_priority_over_signal_evidence() -> None:
+    chapter = make_chapter("Citations", ChapterStatus.active, 1)
+    mastery = {chapter.id: SimpleNamespace(score_percent=35, level=MasteryLevel.new, weak_points=[])}
+    mentor_states = {
+        chapter.id: SimpleNamespace(
+            weak_points=[],
+            evidence=[{"kind": "learning_signal", "summary": "Confused by citations"}],
+        )
+    }
+
+    risks = build_risk_chapters([chapter], mastery, mentor_states)
+    reviews = build_review_recommendations([chapter], mastery, mentor_states)
+
+    assert risks[0]["reason"] == "Mastery score is 35%, below the review threshold."
+    assert reviews[0]["action"] == "Retake chapter quiz after evidence review."
+
+
+def test_malformed_mentor_evidence_is_ignored_for_signal_count_risks_and_reviews() -> None:
+    chapters = [
+        make_chapter("Non-list evidence", ChapterStatus.active, 1),
+        make_chapter("Non-dict evidence", ChapterStatus.active, 2),
+        make_chapter("Missing kind evidence", ChapterStatus.active, 3),
+    ]
+    mentor_states = {
+        chapters[0].id: SimpleNamespace(weak_points=[], evidence={"kind": "learning_signal"}),
+        chapters[1].id: SimpleNamespace(weak_points=[], evidence=["learning_signal"]),
+        chapters[2].id: SimpleNamespace(weak_points=[], evidence=[{"summary": "Missing kind"}]),
+    }
+
+    evidence = build_evidence(chapters, {}, mentor_states)
+
+    assert [item["mentor_signal_count"] for item in evidence] == [0, 0, 0]
+    assert build_risk_chapters(chapters, {}, mentor_states) == []
+    assert build_review_recommendations(chapters, {}, mentor_states) == []
 
 
 @pytest.mark.anyio

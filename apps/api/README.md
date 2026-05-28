@@ -52,6 +52,26 @@ LLM_TIMEOUT_SECONDS=30
 
 When `LLM_API_KEY` is empty, the API falls back to the deterministic provider.
 
+## Session Tutor LangGraph
+
+The session tutor message endpoint is backed by a LangGraph workflow. The route
+contract remains unchanged: clients post a learner message and receive an
+assistant `MessageResponse` with citations. Internally the graph loads session
+context, stores the user message, reads optional Chapter Mentor state, retrieves
+RAG evidence, generates a grounded answer, stores the assistant message, emits
+learning signals, and records an `agent_runs` row.
+
+The graph is the L3 execution agent in the three-layer design. It does not
+mutate learning routes or planner actions. L1/L2 supervision is represented
+through Chapter Mentor context and `learning_signals` in
+`agent_runs.output_payload`.
+
+Graph-backed Session Tutor runs include standardized runtime metadata in
+`agent_runs`: `graph_name`, `thread_id`, `checkpoint_backend`,
+`state_schema_version`, and `node_trace`. The default checkpoint backend is
+`memory`; `postgres` is reserved and fails closed until production checkpoint
+storage is configured.
+
 ## Chapter mentor state
 
 The Chapter Mentor State Agent aggregates tutor sessions for one chapter into a
@@ -66,6 +86,10 @@ The run endpoint uses `CurrentUserContext` for tenant scope and rejects
 client-supplied tenant IDs. Each run records an `agent_runs` row with
 `agent_type=chapter_mentor`. Local generation is deterministic for repeatable
 tests and can be replaced behind the domain service boundary later.
+
+Chapter Mentor state generation also reads Session Tutor `learning_signals`
+from completed graph-backed tutor runs. Those signals enrich weak points,
+next actions, and evidence without changing the public API response shape.
 
 ## Quiz + mastery
 

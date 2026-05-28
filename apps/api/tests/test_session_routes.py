@@ -165,4 +165,5 @@ async def test_create_session_message_uses_answer_service(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert captured["session_id"] == session_id
+    assert captured["user_id"] == uuid.UUID("00000000-0000-0000-0000-000000000002")
     assert captured["content"] == "Explain"
