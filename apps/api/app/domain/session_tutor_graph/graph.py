@@ -4,7 +4,12 @@ from app.domain.session_tutor_graph import nodes
 from app.domain.session_tutor_graph.state import SessionTutorGraphState
 
 
-def build_session_tutor_graph(db_session, embedding_provider, answer_provider):
+def build_session_tutor_graph(
+    db_session,
+    embedding_provider,
+    answer_provider,
+    checkpointer=None,
+):
     async def load_session_context(state):
         return await nodes.load_session_context(state, db_session=db_session)
 
@@ -49,4 +54,4 @@ def build_session_tutor_graph(db_session, embedding_provider, answer_provider):
     graph.add_edge("persist_assistant_message", "extract_learning_signals")
     graph.add_edge("extract_learning_signals", "record_agent_run")
     graph.add_edge("record_agent_run", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)

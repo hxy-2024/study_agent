@@ -151,6 +151,10 @@ async def test_graph_records_messages_agent_run_and_supervision(monkeypatch) -> 
     assert messages[0].role == MessageRole.user
     assert messages[1].role == MessageRole.assistant
     assert len(runs) == 1
+    assert runs[0].output_payload["graph_name"] == "session_tutor"
+    assert runs[0].output_payload["thread_id"] == f"session:{session_id}"
+    assert runs[0].output_payload["checkpoint_backend"] == "memory"
+    assert runs[0].output_payload["state_schema_version"] == 1
     assert runs[0].output_payload["node_trace"][-1] == "record_agent_run"
     assert runs[0].output_payload["chapter_supervision_used"] is True
     assert any(
@@ -229,6 +233,10 @@ async def test_graph_records_failed_agent_run_after_user_message(monkeypatch) ->
     assert len(runs) == 1
     assert runs[0].status.value == "failed"
     assert runs[0].error_message == "provider unavailable"
+    assert runs[0].input_payload["graph_name"] == "session_tutor"
+    assert runs[0].input_payload["thread_id"] == f"session:{session_id}"
+    assert runs[0].input_payload["checkpoint_backend"] == "memory"
+    assert runs[0].input_payload["state_schema_version"] == 1
     assert runs[0].input_payload["content"] == "Explain failure handling."
     assert runs[0].input_payload["user_message_id"] == str(messages[0].id)
     assert runs[0].input_payload["node_trace"] == [
