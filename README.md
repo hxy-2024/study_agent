@@ -15,10 +15,11 @@ The current foundation includes:
 - Learning route generation and chapter study workflow.
 - Session Tutor messages with citations.
 - Chapter Mentor State Agent for chapter summaries, weak points, and next actions.
+- Deterministic user-scoped chapter quizzes and mastery records.
 - Nuxt app shell.
 - Dashboard, create-space, source library, study space, and chapter study UI.
 
-LangGraph durable workflows, quizzes, mastery tracking, and import/export are planned as separate implementation phases.
+LangGraph durable workflows, spaced review, quiz generation with LLMs, and import/export are planned as separate implementation phases.
 
 ### RAG foundation
 
@@ -129,4 +130,6 @@ Manual browser smoke test:
 5. Open a chapter with `Study`.
 6. Ask AI Mentor a question.
 7. Click `Update assessment` in the Chapter state panel.
-8. Mark the chapter complete.
+8. Generate and submit a chapter quiz.
+9. Confirm mastery is shown on the chapter page.
+10. Mark the chapter complete.
