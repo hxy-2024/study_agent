@@ -16,10 +16,12 @@ The current foundation includes:
 - Session Tutor messages with citations.
 - Chapter Mentor State Agent for chapter summaries, weak points, and next actions.
 - Deterministic user-scoped chapter quizzes and mastery records.
+- Space Planner Agent for study-space-level next actions and route proposals.
+- Planner action queue for confirmed reviews and route proposals.
 - Nuxt app shell.
 - Dashboard, create-space, source library, study space, and chapter study UI.
 
-LangGraph durable workflows, spaced review, quiz generation with LLMs, and import/export are planned as separate implementation phases.
+LangGraph durable workflows, automatic route mutation, spaced review queues, quiz generation with LLMs, and import/export are planned as separate implementation phases.
 
 ### RAG foundation
 
@@ -132,4 +134,7 @@ Manual browser smoke test:
 7. Click `Update assessment` in the Chapter state panel.
 8. Generate and submit a chapter quiz.
 9. Confirm mastery is shown on the chapter page.
-10. Mark the chapter complete.
+10. Return to the study space and run the Space planner.
+11. Confirm the planner panel shows next action, risks, reviews, and route proposals.
+12. Create planner actions and accept one queued review.
+13. Mark the chapter complete.

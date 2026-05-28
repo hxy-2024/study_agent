@@ -83,6 +83,37 @@ Generation is deterministic in this phase. Quiz submissions update the current
 user's latest chapter mastery record; review cards, spaced repetition, and LLM
 quiz generation are separate later phases.
 
+## Space planner
+
+The Space Planner Agent is the top layer of the current three-agent design. It
+reads active routes, chapter progress, Chapter Mentor State, and user-scoped
+mastery records, then writes a durable `space_planner_states` snapshot and an
+`agent_runs` row with `agent_type=space_planner`.
+
+Endpoints:
+
+- `GET /api/v1/study-spaces/{study_space_id}/planner-state`
+- `POST /api/v1/agents/space-planner/run`
+
+The planner is deterministic in this phase. It recommends the next chapter,
+flags risk chapters, proposes review actions, and records route adjustment
+proposals. It does not automatically mutate learning routes; route changes stay
+as proposals until a future explicit approval workflow is added.
+
+## Planner actions
+
+Planner actions convert Space Planner recommendations into explicit user-owned
+queue items.
+
+Endpoints:
+
+- `GET /api/v1/study-spaces/{study_space_id}/planner-actions`
+- `POST /api/v1/planner-actions/from-latest-state`
+- `POST /api/v1/planner-actions/{action_id}/status`
+
+Actions support `proposed`, `accepted`, `completed`, and `dismissed` states.
+They do not mutate learning routes automatically.
+
 ## Runtime source ingestion
 
 Local text/Markdown ingestion flow:

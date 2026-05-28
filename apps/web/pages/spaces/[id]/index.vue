@@ -73,6 +73,53 @@ interface RoutesListResponse {
   routes: RouteWithChapters[]
 }
 
+interface PlannerChapterRisk {
+  chapter_id: string
+  title: string
+  reason: string
+  score_percent: number | null
+}
+
+interface PlannerReviewRecommendation {
+  chapter_id: string
+  title: string
+  action: string
+  reason: string
+}
+
+interface PlannerRouteAdjustment {
+  kind: string
+  chapter_id: string | null
+  title: string
+  rationale: string
+}
+
+interface SpacePlannerState {
+  id: string
+  study_space_id: string
+  summary: string
+  next_chapter_id: string | null
+  risk_chapters: PlannerChapterRisk[]
+  review_recommendations: PlannerReviewRecommendation[]
+  route_adjustments: PlannerRouteAdjustment[]
+  evidence: Array<Record<string, unknown>>
+  updated_at: string | null
+}
+
+interface PlannerAction {
+  id: string
+  study_space_id: string
+  chapter_id: string | null
+  source_planner_state_id: string | null
+  action_type: string
+  status: string
+  title: string
+  rationale: string
+  payload: Record<string, unknown>
+  created_at: string | null
+  updated_at: string | null
+}
+
 const DEV_AUTH_HEADERS = {
   'X-User-Id': '00000000-0000-0000-0000-000000000002',
   'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
@@ -89,11 +136,18 @@ const selectedSourceId = ref<string | null>(null)
 const selectedSourceName = ref('')
 const chunks = ref<SourceChunk[]>([])
 const routes = ref<RouteWithChapters[]>([])
+const plannerState = ref<SpacePlannerState | null>(null)
+const plannerActions = ref<PlannerAction[]>([])
 const chunklessSourceIds = ref<Set<string>>(new Set())
 const loadingSources = ref(false)
 const loadingRoutes = ref(false)
+const loadingPlannerState = ref(false)
+const loadingPlannerActions = ref(false)
 const generatingRoute = ref(false)
+const runningPlanner = ref(false)
+const creatingPlannerActions = ref(false)
 const activatingRouteId = ref<string | null>(null)
+const updatingPlannerActionId = ref<string | null>(null)
 const uploadPhase = ref<UploadPhase>('idle')
 const ingestingSourceId = ref<string | null>(null)
 const loadingChunks = ref(false)
@@ -106,6 +160,14 @@ const hasSelectedSource = computed(() => selectedSourceId.value !== null)
 const activeRoute = computed(() => routes.value.find(item => item.route.status === 'active') ?? null)
 const latestDraftRoute = computed(() => routes.value.find(item => item.route.status === 'draft') ?? null)
 const visibleRoute = computed(() => activeRoute.value ?? latestDraftRoute.value ?? null)
+const plannerNextChapter = computed(() => {
+  if (!plannerState.value?.next_chapter_id || !visibleRoute.value) return null
+  return visibleRoute.value.chapters.find(chapter => chapter.id === plannerState.value?.next_chapter_id) ?? null
+})
+const plannerUpdatedAt = computed(() => {
+  if (!plannerState.value?.updated_at) return ''
+  return new Date(plannerState.value.updated_at).toLocaleString()
+})
 const sourceFilters = computed(() => [
   { key: 'all' as const, label: 'All', count: sources.value.length },
   { key: 'uploaded' as const, label: 'Uploaded', count: sources.value.filter(source => source.status === 'uploaded').length },
@@ -199,6 +261,17 @@ function appendBackendMessage(base: string, error: unknown) {
   return base
 }
 
+function normalizePlannerState(response: SpacePlannerState): SpacePlannerState | null {
+  if (!response?.id || !response.summary) return null
+  return {
+    ...response,
+    risk_chapters: response.risk_chapters ?? [],
+    review_recommendations: response.review_recommendations ?? [],
+    route_adjustments: response.route_adjustments ?? [],
+    evidence: response.evidence ?? []
+  }
+}
+
 function onFileSelected(event: Event) {
   const input = event.target as HTMLInputElement
   selectedFile.value = input.files?.[0] ?? null
@@ -230,10 +303,106 @@ async function loadRoutes() {
       { headers: protectedHeaders() }
     )
     routes.value = response.routes ?? []
+    if (routes.value.some(item => item.route.status === 'active')) {
+      await loadPlannerState()
+      await loadPlannerActions()
+    } else {
+      plannerState.value = null
+      plannerActions.value = []
+    }
   } catch (error) {
     errorMessage.value = appendBackendMessage('Failed to load learning routes.', error)
   } finally {
     loadingRoutes.value = false
+  }
+}
+
+async function loadPlannerState() {
+  loadingPlannerState.value = true
+  try {
+    plannerState.value = await $fetch<SpacePlannerState>(
+      `${config.public.apiBaseUrl}/study-spaces/${spaceId.value}/planner-state`,
+      { headers: protectedHeaders() }
+    )
+    plannerState.value = normalizePlannerState(plannerState.value)
+  } catch {
+    plannerState.value = null
+  } finally {
+    loadingPlannerState.value = false
+  }
+}
+
+async function loadPlannerActions() {
+  loadingPlannerActions.value = true
+  try {
+    const response = await $fetch<{ actions: PlannerAction[] }>(
+      `${config.public.apiBaseUrl}/study-spaces/${spaceId.value}/planner-actions`,
+      { headers: protectedHeaders() }
+    )
+    plannerActions.value = response.actions ?? []
+  } catch {
+    plannerActions.value = []
+  } finally {
+    loadingPlannerActions.value = false
+  }
+}
+
+async function runSpacePlanner() {
+  runningPlanner.value = true
+  errorMessage.value = ''
+  try {
+    plannerState.value = await $fetch<SpacePlannerState>(
+      `${config.public.apiBaseUrl}/agents/space-planner/run`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: { study_space_id: spaceId.value }
+      }
+    )
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to run space planner.', error)
+  } finally {
+    runningPlanner.value = false
+  }
+}
+
+async function createPlannerActions() {
+  creatingPlannerActions.value = true
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<{ actions: PlannerAction[] }>(
+      `${config.public.apiBaseUrl}/planner-actions/from-latest-state`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: { study_space_id: spaceId.value }
+      }
+    )
+    plannerActions.value = response.actions ?? []
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to create planner actions.', error)
+  } finally {
+    creatingPlannerActions.value = false
+  }
+}
+
+async function updatePlannerAction(action: PlannerAction, status: string) {
+  updatingPlannerActionId.value = action.id
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<PlannerAction>(
+      `${config.public.apiBaseUrl}/planner-actions/${action.id}/status`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: { status }
+      }
+    )
+    plannerActions.value = plannerActions.value.map(item => (item.id === action.id ? response : item))
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to update planner action.', error)
+  } finally {
+    updatingPlannerActionId.value = null
   }
 }
 
@@ -455,6 +624,132 @@ onMounted(() => {
           <p v-else class="empty-state">No learning route yet. Generate a route after uploading or ingesting sources.</p>
         </section>
 
+        <section class="card planner-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Space planner</p>
+              <h2>Next best action</h2>
+              <p class="muted">Reads route progress, mentor state, and quiz mastery without changing your route automatically.</p>
+            </div>
+            <button
+              data-testid="run-space-planner"
+              type="button"
+              class="secondary-button"
+              :disabled="runningPlanner"
+              @click="runSpacePlanner"
+            >
+              {{ runningPlanner ? 'Planning...' : plannerState ? 'Refresh plan' : 'Run planner' }}
+            </button>
+          </div>
+
+          <p v-if="loadingPlannerState" class="muted">Loading planner state...</p>
+          <div v-else-if="plannerState" class="planner-grid">
+            <article class="planner-summary">
+              <span class="status-badge">Planner</span>
+              <h3>{{ plannerState.summary }}</h3>
+              <p v-if="plannerNextChapter">Recommended next: {{ plannerNextChapter.order_index }}. {{ plannerNextChapter.title }}</p>
+              <p v-else class="muted">No specific next chapter is required.</p>
+              <small v-if="plannerUpdatedAt">Updated {{ plannerUpdatedAt }}</small>
+            </article>
+
+            <article class="planner-list">
+              <h3>Risk chapters</h3>
+              <p v-if="plannerState.risk_chapters.length === 0" class="empty-state">No risk chapters detected.</p>
+              <ul v-else>
+                <li v-for="risk in plannerState.risk_chapters" :key="risk.chapter_id">
+                  <strong>{{ risk.title }}</strong>
+                  <span>{{ risk.reason }}</span>
+                  <small v-if="risk.score_percent !== null">Mastery {{ risk.score_percent }}%</small>
+                </li>
+              </ul>
+            </article>
+
+            <article class="planner-list">
+              <h3>Reviews</h3>
+              <p v-if="plannerState.review_recommendations.length === 0" class="empty-state">No review action is queued.</p>
+              <ul v-else>
+                <li v-for="review in plannerState.review_recommendations" :key="`${review.chapter_id}-${review.action}`">
+                  <strong>{{ review.action }}</strong>
+                  <span>{{ review.title }}: {{ review.reason }}</span>
+                </li>
+              </ul>
+            </article>
+
+            <article class="planner-list">
+              <h3>Route proposals</h3>
+              <p v-if="plannerState.route_adjustments.length === 0" class="empty-state">No route adjustment proposed.</p>
+              <ul v-else>
+                <li v-for="proposal in plannerState.route_adjustments" :key="`${proposal.kind}-${proposal.title}`">
+                  <strong>{{ proposal.title }}</strong>
+                  <span>{{ proposal.rationale }}</span>
+                </li>
+              </ul>
+            </article>
+          </div>
+          <p v-else class="empty-state">Run the planner after activating a route or submitting a quiz.</p>
+        </section>
+
+        <section class="card planner-actions-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Action queue</p>
+              <h2>Planner actions</h2>
+              <p class="muted">Confirm planner suggestions before they affect your study flow.</p>
+            </div>
+            <button
+              data-testid="create-planner-actions"
+              type="button"
+              class="secondary-button"
+              :disabled="creatingPlannerActions"
+              @click="createPlannerActions"
+            >
+              {{ creatingPlannerActions ? 'Creating...' : 'Create actions' }}
+            </button>
+          </div>
+
+          <p v-if="loadingPlannerActions" class="muted">Loading planner actions...</p>
+          <p v-else-if="plannerActions.length === 0" class="empty-state">No planner actions queued.</p>
+          <div v-else class="planner-action-list">
+            <article v-for="action in plannerActions" :key="action.id" class="planner-action-row">
+              <span class="status-badge">{{ action.status }}</span>
+              <div>
+                <h3>{{ action.title }}</h3>
+                <p>{{ action.rationale }}</p>
+              </div>
+              <div class="row-actions">
+                <button
+                  v-if="action.status === 'proposed'"
+                  data-testid="accept-planner-action"
+                  type="button"
+                  class="secondary-button"
+                  :disabled="updatingPlannerActionId === action.id"
+                  @click="updatePlannerAction(action, 'accepted')"
+                >
+                  Accept
+                </button>
+                <button
+                  v-if="action.status !== 'completed'"
+                  type="button"
+                  class="secondary-button"
+                  :disabled="updatingPlannerActionId === action.id"
+                  @click="updatePlannerAction(action, 'completed')"
+                >
+                  Complete
+                </button>
+                <button
+                  v-if="action.status === 'proposed'"
+                  type="button"
+                  class="secondary-button"
+                  :disabled="updatingPlannerActionId === action.id"
+                  @click="updatePlannerAction(action, 'dismissed')"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </article>
+          </div>
+        </section>
+
         <p v-if="errorMessage" class="error-alert">{{ errorMessage }}</p>
 
         <section class="card source-upload-card">
@@ -641,6 +936,104 @@ onMounted(() => {
 .route-overview {
   display: grid;
   gap: 16px;
+}
+
+.planner-panel {
+  display: grid;
+  gap: 16px;
+  border-color: rgba(20, 184, 166, 0.34);
+  box-shadow: 0 18px 48px rgba(15, 118, 110, 0.12);
+}
+
+.planner-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.05fr) repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.planner-summary,
+.planner-list {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(240, 253, 250, 0.72), var(--color-surface));
+  padding: 14px;
+  min-width: 0;
+}
+
+.planner-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.planner-summary h3 {
+  font-size: 17px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.planner-summary small,
+.planner-list small {
+  color: var(--color-primary);
+  font-weight: 800;
+}
+
+.planner-list h3 {
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+
+.planner-list ul {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.planner-list li {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 10px;
+}
+
+.planner-list li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.planner-list strong,
+.planner-list span {
+  overflow-wrap: anywhere;
+}
+
+.planner-list span {
+  color: var(--color-muted);
+}
+
+.planner-action-list {
+  display: grid;
+  gap: 12px;
+}
+
+.planner-action-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  padding: 12px;
+}
+
+.planner-action-row h3,
+.planner-action-row p {
+  overflow-wrap: anywhere;
+}
+
+.planner-action-row p {
+  color: var(--color-muted);
 }
 
 .route-actions {
@@ -907,6 +1300,14 @@ p {
   }
 
   .chapter-row {
+    grid-template-columns: 1fr;
+  }
+
+  .planner-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .planner-action-row {
     grid-template-columns: 1fr;
   }
 }
