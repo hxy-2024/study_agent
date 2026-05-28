@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api import (
+    routes_agent_runtime,
     routes_chapter_mentor_state,
     routes_chapter_study,
     routes_health,
@@ -17,6 +18,7 @@ from app.api import (
 )
 
 api_router = APIRouter()
+api_router.include_router(routes_agent_runtime.router)
 api_router.include_router(routes_health.router)
 api_router.include_router(routes_chapter_mentor_state.router)
 api_router.include_router(routes_chapter_study.router)

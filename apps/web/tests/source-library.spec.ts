@@ -118,6 +118,9 @@ describe('StudySpacePage source library', () => {
       if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/routes')) {
         return Promise.resolve({ routes: [] })
       }
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/agent-runs?limit=8')) {
+        return Promise.resolve({ runs: [] })
+      }
       return Promise.resolve({ sources: [] })
     })
   })
@@ -160,7 +163,7 @@ describe('StudySpacePage source library', () => {
     await wrapper.find('button.primary-button').trigger('click')
 
     expect(wrapper.text()).toContain('This phase supports only .txt and .md files.')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:8000/api/v1/study-spaces/00000000-0000-0000-0000-000000000101/sources',
       expect.any(Object)
@@ -175,7 +178,7 @@ describe('StudySpacePage source library', () => {
     await wrapper.find('button.primary-button').trigger('click')
 
     expect(wrapper.text()).toContain('This phase supports only .txt and .md files.')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('uploads markdown through presign, storage PUT, confirmation, and source reload', async () => {
@@ -185,6 +188,9 @@ describe('StudySpacePage source library', () => {
       }
       if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/sources')) {
         return Promise.resolve({ sources: [] })
+      }
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/agent-runs?limit=8')) {
+        return Promise.resolve({ runs: [] })
       }
       if (url.endsWith('/uploads/presign')) {
         return Promise.resolve({
@@ -210,7 +216,7 @@ describe('StudySpacePage source library', () => {
     await wrapper.find('button.primary-button').trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(3, 'http://localhost:8000/api/v1/uploads/presign', {
+    expect(fetchMock).toHaveBeenNthCalledWith(4, 'http://localhost:8000/api/v1/uploads/presign', {
       method: 'POST',
       headers: {
         'X-User-Id': '00000000-0000-0000-0000-000000000002',
@@ -222,18 +228,18 @@ describe('StudySpacePage source library', () => {
         content_type: 'text/markdown'
       }
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(4, 'http://object-storage.local/upload/notes.md', {
+    expect(fetchMock).toHaveBeenNthCalledWith(5, 'http://object-storage.local/upload/notes.md', {
       method: 'PUT',
       headers: {
         'Content-Type': 'text/markdown'
       },
       body: expect.any(File)
     })
-    const putHeaders = (fetchMock.mock.calls[3]?.[1] as { headers?: Record<string, string> } | undefined)?.headers
+    const putHeaders = (fetchMock.mock.calls[4]?.[1] as { headers?: Record<string, string> } | undefined)?.headers
     expect(putHeaders).not.toHaveProperty('X-User-Id')
     expect(putHeaders).not.toHaveProperty('X-Tenant-Id')
     expect(fetchMock).toHaveBeenNthCalledWith(
-      5,
+      6,
       'http://localhost:8000/api/v1/sources/00000000-0000-0000-0000-000000000201/uploaded',
       {
         method: 'POST',
@@ -243,7 +249,7 @@ describe('StudySpacePage source library', () => {
         }
       }
     )
-    expect(fetchMock).toHaveBeenCalledTimes(6)
+    expect(fetchMock).toHaveBeenCalledTimes(7)
   })
 
   it('runs ingestion then loads and renders chunks with citation page', async () => {

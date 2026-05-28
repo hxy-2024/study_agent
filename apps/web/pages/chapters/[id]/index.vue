@@ -108,6 +108,31 @@ interface PlannerAction {
   updated_at?: string | null
 }
 
+interface AgentRunLearningSignal {
+  kind: string
+  [key: string]: unknown
+}
+
+interface AgentRunTimelineItem {
+  id?: string
+  agent_type: string
+  graph_name?: string | null
+  status: string
+  summary: string
+  node_trace: string[]
+  learning_signals: AgentRunLearningSignal[]
+  thread_id: string | null
+  checkpoint_backend: string | null
+  state_schema_version?: number | null
+  created_at?: string | null
+  completed_at?: string | null
+  latency_ms?: number | null
+  prompt_tokens?: number | null
+  completion_tokens?: number | null
+  total_tokens?: number | null
+  error_message?: string | null
+}
+
 const DEV_AUTH_HEADERS = {
   'X-User-Id': '00000000-0000-0000-0000-000000000002',
   'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
@@ -134,6 +159,9 @@ const generatingQuiz = ref(false)
 const plannerActions = ref<PlannerAction[]>([])
 const loadingPlannerActions = ref(false)
 const updatingPlannerActionId = ref<string | null>(null)
+const agentRuns = ref<AgentRunTimelineItem[]>([])
+const selectedAgentRunId = ref<string | null>(null)
+const loadingAgentRuns = ref(false)
 
 const chapter = computed(() => detail.value?.chapter ?? null)
 const evidence = computed(() => detail.value?.evidence ?? [])
@@ -159,6 +187,10 @@ const activeReviewActions = computed(() => {
       action.status !== 'dismissed'
     )
   })
+})
+const selectedAgentRun = computed(() => {
+  if (!selectedAgentRunId.value) return null
+  return agentRuns.value.find(run => runtimeRunKey(run) === selectedAgentRunId.value) ?? null
 })
 
 function protectedHeaders() {
@@ -186,6 +218,61 @@ function normalizeMessages(response: MentorMessage[] | { messages?: MentorMessag
 
 function normalizePlannerActions(response: PlannerAction[] | { actions?: PlannerAction[] }) {
   return Array.isArray(response) ? response : response.actions ?? []
+}
+
+function normalizeAgentRuns(response: { runs?: AgentRunTimelineItem[] } | null | undefined): AgentRunTimelineItem[] {
+  return (response?.runs ?? [])
+    .filter(run => ['chapter_mentor', 'session_tutor'].includes(run?.agent_type) && run.status)
+    .map(run => ({
+      ...run,
+      summary: run.summary || 'No summary recorded.',
+      node_trace: Array.isArray(run.node_trace) ? run.node_trace.filter(Boolean).map(String) : [],
+      learning_signals: Array.isArray(run.learning_signals)
+        ? run.learning_signals
+            .map(signal => (typeof signal === 'string' ? { kind: signal } : signal))
+            .filter((signal): signal is AgentRunLearningSignal => Boolean(signal?.kind))
+        : [],
+      thread_id: run.thread_id ?? null,
+      checkpoint_backend: run.checkpoint_backend ?? null,
+      graph_name: run.graph_name ?? null,
+      state_schema_version: run.state_schema_version ?? null,
+      created_at: run.created_at ?? null,
+      completed_at: run.completed_at ?? null,
+      latency_ms: run.latency_ms ?? null,
+      prompt_tokens: run.prompt_tokens ?? null,
+      completion_tokens: run.completion_tokens ?? null,
+      total_tokens: run.total_tokens ?? null,
+      error_message: run.error_message ?? null
+    }))
+}
+
+function runtimeRunKey(run: AgentRunTimelineItem) {
+  return run.id ?? `${run.agent_type}-${run.thread_id ?? 'no-thread'}`
+}
+
+function toggleAgentRun(run: AgentRunTimelineItem) {
+  const runKey = runtimeRunKey(run)
+  selectedAgentRunId.value = selectedAgentRunId.value === runKey ? null : runKey
+}
+
+function formatRuntimeMetric(value: number | string | null | undefined, suffix = '') {
+  if (value === null || value === undefined || value === '') return 'Not recorded'
+  return `${value}${suffix}`
+}
+
+function formatRuntimeDate(value: string | null | undefined) {
+  if (!value) return 'Not recorded'
+  const runtimeDate = new Date(value)
+  if (Number.isNaN(runtimeDate.getTime())) return 'Not recorded'
+  return runtimeDate.toLocaleString()
+}
+
+function agentTypeLabel(agentType: string) {
+  const labels: Record<string, string> = {
+    chapter_mentor: 'L2 Mentor',
+    session_tutor: 'L3 Tutor'
+  }
+  return labels[agentType] ?? agentType
 }
 
 function isMasteryRecord(response: unknown): response is MasteryRecord {
@@ -233,6 +320,21 @@ async function loadPlannerActions(studySpaceId: string) {
     plannerActions.value = []
   } finally {
     loadingPlannerActions.value = false
+  }
+}
+
+async function loadAgentRuns() {
+  loadingAgentRuns.value = true
+  try {
+    const response = await $fetch<{ runs: AgentRunTimelineItem[] }>(
+      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/agent-runs?limit=8`,
+      { headers: protectedHeaders() }
+    )
+    agentRuns.value = normalizeAgentRuns(response)
+  } catch {
+    agentRuns.value = []
+  } finally {
+    loadingAgentRuns.value = false
   }
 }
 
@@ -414,6 +516,7 @@ onMounted(() => {
   loadMentorSession()
   loadMentorState()
   loadMastery()
+  loadAgentRuns()
 })
 </script>
 
@@ -507,6 +610,128 @@ onMounted(() => {
         <p v-else class="empty-state">
           No chapter mentor state yet. Update after asking the mentor a few questions.
         </p>
+      </section>
+
+      <section class="card chapter-runtime-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Chapter runtime</p>
+            <h2>Recent agent runs</h2>
+            <p class="muted">Latest L2 Mentor and L3 Tutor traces for this chapter.</p>
+          </div>
+          <button
+            data-testid="refresh-chapter-agent-runs"
+            class="secondary-button"
+            type="button"
+            :disabled="loadingAgentRuns"
+            @click="loadAgentRuns"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <p v-if="loadingAgentRuns" class="muted">Loading runtime...</p>
+        <p v-else-if="agentRuns.length === 0" class="empty-state">No chapter runtime yet.</p>
+        <div v-else class="chapter-runtime-list">
+          <article
+            v-for="run in agentRuns"
+            :key="run.id ?? `${run.agent_type}-${run.thread_id}`"
+            class="chapter-runtime-row"
+          >
+            <button
+              data-testid="chapter-runtime-row-button"
+              type="button"
+              class="chapter-runtime-header"
+              :aria-expanded="selectedAgentRunId === runtimeRunKey(run)"
+              @click="toggleAgentRun(run)"
+            >
+              <span class="chapter-runtime-meta">
+                <span class="status-badge">{{ agentTypeLabel(run.agent_type) }}</span>
+                <span class="runtime-status">{{ run.status }}</span>
+              </span>
+              <span class="chapter-runtime-body">
+                <span class="runtime-summary">{{ run.summary }}</span>
+                <span v-if="run.node_trace.length" class="runtime-trace">{{ run.node_trace.join(' -> ') }}</span>
+                <span v-else class="runtime-trace">No node trace recorded.</span>
+                <span v-if="run.learning_signals.length" class="signal-list" aria-label="Learning signals">
+                  <span
+                    v-for="signal in run.learning_signals"
+                    :key="signal.kind"
+                    class="signal-chip"
+                  >
+                    {{ signal.kind }}
+                  </span>
+                </span>
+                <span v-else class="muted">No learning signals.</span>
+              </span>
+            </button>
+            <div
+              v-if="selectedAgentRun && selectedAgentRunId === runtimeRunKey(run)"
+              class="chapter-runtime-detail"
+            >
+              <dl class="runtime-detail-grid">
+                <div>
+                  <dt>Thread</dt>
+                  <dd>{{ run.thread_id || 'Not recorded' }}</dd>
+                </div>
+                <div>
+                  <dt>Graph</dt>
+                  <dd>{{ run.graph_name || run.agent_type }}</dd>
+                </div>
+                <div>
+                  <dt>Checkpoint</dt>
+                  <dd>{{ run.checkpoint_backend || 'Not recorded' }}</dd>
+                </div>
+                <div>
+                  <dt>Schema</dt>
+                  <dd>{{ formatRuntimeMetric(run.state_schema_version) }}</dd>
+                </div>
+                <div>
+                  <dt>Created</dt>
+                  <dd>{{ formatRuntimeDate(run.created_at) }}</dd>
+                </div>
+                <div>
+                  <dt>Completed</dt>
+                  <dd>{{ formatRuntimeDate(run.completed_at) }}</dd>
+                </div>
+                <div>
+                  <dt>Latency</dt>
+                  <dd>{{ formatRuntimeMetric(run.latency_ms, ' ms') }}</dd>
+                </div>
+                <div>
+                  <dt>Tokens</dt>
+                  <dd>
+                    {{ formatRuntimeMetric(run.total_tokens) }}
+                    <span v-if="run.prompt_tokens != null || run.completion_tokens != null" class="runtime-token-breakdown">
+                      ({{ formatRuntimeMetric(run.prompt_tokens, ' prompt') }},
+                      {{ formatRuntimeMetric(run.completion_tokens, ' completion') }})
+                    </span>
+                  </dd>
+                </div>
+              </dl>
+
+              <div class="runtime-detail-section">
+                <h4>Node trace</h4>
+                <ol v-if="run.node_trace.length" class="runtime-node-list">
+                  <li v-for="node in run.node_trace" :key="node">{{ node }}</li>
+                </ol>
+                <p v-else class="muted">No node trace recorded.</p>
+              </div>
+
+              <div class="runtime-detail-section">
+                <h4>Learning signals</h4>
+                <div v-if="run.learning_signals.length" class="signal-list" aria-label="Learning signals detail">
+                  <span v-for="signal in run.learning_signals" :key="`detail-${signal.kind}`" class="signal-chip">
+                    {{ signal.kind }}
+                  </span>
+                </div>
+                <p v-else class="muted">No learning signals.</p>
+              </div>
+
+              <p v-if="run.error_message" class="runtime-error">{{ run.error_message }}</p>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section class="card quiz-panel">
@@ -736,6 +961,7 @@ onMounted(() => {
 
 .chapter-summary,
 .chapter-state-panel,
+.chapter-runtime-panel,
 .quiz-panel,
 .review-callout,
 .evidence-panel,
@@ -783,6 +1009,162 @@ onMounted(() => {
 
 .quiz-action {
   flex: 0 0 auto;
+}
+
+.chapter-runtime-list {
+  display: grid;
+  gap: 12px;
+}
+
+.chapter-runtime-row {
+  border: 1px solid rgba(20, 184, 166, 0.28);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 10px 26px rgba(15, 118, 110, 0.08);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chapter-runtime-header {
+  display: grid;
+  grid-template-columns: minmax(124px, 0.24fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 13px;
+  text-align: left;
+}
+
+.chapter-runtime-header:hover,
+.chapter-runtime-header:focus-visible {
+  background: rgba(204, 251, 241, 0.34);
+  outline: none;
+}
+
+.chapter-runtime-meta,
+.chapter-runtime-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.runtime-summary {
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.runtime-summary,
+.runtime-trace {
+  overflow-wrap: anywhere;
+}
+
+.runtime-status {
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.runtime-trace {
+  display: block;
+  border-left: 3px solid var(--color-primary-bright);
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  padding-left: 10px;
+}
+
+.chapter-runtime-detail {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid rgba(20, 184, 166, 0.2);
+  background: #ffffff;
+  padding: 14px;
+}
+
+.runtime-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.runtime-detail-grid div {
+  min-width: 0;
+}
+
+.runtime-detail-grid dt {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.runtime-detail-grid dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.runtime-token-breakdown {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.runtime-detail-section {
+  display: grid;
+  gap: 8px;
+}
+
+.runtime-detail-section h4 {
+  font-size: 13px;
+  margin: 0;
+}
+
+.runtime-node-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.runtime-node-list li {
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+.runtime-error {
+  border: 1px solid rgba(220, 38, 38, 0.24);
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #991b1b;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.signal-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.signal-chip {
+  border: 1px solid rgba(20, 184, 166, 0.28);
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
 }
 
 .review-callout {
@@ -1071,6 +1453,11 @@ onMounted(() => {
   }
 
   .review-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .chapter-runtime-header,
+  .runtime-detail-grid {
     grid-template-columns: 1fr;
   }
 

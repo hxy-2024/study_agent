@@ -72,6 +72,24 @@ Graph-backed Session Tutor runs include standardized runtime metadata in
 `memory`; `postgres` is reserved and fails closed until production checkpoint
 storage is configured.
 
+## Agent runtime timeline
+
+Read-only runtime timeline endpoints expose recent `agent_runs` rows for study
+spaces, chapters, and sessions:
+
+- `GET /api/v1/study-spaces/{study_space_id}/agent-runs`
+- `GET /api/v1/chapters/{chapter_id}/agent-runs`
+- `GET /api/v1/sessions/{session_id}/agent-runs`
+
+The endpoints use `CurrentUserContext` for tenant scope. They are intended for
+debugging and product visibility into the three-layer agent design: L1 Space
+Planner, L2 Chapter Mentor, and L3 Session Tutor.
+
+Timeline rows include drilldown fields for graph metadata, node trace, learning
+signals, error messages, completion time, latency, and token counts. Raw prompts
+and full input/output payloads are intentionally not exposed in this UI-facing
+contract.
+
 ## Chapter mentor state
 
 The Chapter Mentor State Agent aggregates tutor sessions for one chapter into a
