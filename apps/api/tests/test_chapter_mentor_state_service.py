@@ -23,7 +23,7 @@ from app.db.models import (
     Tenant,
     User,
 )
-from app.domain.chapter_mentor_state.service import generate_chapter_mentor_state
+from app.domain.chapter_mentor_state.service import build_signal_insights, generate_chapter_mentor_state
 
 
 class FakeScalarResult:
@@ -65,6 +65,39 @@ def make_message(tenant_id: uuid.UUID, study_space_id: uuid.UUID, session_id: uu
     )
 
 
+def test_build_signal_insights_converts_learning_signals_to_state_inputs() -> None:
+    insights = build_signal_insights(
+        [
+            {
+                "run_id": "run-1",
+                "session_id": "session-1",
+                "signals": [
+                    {
+                        "type": "confusion_detected",
+                        "value": True,
+                        "rationale": "Learner question includes confusion markers.",
+                    },
+                    {
+                        "type": "needs_review",
+                        "value": True,
+                        "rationale": "Review is useful.",
+                    },
+                    {
+                        "type": "evidence_used",
+                        "value": False,
+                        "rationale": "Assistant answer included 0 citations.",
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert "Recent tutor sessions show learner confusion." in insights.weak_points
+    assert "Tutor answers need stronger cited evidence." in insights.weak_points
+    assert "Run a focused review based on recent tutor confusion signals." in insights.next_actions
+    assert insights.evidence[0]["run_id"] == "run-1"
+
+
 @pytest.mark.anyio
 async def test_generate_writes_chapter_mentor_state_and_agent_run() -> None:
     tenant_id = uuid.uuid4()
@@ -81,6 +114,7 @@ async def test_generate_writes_chapter_mentor_state_and_agent_run() -> None:
     class FakeSession:
         def __init__(self):
             self.scalar_calls = 0
+            self.scalars_calls = 0
             self.committed = False
 
         async def scalar(self, _statement):
@@ -90,7 +124,10 @@ async def test_generate_writes_chapter_mentor_state_and_agent_run() -> None:
             return None
 
         async def scalars(self, _statement):
-            return FakeScalarResult(messages)
+            self.scalars_calls += 1
+            if self.scalars_calls == 1:
+                return FakeScalarResult(messages)
+            return FakeScalarResult([])
 
         def add(self, obj) -> None:
             added.append(obj)
@@ -139,6 +176,87 @@ async def test_generate_writes_chapter_mentor_state_and_agent_run() -> None:
     assert run.input_payload["message_count"] == 2
     assert run.output_payload["chapter_id"] == str(chapter_id)
     assert run.output_payload["state_id"] == str(result.id)
+
+
+@pytest.mark.anyio
+async def test_generate_enriches_state_from_completed_session_tutor_learning_signals() -> None:
+    tenant_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    chapter = make_chapter(tenant_id, study_space_id, chapter_id)
+    messages = [
+        make_message(tenant_id, study_space_id, session_id, "What is retrieval practice?"),
+    ]
+    signal_runs = [
+        AgentRun(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            study_space_id=study_space_id,
+            session_id=session_id,
+            message_id=None,
+            agent_type=AgentType.session_tutor,
+            status=AgentRunStatus.completed,
+            model="deterministic",
+            input_payload={},
+            output_payload={
+                "learning_signals": [
+                    {
+                        "type": "confusion_detected",
+                        "value": True,
+                        "rationale": "Learner question includes confusion markers.",
+                    },
+                    {
+                        "type": "needs_review",
+                        "value": True,
+                        "rationale": "Review is useful.",
+                    },
+                ]
+            },
+        )
+    ]
+    added = []
+
+    class FakeSession:
+        def __init__(self):
+            self.scalar_calls = 0
+            self.scalars_calls = 0
+
+        async def scalar(self, _statement):
+            self.scalar_calls += 1
+            if self.scalar_calls == 1:
+                return chapter
+            return None
+
+        async def scalars(self, _statement):
+            self.scalars_calls += 1
+            if self.scalars_calls == 1:
+                return FakeScalarResult(messages)
+            return FakeScalarResult(signal_runs)
+
+        def add(self, obj) -> None:
+            added.append(obj)
+
+        async def commit(self) -> None:
+            return None
+
+        async def refresh(self, obj) -> None:
+            if obj.id is None:
+                obj.id = uuid.uuid4()
+            if getattr(obj, "created_at", None) is None:
+                obj.created_at = datetime.now(UTC)
+            if getattr(obj, "updated_at", None) is None:
+                obj.updated_at = datetime.now(UTC)
+
+    result = await generate_chapter_mentor_state(
+        session=FakeSession(),
+        tenant_id=tenant_id,
+        chapter_id=chapter_id,
+    )
+
+    assert any("learner confusion" in item.lower() for item in result.weak_points)
+    assert any("focused review" in item.lower() for item in result.next_actions)
+    assert any(item.get("kind") == "learning_signal" for item in result.evidence)
 
 
 @pytest.mark.anyio
