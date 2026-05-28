@@ -137,6 +137,11 @@ def _build_timeline_item(
         summary=summary,
         error_message=row.error_message,
         created_at=row.created_at,
+        completed_at=row.completed_at,
+        latency_ms=row.latency_ms,
+        prompt_tokens=row.prompt_tokens,
+        completion_tokens=row.completion_tokens,
+        total_tokens=row.total_tokens,
     )
 
 

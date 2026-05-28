@@ -163,6 +163,7 @@ def test_build_timeline_item_uses_session_chapter_id_over_payload_chapter_id() -
     session_chapter_id = uuid.uuid4()
     payload_chapter_id = uuid.uuid4()
     created_at = datetime.now(UTC)
+    completed_at = datetime.now(UTC)
 
     fake_run = SimpleNamespace(
         id=run_id,
@@ -184,6 +185,11 @@ def test_build_timeline_item_uses_session_chapter_id_over_payload_chapter_id() -
         },
         error_message=None,
         created_at=created_at,
+        completed_at=completed_at,
+        latency_ms=1234,
+        prompt_tokens=100,
+        completion_tokens=25,
+        total_tokens=125,
     )
 
     item = _build_timeline_item(fake_run, chapter_id=session_chapter_id)
@@ -200,6 +206,11 @@ def test_build_timeline_item_uses_session_chapter_id_over_payload_chapter_id() -
     assert item.learning_signals == [{"type": "needs_review"}]
     assert item.summary == "Session tutor completed with 1 citation."
     assert item.created_at == created_at
+    assert item.completed_at == completed_at
+    assert item.latency_ms == 1234
+    assert item.prompt_tokens == 100
+    assert item.completion_tokens == 25
+    assert item.total_tokens == 125
 
 
 def test_bounded_limit_clamps_to_supported_range() -> None:
