@@ -46,20 +46,23 @@ def build_signal_insights(signal_runs: list[dict[str, Any]]) -> SignalInsights:
     weak_points: list[str] = []
     next_actions: list[str] = []
     evidence: list[dict[str, Any]] = []
+    evidence_keys: set[tuple[str, Any, Any, tuple[str, ...]]] = set()
 
     for run in signal_runs:
+        if not isinstance(run, dict):
+            continue
         signals = run.get("signals", [])
         if not isinstance(signals, list):
             continue
         true_signal_types = {
             signal.get("type")
             for signal in signals
-            if isinstance(signal, dict) and signal.get("value") is True
+            if isinstance(signal, dict) and isinstance(signal.get("type"), str) and signal.get("value") is True
         }
         false_signal_types = {
             signal.get("type")
             for signal in signals
-            if isinstance(signal, dict) and signal.get("value") is False
+            if isinstance(signal, dict) and isinstance(signal.get("type"), str) and signal.get("value") is False
         }
         if "confusion_detected" in true_signal_types:
             weak_points.append("Recent tutor sessions show learner confusion.")
@@ -68,28 +71,56 @@ def build_signal_insights(signal_runs: list[dict[str, Any]]) -> SignalInsights:
         if "evidence_used" in false_signal_types:
             weak_points.append("Tutor answers need stronger cited evidence.")
         if "chapter_supervision_used" in true_signal_types:
-            evidence.append(
-                {
-                    "kind": "learning_signal",
-                    "run_id": run.get("run_id"),
-                    "session_id": run.get("session_id"),
-                    "signal_types": sorted(true_signal_types),
-                }
-            )
+            signal_types = sorted(true_signal_types)
+            evidence_key = ("learning_signal", run.get("run_id"), run.get("session_id"), tuple(signal_types))
+            if evidence_key not in evidence_keys:
+                evidence_keys.add(evidence_key)
+                evidence.append(
+                    {
+                        "kind": "learning_signal",
+                        "run_id": run.get("run_id"),
+                        "session_id": run.get("session_id"),
+                        "signal_types": signal_types,
+                    }
+                )
         elif true_signal_types or false_signal_types:
-            evidence.append(
-                {
-                    "kind": "learning_signal",
-                    "run_id": run.get("run_id"),
-                    "session_id": run.get("session_id"),
-                    "signal_types": sorted(true_signal_types | false_signal_types),
-                }
-            )
+            signal_types = sorted(true_signal_types | false_signal_types)
+            evidence_key = ("learning_signal", run.get("run_id"), run.get("session_id"), tuple(signal_types))
+            if evidence_key not in evidence_keys:
+                evidence_keys.add(evidence_key)
+                evidence.append(
+                    {
+                        "kind": "learning_signal",
+                        "run_id": run.get("run_id"),
+                        "session_id": run.get("session_id"),
+                        "signal_types": signal_types,
+                    }
+                )
 
     return SignalInsights(
         weak_points=list(dict.fromkeys(weak_points))[:3],
         next_actions=list(dict.fromkeys(next_actions))[:3],
         evidence=evidence[:5],
+    )
+
+
+def _extract_learning_signals(output_payload: Any) -> Any:
+    if not isinstance(output_payload, dict):
+        return []
+    return output_payload.get("learning_signals", [])
+
+
+def _build_signal_runs_statement(tenant_id: uuid.UUID, chapter_id: uuid.UUID):
+    return (
+        select(AgentRun)
+        .join(Session, AgentRun.session_id == Session.id)
+        .where(
+            AgentRun.tenant_id == tenant_id,
+            AgentRun.agent_type == AgentType.session_tutor,
+            AgentRun.status == AgentRunStatus.completed,
+            Session.chapter_id == chapter_id,
+        )
+        .order_by(AgentRun.created_at.desc(), AgentRun.id)
     )
 
 
@@ -184,22 +215,12 @@ async def generate_chapter_mentor_state(
     source_session_count = len({message.session_id for message in messages})
     source_message_count = len(messages)
 
-    signal_run_rows = await session.scalars(
-        select(AgentRun)
-        .join(Session, AgentRun.session_id == Session.id)
-        .where(
-            AgentRun.tenant_id == tenant_id,
-            AgentRun.agent_type == AgentType.session_tutor,
-            AgentRun.status == AgentRunStatus.completed,
-            Session.chapter_id == chapter_id,
-        )
-        .order_by(AgentRun.created_at.desc(), AgentRun.id)
-    )
+    signal_run_rows = await session.scalars(_build_signal_runs_statement(tenant_id, chapter_id))
     signal_runs = [
         {
             "run_id": str(run.id),
             "session_id": str(run.session_id),
-            "signals": (run.output_payload or {}).get("learning_signals", []),
+            "signals": _extract_learning_signals(run.output_payload),
         }
         for run in list(signal_run_rows.all() if hasattr(signal_run_rows, "all") else signal_run_rows)[:10]
     ]

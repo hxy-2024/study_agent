@@ -24,6 +24,7 @@ from app.db.models import (
     User,
 )
 from app.domain.chapter_mentor_state.service import build_signal_insights, generate_chapter_mentor_state
+from app.domain.chapter_mentor_state import service as chapter_mentor_service
 
 
 class FakeScalarResult:
@@ -96,6 +97,101 @@ def test_build_signal_insights_converts_learning_signals_to_state_inputs() -> No
     assert "Tutor answers need stronger cited evidence." in insights.weak_points
     assert "Run a focused review based on recent tutor confusion signals." in insights.next_actions
     assert insights.evidence[0]["run_id"] == "run-1"
+
+
+def test_build_signal_insights_ignores_malformed_helper_inputs() -> None:
+    insights = build_signal_insights(
+        [
+            {"run_id": "bad-signals", "session_id": "session-1", "signals": "not-a-list"},
+            {
+                "run_id": "mixed-signals",
+                "session_id": "session-2",
+                "signals": [
+                    None,
+                    "not-a-dict",
+                    {"type": None, "value": True},
+                    {"type": "needs_review", "value": "true"},
+                    {"type": "confusion_detected", "value": True},
+                    {"type": "evidence_used", "value": False},
+                ],
+            },
+        ]
+    )
+
+    assert insights.weak_points == [
+        "Recent tutor sessions show learner confusion.",
+        "Tutor answers need stronger cited evidence.",
+    ]
+    assert insights.next_actions == []
+    assert insights.evidence == [
+        {
+            "kind": "learning_signal",
+            "run_id": "mixed-signals",
+            "session_id": "session-2",
+            "signal_types": ["confusion_detected", "evidence_used"],
+        }
+    ]
+
+
+def test_build_signal_insights_deduplicates_and_limits_evidence() -> None:
+    duplicate_run = {
+        "run_id": "run-1",
+        "session_id": "session-1",
+        "signals": [
+            {"type": "chapter_supervision_used", "value": True},
+            {"type": "needs_review", "value": True},
+        ],
+    }
+    unique_runs = [
+        {
+            "run_id": f"run-{index}",
+            "session_id": f"session-{index}",
+            "signals": [{"type": "confusion_detected", "value": True}],
+        }
+        for index in range(2, 8)
+    ]
+
+    insights = build_signal_insights([duplicate_run, duplicate_run, *unique_runs])
+
+    assert len(insights.evidence) == 5
+    assert insights.evidence.count(insights.evidence[0]) == 1
+    assert insights.evidence[0] == {
+        "kind": "learning_signal",
+        "run_id": "run-1",
+        "session_id": "session-1",
+        "signal_types": ["chapter_supervision_used", "needs_review"],
+    }
+
+
+def test_build_signal_insights_no_signal_behavior_keeps_existing_empty_outputs() -> None:
+    insights = build_signal_insights(
+        [
+            {"run_id": "run-1", "session_id": "session-1", "signals": []},
+            {"run_id": "run-2", "session_id": "session-2"},
+        ]
+    )
+
+    assert insights.weak_points == []
+    assert insights.next_actions == []
+    assert insights.evidence == []
+
+
+def test_build_signal_runs_statement_filters_completed_session_tutor_runs_for_chapter() -> None:
+    tenant_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+
+    statement = chapter_mentor_service._build_signal_runs_statement(tenant_id, chapter_id)
+    compiled = statement.compile(compile_kwargs={"literal_binds": True})
+    sql = str(compiled)
+
+    assert "agent_runs.tenant_id" in sql
+    assert tenant_id.hex in sql
+    assert "agent_runs.agent_type" in sql
+    assert AgentType.session_tutor.value in sql
+    assert "agent_runs.status" in sql
+    assert AgentRunStatus.completed.value in sql
+    assert "sessions.chapter_id" in sql
+    assert chapter_id.hex in sql
 
 
 @pytest.mark.anyio
@@ -257,6 +353,76 @@ async def test_generate_enriches_state_from_completed_session_tutor_learning_sig
     assert any("learner confusion" in item.lower() for item in result.weak_points)
     assert any("focused review" in item.lower() for item in result.next_actions)
     assert any(item.get("kind") == "learning_signal" for item in result.evidence)
+
+
+@pytest.mark.anyio
+async def test_generate_treats_non_dict_output_payload_as_no_learning_signals() -> None:
+    tenant_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    chapter = make_chapter(tenant_id, study_space_id, chapter_id)
+    messages = [
+        make_message(tenant_id, study_space_id, session_id, "I am confused about citations."),
+    ]
+    signal_runs = [
+        AgentRun(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            study_space_id=study_space_id,
+            session_id=session_id,
+            message_id=None,
+            agent_type=AgentType.session_tutor,
+            status=AgentRunStatus.completed,
+            model="deterministic",
+            input_payload={},
+            output_payload="not-a-dict",
+        )
+    ]
+
+    class FakeSession:
+        def __init__(self):
+            self.scalar_calls = 0
+            self.scalars_calls = 0
+
+        async def scalar(self, _statement):
+            self.scalar_calls += 1
+            if self.scalar_calls == 1:
+                return chapter
+            return None
+
+        async def scalars(self, _statement):
+            self.scalars_calls += 1
+            if self.scalars_calls == 1:
+                return FakeScalarResult(messages)
+            return FakeScalarResult(signal_runs)
+
+        def add(self, _obj) -> None:
+            return None
+
+        async def commit(self) -> None:
+            return None
+
+        async def refresh(self, obj) -> None:
+            if obj.id is None:
+                obj.id = uuid.uuid4()
+            if getattr(obj, "created_at", None) is None:
+                obj.created_at = datetime.now(UTC)
+            if getattr(obj, "updated_at", None) is None:
+                obj.updated_at = datetime.now(UTC)
+
+    result = await generate_chapter_mentor_state(
+        session=FakeSession(),
+        tenant_id=tenant_id,
+        chapter_id=chapter_id,
+    )
+
+    assert result.weak_points == ["Needs clarification: I am confused about citations."]
+    assert result.next_actions == [
+        "Review the latest discussion and restate the key idea in your own words.",
+        "Answer one follow-up question using cited evidence from the chapter sources.",
+    ]
+    assert all(item.get("kind") != "learning_signal" for item in result.evidence)
 
 
 @pytest.mark.anyio
