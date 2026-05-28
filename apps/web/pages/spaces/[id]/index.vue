@@ -120,6 +120,22 @@ interface PlannerAction {
   updated_at: string | null
 }
 
+interface AgentRunLearningSignal {
+  kind: string
+  [key: string]: unknown
+}
+
+interface AgentRunTimelineItem {
+  id?: string
+  agent_type: string
+  status: string
+  summary: string
+  node_trace: string[]
+  learning_signals: AgentRunLearningSignal[]
+  thread_id: string | null
+  checkpoint_backend: string | null
+}
+
 const DEV_AUTH_HEADERS = {
   'X-User-Id': '00000000-0000-0000-0000-000000000002',
   'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
@@ -138,11 +154,13 @@ const chunks = ref<SourceChunk[]>([])
 const routes = ref<RouteWithChapters[]>([])
 const plannerState = ref<SpacePlannerState | null>(null)
 const plannerActions = ref<PlannerAction[]>([])
+const agentRuns = ref<AgentRunTimelineItem[]>([])
 const chunklessSourceIds = ref<Set<string>>(new Set())
 const loadingSources = ref(false)
 const loadingRoutes = ref(false)
 const loadingPlannerState = ref(false)
 const loadingPlannerActions = ref(false)
+const loadingAgentRuns = ref(false)
 const generatingRoute = ref(false)
 const runningPlanner = ref(false)
 const creatingPlannerActions = ref(false)
@@ -272,6 +290,32 @@ function normalizePlannerState(response: SpacePlannerState): SpacePlannerState |
   }
 }
 
+function normalizeAgentRuns(response: { runs?: AgentRunTimelineItem[] } | null | undefined): AgentRunTimelineItem[] {
+  return (response?.runs ?? [])
+    .filter(run => run?.agent_type && run.status)
+    .map(run => ({
+      ...run,
+      summary: run.summary || 'No summary recorded.',
+      node_trace: Array.isArray(run.node_trace) ? run.node_trace.filter(Boolean).map(String) : [],
+      learning_signals: Array.isArray(run.learning_signals)
+        ? run.learning_signals
+            .map(signal => (typeof signal === 'string' ? { kind: signal } : signal))
+            .filter((signal): signal is AgentRunLearningSignal => Boolean(signal?.kind))
+        : [],
+      thread_id: run.thread_id ?? null,
+      checkpoint_backend: run.checkpoint_backend ?? null
+    }))
+}
+
+function agentTypeLabel(agentType: string) {
+  const labels: Record<string, string> = {
+    l1_planner: 'L1 Planner',
+    l2_mentor: 'L2 Mentor',
+    l3_tutor: 'L3 Tutor'
+  }
+  return labels[agentType] ?? agentType
+}
+
 function onFileSelected(event: Event) {
   const input = event.target as HTMLInputElement
   selectedFile.value = input.files?.[0] ?? null
@@ -344,6 +388,21 @@ async function loadPlannerActions() {
     plannerActions.value = []
   } finally {
     loadingPlannerActions.value = false
+  }
+}
+
+async function loadAgentRuns() {
+  loadingAgentRuns.value = true
+  try {
+    const response = await $fetch<{ runs: AgentRunTimelineItem[] }>(
+      `${config.public.apiBaseUrl}/study-spaces/${spaceId.value}/agent-runs?limit=8`,
+      { headers: protectedHeaders() }
+    )
+    agentRuns.value = normalizeAgentRuns(response)
+  } catch {
+    agentRuns.value = []
+  } finally {
+    loadingAgentRuns.value = false
   }
 }
 
@@ -556,6 +615,7 @@ async function loadChunks(source: SourceItem) {
 onMounted(() => {
   loadSources()
   loadRoutes()
+  loadAgentRuns()
 })
 </script>
 
@@ -745,6 +805,45 @@ onMounted(() => {
                 >
                   Dismiss
                 </button>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="card agent-runtime-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Agent runtime</p>
+              <h2>Recent agent runs</h2>
+              <p class="muted">Latest L1 Planner, L2 Mentor, and L3 Tutor execution traces for this study space.</p>
+            </div>
+            <button
+              data-testid="refresh-agent-runs"
+              type="button"
+              class="secondary-button"
+              :disabled="loadingAgentRuns"
+              @click="loadAgentRuns"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <p v-if="loadingAgentRuns" class="muted">Loading agent runtime...</p>
+          <p v-else-if="agentRuns.length === 0" class="empty-state">No agent runs recorded yet.</p>
+          <div v-else class="agent-runtime-list">
+            <article v-for="run in agentRuns" :key="run.id ?? `${run.agent_type}-${run.thread_id}`" class="agent-runtime-row">
+              <div class="agent-runtime-meta">
+                <span class="status-badge">{{ agentTypeLabel(run.agent_type) }}</span>
+                <span class="runtime-status">{{ run.status }}</span>
+              </div>
+              <div class="agent-runtime-body">
+                <h3>{{ run.summary }}</h3>
+                <p v-if="run.node_trace.length" class="runtime-trace">{{ run.node_trace.join(' -> ') }}</p>
+                <p v-else class="runtime-trace">No node trace recorded.</p>
+                <div v-if="run.learning_signals.length" class="signal-list" aria-label="Learning signals">
+                  <span v-for="signal in run.learning_signals" :key="signal.kind" class="signal-chip">{{ signal.kind }}</span>
+                </div>
+                <p v-else class="muted">No learning signals.</p>
               </div>
             </article>
           </div>
@@ -945,6 +1044,13 @@ onMounted(() => {
   box-shadow: 0 18px 48px rgba(15, 118, 110, 0.12);
 }
 
+.agent-runtime-panel {
+  display: grid;
+  gap: 16px;
+  border-color: rgba(20, 184, 166, 0.3);
+  box-shadow: 0 16px 42px rgba(15, 118, 110, 0.1);
+}
+
 .planner-grid {
   display: grid;
   grid-template-columns: minmax(240px, 1.05fr) repeat(3, minmax(0, 1fr));
@@ -1034,6 +1140,76 @@ onMounted(() => {
 
 .planner-action-row p {
   color: var(--color-muted);
+}
+
+.agent-runtime-list {
+  display: grid;
+  gap: 12px;
+}
+
+.agent-runtime-row {
+  display: grid;
+  grid-template-columns: minmax(128px, 0.28fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  border: 1px solid rgba(20, 184, 166, 0.28);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 10px 28px rgba(15, 118, 110, 0.08);
+  padding: 13px;
+  min-width: 0;
+}
+
+.agent-runtime-meta,
+.agent-runtime-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-runtime-body h3 {
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.agent-runtime-body h3,
+.runtime-trace {
+  overflow-wrap: anywhere;
+}
+
+.runtime-status {
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.runtime-trace {
+  border-left: 3px solid var(--color-primary-bright);
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  padding-left: 10px;
+}
+
+.signal-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.signal-chip {
+  border: 1px solid rgba(20, 184, 166, 0.28);
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
 }
 
 .route-actions {
@@ -1308,6 +1484,10 @@ p {
   }
 
   .planner-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-runtime-row {
     grid-template-columns: 1fr;
   }
 }
