@@ -1,0 +1,112 @@
+import uuid
+from types import SimpleNamespace
+
+import pytest
+
+from app.db.models import AgentRun, AgentType, ChapterStatus, MasteryLevel, SpacePlannerState, StudySpace
+from app.domain.space_planner.service import (
+    build_review_recommendations,
+    build_risk_chapters,
+    build_route_adjustments,
+    choose_next_chapter,
+    generate_space_planner_state,
+)
+
+
+def make_chapter(title: str, status: ChapterStatus, order_index: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        title=title,
+        status=status,
+        order_index=order_index,
+    )
+
+
+def test_choose_next_chapter_prefers_active_low_mastery() -> None:
+    chapter_a = make_chapter("Retrieval", ChapterStatus.active, 1)
+    chapter_b = make_chapter("Generation", ChapterStatus.not_started, 2)
+    mastery = {chapter_a.id: SimpleNamespace(score_percent=40, level=MasteryLevel.developing)}
+
+    assert choose_next_chapter([chapter_b, chapter_a], mastery) == chapter_a.id
+
+
+def test_choose_next_chapter_falls_back_to_first_not_completed() -> None:
+    chapter_a = make_chapter("Retrieval", ChapterStatus.completed, 1)
+    chapter_b = make_chapter("Generation", ChapterStatus.not_started, 2)
+
+    assert choose_next_chapter([chapter_a, chapter_b], {}) == chapter_b.id
+
+
+def test_risk_review_and_adjustment_builders_use_mastery_and_mentor_state() -> None:
+    chapter = make_chapter("Citations", ChapterStatus.active, 1)
+    mastery = {
+        chapter.id: SimpleNamespace(score_percent=35, level=MasteryLevel.new, weak_points=["Missed citation support"])
+    }
+    mentor_states = {chapter.id: SimpleNamespace(weak_points=["Confused about grounding"])}
+
+    risks = build_risk_chapters([chapter], mastery, mentor_states)
+    reviews = build_review_recommendations([chapter], mastery, mentor_states)
+    adjustments = build_route_adjustments([chapter], mastery)
+
+    assert risks[0]["chapter_id"] == str(chapter.id)
+    assert risks[0]["score_percent"] == 35
+    assert reviews[0]["action"] == "Retake chapter quiz after evidence review."
+    assert adjustments[0]["kind"] == "insert_review"
+
+
+@pytest.mark.anyio
+async def test_generate_space_planner_state_upserts_state_and_agent_run(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    added = []
+
+    study_space = StudySpace(
+        id=study_space_id,
+        tenant_id=tenant_id,
+        owner_user_id=user_id,
+        name="AI Study",
+        goal="Learn RAG",
+    )
+    chapter = SimpleNamespace(id=chapter_id, title="Retrieval", status=ChapterStatus.active, order_index=1)
+    mastery = {chapter_id: SimpleNamespace(score_percent=50, level=MasteryLevel.developing, weak_points=["Citations"])}
+    mentor = {chapter_id: SimpleNamespace(weak_points=["Needs better grounding"])}
+
+    class FakeSession:
+        async def scalar(self, _statement):
+            return None
+
+        def add(self, obj) -> None:
+            added.append(obj)
+
+        async def commit(self) -> None:
+            pass
+
+        async def refresh(self, obj) -> None:
+            if obj.updated_at is None:
+                obj.updated_at = None
+
+    async def fake_snapshot(**kwargs):
+        return study_space, [chapter], mastery, mentor
+
+    monkeypatch.setattr("app.domain.space_planner.service.build_space_planner_snapshot", fake_snapshot)
+
+    response = await generate_space_planner_state(
+        session=FakeSession(),
+        tenant_id=tenant_id,
+        user_id=user_id,
+        study_space_id=study_space_id,
+    )
+
+    states = [obj for obj in added if isinstance(obj, SpacePlannerState)]
+    agent_runs = [obj for obj in added if isinstance(obj, AgentRun)]
+
+    assert len(states) == 1
+    assert states[0].tenant_id == tenant_id
+    assert states[0].user_id == user_id
+    assert states[0].next_chapter_id == chapter_id
+    assert states[0].risk_chapters[0]["chapter_id"] == str(chapter_id)
+    assert len(agent_runs) == 1
+    assert agent_runs[0].agent_type == AgentType.space_planner
+    assert response.next_chapter_id == chapter_id
