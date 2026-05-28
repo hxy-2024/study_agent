@@ -85,7 +85,7 @@ def test_summarize_agent_run_uses_stable_agent_summaries() -> None:
             {"summary": "Route refreshed."},
             None,
         )
-        == "Space planner completed: Route refreshed."
+        == "Route refreshed."
     )
     assert (
         _summarize_agent_run(
@@ -94,7 +94,7 @@ def test_summarize_agent_run_uses_stable_agent_summaries() -> None:
             {"summary": "Mentor state updated."},
             None,
         )
-        == "Chapter mentor completed: Mentor state updated."
+        == "Mentor state updated."
     )
     assert (
         _summarize_agent_run(

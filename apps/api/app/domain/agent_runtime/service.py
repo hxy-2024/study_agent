@@ -27,7 +27,14 @@ def _bounded_limit(limit: int) -> int:
 def _extract_graph_metadata(input_payload: Any, output_payload: Any) -> AgentRunGraphMetadata:
     input_data = _safe_payload(input_payload)
     output_data = _safe_payload(output_payload)
-    payload = output_data if output_data else input_data
+    graph_keys = {
+        "graph_name",
+        "thread_id",
+        "checkpoint_backend",
+        "state_schema_version",
+        "node_trace",
+    }
+    payload = output_data if any(key in output_data for key in graph_keys) else input_data
 
     raw_node_trace = payload.get("node_trace")
     node_trace = [str(item) for item in raw_node_trace] if isinstance(raw_node_trace, list) else []
@@ -73,9 +80,9 @@ def _summarize_agent_run(
     agent_type_value = _enum_value(agent_type)
 
     if agent_type_value == AgentType.space_planner.value:
-        return f"Space planner completed: {summary_text or 'study plan updated.'}"
+        return summary_text or "Space planner updated next action."
     if agent_type_value == AgentType.chapter_mentor.value:
-        return f"Chapter mentor completed: {summary_text or 'chapter state updated.'}"
+        return summary_text or "Chapter mentor state refreshed."
     if agent_type_value == AgentType.session_tutor.value:
         raw_citation_count = output_data.get("citation_count", 0)
         citation_count = raw_citation_count if isinstance(raw_citation_count, int) else 0
@@ -165,7 +172,7 @@ async def list_agent_runs_for_study_space(
         session_ids=[row.session_id for row in rows if row.session_id is not None],
     )
     return AgentRunTimelineResponse(
-        items=[
+        runs=[
             _build_timeline_item(row, chapter_id=chapter_ids_by_session.get(row.session_id))
             for row in rows
         ]
@@ -223,7 +230,7 @@ async def list_agent_runs_for_chapter(
         session_ids=[row.session_id for row in rows if row.session_id is not None],
     )
     return AgentRunTimelineResponse(
-        items=[
+        runs=[
             _build_timeline_item(
                 row,
                 chapter_id=chapter_ids_by_session.get(row.session_id, chapter_id),
@@ -260,7 +267,7 @@ async def list_agent_runs_for_session(
         )
     )
     return AgentRunTimelineResponse(
-        items=[_build_timeline_item(row, chapter_id=tutor_session.chapter_id) for row in rows]
+        runs=[_build_timeline_item(row, chapter_id=tutor_session.chapter_id) for row in rows]
     )
 
 

@@ -33,4 +33,4 @@ class AgentRunTimelineItem(BaseModel):
 
 
 class AgentRunTimelineResponse(BaseModel):
-    items: list[AgentRunTimelineItem] = Field(default_factory=list)
+    runs: list[AgentRunTimelineItem] = Field(default_factory=list)
