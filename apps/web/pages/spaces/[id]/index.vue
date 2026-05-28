@@ -106,6 +106,20 @@ interface SpacePlannerState {
   updated_at: string | null
 }
 
+interface PlannerAction {
+  id: string
+  study_space_id: string
+  chapter_id: string | null
+  source_planner_state_id: string | null
+  action_type: string
+  status: string
+  title: string
+  rationale: string
+  payload: Record<string, unknown>
+  created_at: string | null
+  updated_at: string | null
+}
+
 const DEV_AUTH_HEADERS = {
   'X-User-Id': '00000000-0000-0000-0000-000000000002',
   'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
@@ -123,13 +137,17 @@ const selectedSourceName = ref('')
 const chunks = ref<SourceChunk[]>([])
 const routes = ref<RouteWithChapters[]>([])
 const plannerState = ref<SpacePlannerState | null>(null)
+const plannerActions = ref<PlannerAction[]>([])
 const chunklessSourceIds = ref<Set<string>>(new Set())
 const loadingSources = ref(false)
 const loadingRoutes = ref(false)
 const loadingPlannerState = ref(false)
+const loadingPlannerActions = ref(false)
 const generatingRoute = ref(false)
 const runningPlanner = ref(false)
+const creatingPlannerActions = ref(false)
 const activatingRouteId = ref<string | null>(null)
+const updatingPlannerActionId = ref<string | null>(null)
 const uploadPhase = ref<UploadPhase>('idle')
 const ingestingSourceId = ref<string | null>(null)
 const loadingChunks = ref(false)
@@ -287,8 +305,10 @@ async function loadRoutes() {
     routes.value = response.routes ?? []
     if (routes.value.some(item => item.route.status === 'active')) {
       await loadPlannerState()
+      await loadPlannerActions()
     } else {
       plannerState.value = null
+      plannerActions.value = []
     }
   } catch (error) {
     errorMessage.value = appendBackendMessage('Failed to load learning routes.', error)
@@ -312,6 +332,21 @@ async function loadPlannerState() {
   }
 }
 
+async function loadPlannerActions() {
+  loadingPlannerActions.value = true
+  try {
+    const response = await $fetch<{ actions: PlannerAction[] }>(
+      `${config.public.apiBaseUrl}/study-spaces/${spaceId.value}/planner-actions`,
+      { headers: protectedHeaders() }
+    )
+    plannerActions.value = response.actions ?? []
+  } catch {
+    plannerActions.value = []
+  } finally {
+    loadingPlannerActions.value = false
+  }
+}
+
 async function runSpacePlanner() {
   runningPlanner.value = true
   errorMessage.value = ''
@@ -328,6 +363,46 @@ async function runSpacePlanner() {
     errorMessage.value = appendBackendMessage('Failed to run space planner.', error)
   } finally {
     runningPlanner.value = false
+  }
+}
+
+async function createPlannerActions() {
+  creatingPlannerActions.value = true
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<{ actions: PlannerAction[] }>(
+      `${config.public.apiBaseUrl}/planner-actions/from-latest-state`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: { study_space_id: spaceId.value }
+      }
+    )
+    plannerActions.value = response.actions ?? []
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to create planner actions.', error)
+  } finally {
+    creatingPlannerActions.value = false
+  }
+}
+
+async function updatePlannerAction(action: PlannerAction, status: string) {
+  updatingPlannerActionId.value = action.id
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<PlannerAction>(
+      `${config.public.apiBaseUrl}/planner-actions/${action.id}/status`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: { status }
+      }
+    )
+    plannerActions.value = plannerActions.value.map(item => (item.id === action.id ? response : item))
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to update planner action.', error)
+  } finally {
+    updatingPlannerActionId.value = null
   }
 }
 
@@ -614,6 +689,67 @@ onMounted(() => {
           <p v-else class="empty-state">Run the planner after activating a route or submitting a quiz.</p>
         </section>
 
+        <section class="card planner-actions-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Action queue</p>
+              <h2>Planner actions</h2>
+              <p class="muted">Confirm planner suggestions before they affect your study flow.</p>
+            </div>
+            <button
+              data-testid="create-planner-actions"
+              type="button"
+              class="secondary-button"
+              :disabled="creatingPlannerActions"
+              @click="createPlannerActions"
+            >
+              {{ creatingPlannerActions ? 'Creating...' : 'Create actions' }}
+            </button>
+          </div>
+
+          <p v-if="loadingPlannerActions" class="muted">Loading planner actions...</p>
+          <p v-else-if="plannerActions.length === 0" class="empty-state">No planner actions queued.</p>
+          <div v-else class="planner-action-list">
+            <article v-for="action in plannerActions" :key="action.id" class="planner-action-row">
+              <span class="status-badge">{{ action.status }}</span>
+              <div>
+                <h3>{{ action.title }}</h3>
+                <p>{{ action.rationale }}</p>
+              </div>
+              <div class="row-actions">
+                <button
+                  v-if="action.status === 'proposed'"
+                  data-testid="accept-planner-action"
+                  type="button"
+                  class="secondary-button"
+                  :disabled="updatingPlannerActionId === action.id"
+                  @click="updatePlannerAction(action, 'accepted')"
+                >
+                  Accept
+                </button>
+                <button
+                  v-if="action.status !== 'completed'"
+                  type="button"
+                  class="secondary-button"
+                  :disabled="updatingPlannerActionId === action.id"
+                  @click="updatePlannerAction(action, 'completed')"
+                >
+                  Complete
+                </button>
+                <button
+                  v-if="action.status === 'proposed'"
+                  type="button"
+                  class="secondary-button"
+                  :disabled="updatingPlannerActionId === action.id"
+                  @click="updatePlannerAction(action, 'dismissed')"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </article>
+          </div>
+        </section>
+
         <p v-if="errorMessage" class="error-alert">{{ errorMessage }}</p>
 
         <section class="card source-upload-card">
@@ -872,6 +1008,31 @@ onMounted(() => {
 }
 
 .planner-list span {
+  color: var(--color-muted);
+}
+
+.planner-action-list {
+  display: grid;
+  gap: 12px;
+}
+
+.planner-action-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  padding: 12px;
+}
+
+.planner-action-row h3,
+.planner-action-row p {
+  overflow-wrap: anywhere;
+}
+
+.planner-action-row p {
   color: var(--color-muted);
 }
 
@@ -1143,6 +1304,10 @@ p {
   }
 
   .planner-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .planner-action-row {
     grid-template-columns: 1fr;
   }
 }

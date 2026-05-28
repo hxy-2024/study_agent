@@ -100,6 +100,20 @@ flags risk chapters, proposes review actions, and records route adjustment
 proposals. It does not automatically mutate learning routes; route changes stay
 as proposals until a future explicit approval workflow is added.
 
+## Planner actions
+
+Planner actions convert Space Planner recommendations into explicit user-owned
+queue items.
+
+Endpoints:
+
+- `GET /api/v1/study-spaces/{study_space_id}/planner-actions`
+- `POST /api/v1/planner-actions/from-latest-state`
+- `POST /api/v1/planner-actions/{action_id}/status`
+
+Actions support `proposed`, `accepted`, `completed`, and `dismissed` states.
+They do not mutate learning routes automatically.
+
 ## Runtime source ingestion
 
 Local text/Markdown ingestion flow:
