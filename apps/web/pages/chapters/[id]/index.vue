@@ -96,6 +96,21 @@ interface QuizSummary {
   question_count: number
 }
 
+interface ChapterAnnotation {
+  id: string
+  tenant_id: string
+  user_id: string
+  study_space_id: string
+  chapter_id: string
+  source_chunk_id: string | null
+  kind: 'note' | 'highlight' | string
+  content: string | null
+  quote: string | null
+  anchor: Record<string, unknown>
+  created_at: string | null
+  updated_at: string | null
+}
+
 interface PlannerAction {
   id: string
   study_space_id: string
@@ -169,6 +184,11 @@ const generatingQuiz = ref(false)
 const plannerActions = ref<PlannerAction[]>([])
 const loadingPlannerActions = ref(false)
 const updatingPlannerActionId = ref<string | null>(null)
+const annotations = ref<ChapterAnnotation[]>([])
+const loadingAnnotations = ref(false)
+const savingNote = ref(false)
+const savingHighlightChunkId = ref<string | null>(null)
+const noteDraft = ref('')
 const agentRuns = ref<AgentRunTimelineItem[]>([])
 const selectedAgentRunId = ref<string | null>(null)
 const loadingAgentRuns = ref(false)
@@ -200,6 +220,9 @@ const activeReviewActions = computed(() => {
     )
   })
 })
+const notes = computed(() => annotations.value.filter(annotation => annotation.kind === 'note'))
+const highlights = computed(() => annotations.value.filter(annotation => annotation.kind === 'highlight'))
+const canSaveNote = computed(() => noteDraft.value.trim().length > 0 && !savingNote.value)
 const selectedAgentRun = computed(() => {
   if (!selectedAgentRunId.value) return null
   return agentRuns.value.find(run => runtimeRunKey(run) === selectedAgentRunId.value) ?? null
@@ -230,6 +253,10 @@ function normalizeMessages(response: MentorMessage[] | { messages?: MentorMessag
 
 function normalizePlannerActions(response: PlannerAction[] | { actions?: PlannerAction[] }) {
   return Array.isArray(response) ? response : response.actions ?? []
+}
+
+function normalizeAnnotations(response: { annotations?: ChapterAnnotation[] } | ChapterAnnotation[] | null | undefined) {
+  return Array.isArray(response) ? response : response?.annotations ?? []
 }
 
 function preferredSessionId() {
@@ -292,6 +319,10 @@ function agentTypeLabel(agentType: string) {
   return labels[agentType] ?? agentType
 }
 
+function annotationsForChunk(chunkId: string) {
+  return highlights.value.filter(annotation => annotation.source_chunk_id === chunkId)
+}
+
 function isMasteryRecord(response: unknown): response is MasteryRecord {
   if (!response || typeof response !== 'object') return false
   const candidate = response as Partial<MasteryRecord>
@@ -322,6 +353,84 @@ async function loadChapter() {
     plannerActions.value = []
   } finally {
     loading.value = false
+  }
+}
+
+async function loadAnnotations() {
+  loadingAnnotations.value = true
+  try {
+    const response = await $fetch<{ annotations: ChapterAnnotation[] }>(
+      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/annotations`,
+      { headers: protectedHeaders() }
+    )
+    annotations.value = normalizeAnnotations(response)
+  } catch {
+    annotations.value = []
+  } finally {
+    loadingAnnotations.value = false
+  }
+}
+
+async function createNote() {
+  if (!canSaveNote.value) return
+  savingNote.value = true
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<{ annotation: ChapterAnnotation }>(
+      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/annotations`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: {
+          kind: 'note',
+          content: noteDraft.value.trim()
+        }
+      }
+    )
+    annotations.value = [response.annotation, ...annotations.value]
+    noteDraft.value = ''
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to save note.', error)
+  } finally {
+    savingNote.value = false
+  }
+}
+
+async function highlightEvidence(item: ChapterEvidence) {
+  savingHighlightChunkId.value = item.chunk_id
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<{ annotation: ChapterAnnotation }>(
+      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/annotations`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: {
+          kind: 'highlight',
+          source_chunk_id: item.chunk_id,
+          quote: item.text,
+          anchor: { citation: item.citation }
+        }
+      }
+    )
+    annotations.value = [response.annotation, ...annotations.value]
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to save highlight.', error)
+  } finally {
+    savingHighlightChunkId.value = null
+  }
+}
+
+async function deleteAnnotation(annotation: ChapterAnnotation) {
+  errorMessage.value = ''
+  try {
+    await $fetch(`${config.public.apiBaseUrl}/chapter-annotations/${annotation.id}`, {
+      method: 'DELETE',
+      headers: protectedHeaders()
+    })
+    annotations.value = annotations.value.filter(item => item.id !== annotation.id)
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to delete annotation.', error)
   }
 }
 
@@ -588,6 +697,7 @@ async function askMentor() {
 
 onMounted(() => {
   loadChapter()
+  loadAnnotations()
   loadMentorSession()
   loadMentorState()
   loadMastery()
@@ -943,11 +1053,68 @@ onMounted(() => {
                 <span>Chunk #{{ item.chunk_index }}</span>
               </div>
               <p>{{ item.text }}</p>
-              <small>{{ citationSummary(item.citation) }}</small>
+              <div class="evidence-actions">
+                <small>{{ citationSummary(item.citation) }}</small>
+                <button
+                  data-testid="highlight-evidence"
+                  class="secondary-button compact-button"
+                  type="button"
+                  :disabled="savingHighlightChunkId === item.chunk_id"
+                  @click="highlightEvidence(item)"
+                >
+                  {{ savingHighlightChunkId === item.chunk_id ? 'Saving...' : 'Highlight' }}
+                </button>
+              </div>
+              <div v-if="annotationsForChunk(item.chunk_id).length" class="highlight-list">
+                <article
+                  v-for="highlight in annotationsForChunk(item.chunk_id)"
+                  :key="highlight.id"
+                  class="highlight-chip"
+                >
+                  <span>{{ highlight.quote }}</span>
+                  <button type="button" class="text-button" @click="deleteAnnotation(highlight)">Delete</button>
+                </article>
+              </div>
             </article>
           </div>
           <p v-else class="empty-state">No source evidence is linked to this chapter yet.</p>
         </section>
+
+        <aside class="card notes-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Study notes</p>
+              <h2>Notes and highlights</h2>
+            </div>
+            <span v-if="highlights.length" class="chunk-count">{{ highlights.length }} highlights</span>
+          </div>
+
+          <form class="note-form" @submit.prevent="createNote">
+            <textarea
+              v-model="noteDraft"
+              data-testid="chapter-note-input"
+              placeholder="Write a note for this chapter"
+              :disabled="savingNote"
+            />
+            <button
+              data-testid="save-chapter-note"
+              class="secondary-button"
+              type="submit"
+              :disabled="!canSaveNote"
+            >
+              {{ savingNote ? 'Saving...' : 'Save note' }}
+            </button>
+          </form>
+
+          <p v-if="loadingAnnotations" class="muted">Loading notes...</p>
+          <div v-else-if="notes.length" class="note-list">
+            <article v-for="note in notes" :key="note.id" class="note-card">
+              <p>{{ note.content }}</p>
+              <button type="button" class="text-button" @click="deleteAnnotation(note)">Delete</button>
+            </article>
+          </div>
+          <p v-else class="empty-state">No notes yet.</p>
+        </aside>
 
         <aside class="card mentor-panel">
           <div class="section-heading">
@@ -1069,6 +1236,7 @@ onMounted(() => {
 .quiz-panel,
 .review-callout,
 .evidence-panel,
+.notes-panel,
 .mentor-panel {
   display: grid;
   gap: 16px;
@@ -1453,6 +1621,71 @@ onMounted(() => {
 .evidence-card p {
   color: var(--color-text);
   white-space: pre-wrap;
+}
+
+.evidence-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.compact-button {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.highlight-list,
+.note-list,
+.note-form {
+  display: grid;
+  gap: 10px;
+}
+
+.highlight-chip,
+.note-card {
+  border: 1px solid rgba(20, 184, 166, 0.22);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(204, 251, 241, 0.38), rgba(255, 255, 255, 0.88)),
+    var(--color-surface);
+  padding: 10px 12px;
+}
+
+.highlight-chip {
+  display: grid;
+  gap: 8px;
+}
+
+.highlight-chip span,
+.note-card p {
+  color: var(--color-text);
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.note-form textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.text-button {
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0;
+}
+
+.text-button:hover,
+.text-button:focus-visible {
+  color: #115e59;
+  text-decoration: underline;
 }
 
 .evidence-card small,

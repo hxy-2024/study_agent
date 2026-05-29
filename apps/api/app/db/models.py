@@ -92,6 +92,11 @@ class PlannerActionStatus(str, enum.Enum):
     dismissed = "dismissed"
 
 
+class ChapterAnnotationKind(str, enum.Enum):
+    note = "note"
+    highlight = "highlight"
+
+
 class Tenant(Base):
     __tablename__ = "tenants"
 
@@ -147,6 +152,7 @@ class StudySpace(Base):
     mastery_records: Mapped[list["MasteryRecord"]] = relationship(back_populates="study_space")
     space_planner_states: Mapped[list["SpacePlannerState"]] = relationship(back_populates="study_space")
     planner_actions: Mapped[list["PlannerAction"]] = relationship(back_populates="study_space")
+    chapter_annotations: Mapped[list["ChapterAnnotation"]] = relationship(back_populates="study_space")
 
 
 class Source(Base):
@@ -216,6 +222,7 @@ class SourceChunk(Base):
 
     source: Mapped["Source"] = relationship(back_populates="chunks")
     message_citations: Mapped[list["MessageCitation"]] = relationship(back_populates="source_chunk")
+    chapter_annotations: Mapped[list["ChapterAnnotation"]] = relationship(back_populates="source_chunk")
 
 
 class LearningRoute(Base):
@@ -272,6 +279,7 @@ class Chapter(Base):
     mentor_state: Mapped["ChapterMentorState"] = relationship(back_populates="chapter")
     quizzes: Mapped[list["Quiz"]] = relationship(back_populates="chapter")
     mastery_records: Mapped[list["MasteryRecord"]] = relationship(back_populates="chapter")
+    annotations: Mapped[list["ChapterAnnotation"]] = relationship(back_populates="chapter")
 
 
 class ChapterMentorState(Base):
@@ -449,6 +457,30 @@ class PlannerAction(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     study_space: Mapped["StudySpace"] = relationship(back_populates="planner_actions")
+
+
+class ChapterAnnotation(Base):
+    __tablename__ = "chapter_annotations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
+    chapter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chapters.id"), nullable=False, index=True)
+    source_chunk_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("source_chunks.id"), nullable=True, index=True)
+    kind: Mapped[ChapterAnnotationKind] = mapped_column(
+        Enum(ChapterAnnotationKind, name="chapter_annotation_kind"),
+        nullable=False,
+    )
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    anchor: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    study_space: Mapped["StudySpace"] = relationship(back_populates="chapter_annotations")
+    chapter: Mapped["Chapter"] = relationship(back_populates="annotations")
+    source_chunk: Mapped["SourceChunk"] = relationship(back_populates="chapter_annotations")
 
 
 class Session(Base):

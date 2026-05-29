@@ -96,6 +96,24 @@ function mentorMessage(overrides = {}) {
   }
 }
 
+function annotationItem(overrides = {}) {
+  return {
+    id: '00000000-0000-0000-0000-000000000901',
+    tenant_id: '00000000-0000-0000-0000-000000000001',
+    user_id: '00000000-0000-0000-0000-000000000002',
+    study_space_id: '00000000-0000-0000-0000-000000000101',
+    chapter_id: '00000000-0000-0000-0000-000000000601',
+    source_chunk_id: null,
+    kind: 'note',
+    content: 'Remember the vector intuition.',
+    quote: null,
+    anchor: {},
+    created_at: '2026-05-29T00:00:00Z',
+    updated_at: '2026-05-29T00:00:00Z',
+    ...overrides
+  }
+}
+
 async function flushPromises() {
   await new Promise(resolve => setTimeout(resolve, 0))
 }
@@ -109,6 +127,9 @@ describe('ChapterStudyPage', () => {
       }
       if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
         return Promise.resolve([])
+      }
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/annotations')) {
+        return Promise.resolve({ annotations: [] })
       }
       return Promise.resolve(chapterDetail())
     })
@@ -156,6 +177,94 @@ describe('ChapterStudyPage', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('No source evidence is linked to this chapter yet.')
+  })
+
+  it('renders notes and creates a new chapter note', async () => {
+    fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
+        return Promise.resolve([mentorSession()])
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
+        return Promise.resolve([])
+      }
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/annotations') && options?.method === 'POST') {
+        return Promise.resolve({ annotation: annotationItem({ content: 'New note' }) })
+      }
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/annotations')) {
+        return Promise.resolve({ annotations: [annotationItem()] })
+      }
+      return Promise.resolve(chapterDetail())
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Study notes')
+    expect(wrapper.text()).toContain('Remember the vector intuition.')
+
+    await wrapper.find('[data-testid="chapter-note-input"]').setValue('New note')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('form.note-form').trigger('submit')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/chapters/00000000-0000-0000-0000-000000000601/annotations',
+      expect.objectContaining({
+        method: 'POST',
+        body: { kind: 'note', content: 'New note' }
+      })
+    )
+  })
+
+  it('adds a highlight from an evidence card', async () => {
+    const evidenceItem = {
+      source_id: '00000000-0000-0000-0000-000000000201',
+      chunk_id: '00000000-0000-0000-0000-000000000301',
+      chunk_index: 0,
+      source_filename: 'notes.md',
+      text: 'Embeddings convert text into vectors.',
+      citation: { page_number: 2 }
+    }
+    fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/annotations') && options?.method === 'POST') {
+        return Promise.resolve({
+          annotation: annotationItem({
+            kind: 'highlight',
+            source_chunk_id: evidenceItem.chunk_id,
+            quote: evidenceItem.text,
+            content: null,
+            anchor: { citation: evidenceItem.citation }
+          })
+        })
+      }
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/annotations')) {
+        return Promise.resolve({ annotations: [] })
+      }
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
+        return Promise.resolve([])
+      }
+      return Promise.resolve(chapterDetail({ evidence: [evidenceItem] }))
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="highlight-evidence"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/chapters/00000000-0000-0000-0000-000000000601/annotations',
+      expect.objectContaining({
+        method: 'POST',
+        body: {
+          kind: 'highlight',
+          source_chunk_id: evidenceItem.chunk_id,
+          quote: evidenceItem.text,
+          anchor: { citation: evidenceItem.citation }
+        }
+      })
+    )
+    expect(wrapper.text()).toContain('Embeddings convert text into vectors.')
   })
 
   it('marks chapter complete and shows next chapter action', async () => {
