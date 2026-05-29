@@ -116,6 +116,25 @@ describe('StudySpacePage planner actions panel', () => {
       if (url.endsWith('/planner-actions/from-latest-state') && options?.method === 'POST') {
         return Promise.resolve(plannerActions())
       }
+      if (url.endsWith('/planner-actions/from-runtime-signals') && options?.method === 'POST') {
+        return Promise.resolve({
+          actions: [
+            {
+              id: '00000000-0000-0000-0000-000000000802',
+              study_space_id: spaceId,
+              chapter_id: chapterId,
+              source_planner_state_id: null,
+              action_type: 'review_chapter',
+              status: 'proposed',
+              title: 'Review runtime signal evidence.',
+              rationale: 'Runtime signals indicate a needed chapter review.',
+              payload: { source: 'runtime_signal' },
+              created_at: null,
+              updated_at: null
+            }
+          ]
+        })
+      }
       if (url.endsWith(`/planner-actions/${actionId}/status`) && options?.method === 'POST') {
         return Promise.resolve(plannerActions('accepted').actions[0])
       }
@@ -156,5 +175,22 @@ describe('StudySpacePage planner actions panel', () => {
       })
     )
     expect(wrapper.text()).toContain('accepted')
+  })
+
+  it('creates runtime actions from runtime signals', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="create-runtime-actions"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/planner-actions/from-runtime-signals',
+      expect.objectContaining({
+        method: 'POST',
+        body: { study_space_id: spaceId }
+      })
+    )
+    expect(wrapper.text()).toContain('Review runtime signal evidence.')
   })
 })

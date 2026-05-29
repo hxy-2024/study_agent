@@ -115,6 +115,17 @@ describe('Chapter review callout', () => {
           ]
         })
       }
+      if (url.endsWith('/planner-actions/from-runtime-signals') && options?.method === 'POST') {
+        return Promise.resolve({
+          actions: [
+            plannerAction({
+              id: '00000000-0000-0000-0000-000000000804',
+              title: 'Review runtime signal evidence.',
+              rationale: 'Runtime signals indicate the chapter needs another pass.'
+            })
+          ]
+        })
+      }
       if (url.endsWith(`/planner-actions/${actionId}/status`) && options?.method === 'POST') {
         return Promise.resolve(plannerAction({ status: 'accepted' }))
       }
@@ -148,5 +159,25 @@ describe('Chapter review callout', () => {
       })
     )
     expect(wrapper.text()).toContain('accepted')
+  })
+
+  it('creates runtime actions for the current chapter', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="create-chapter-runtime-actions"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/planner-actions/from-runtime-signals',
+      expect.objectContaining({
+        method: 'POST',
+        body: {
+          study_space_id: spaceId,
+          chapter_id: chapterId
+        }
+      })
+    )
+    expect(wrapper.text()).toContain('Review runtime signal evidence.')
   })
 })

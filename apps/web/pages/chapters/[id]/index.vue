@@ -162,6 +162,8 @@ const updatingPlannerActionId = ref<string | null>(null)
 const agentRuns = ref<AgentRunTimelineItem[]>([])
 const selectedAgentRunId = ref<string | null>(null)
 const loadingAgentRuns = ref(false)
+const creatingRuntimeActions = ref(false)
+const runtimeActionsMessage = ref('')
 
 const chapter = computed(() => detail.value?.chapter ?? null)
 const evidence = computed(() => detail.value?.evidence ?? [])
@@ -486,6 +488,38 @@ async function updatePlannerAction(action: PlannerAction, status: string) {
   }
 }
 
+async function createRuntimeActions() {
+  if (!detail.value?.chapter.study_space_id) return
+
+  creatingRuntimeActions.value = true
+  runtimeActionsMessage.value = ''
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<{ actions: PlannerAction[] }>(
+      `${config.public.apiBaseUrl}/planner-actions/from-runtime-signals`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: {
+          study_space_id: detail.value.chapter.study_space_id,
+          chapter_id: chapterId.value
+        }
+      }
+    )
+    const actions = response.actions ?? []
+    plannerActions.value = [
+      ...actions,
+      ...plannerActions.value.filter(existingAction => !actions.some(action => action.id === existingAction.id))
+    ]
+    runtimeActionsMessage.value =
+      actions.length > 0 ? `Created ${actions.length} runtime actions.` : 'No new runtime actions found.'
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to create runtime actions.', error)
+  } finally {
+    creatingRuntimeActions.value = false
+  }
+}
+
 async function askMentor() {
   const question = mentorQuestion.value.trim()
   if (!chapter.value || !question) return
@@ -768,10 +802,22 @@ onMounted(() => {
             <p class="eyebrow">Planner review</p>
             <h2>Queued review actions</h2>
           </div>
-          <span v-if="activeReviewActions.length" class="review-count">
-            {{ activeReviewActions.length }} queued
-          </span>
+          <div class="row-actions review-callout-actions">
+            <span v-if="activeReviewActions.length" class="review-count">
+              {{ activeReviewActions.length }} queued
+            </span>
+            <button
+              data-testid="create-chapter-runtime-actions"
+              class="secondary-button"
+              type="button"
+              :disabled="creatingRuntimeActions"
+              @click="createRuntimeActions"
+            >
+              {{ creatingRuntimeActions ? 'Creating...' : 'Create runtime actions' }}
+            </button>
+          </div>
         </div>
+        <p v-if="runtimeActionsMessage" class="muted">{{ runtimeActionsMessage }}</p>
 
         <p v-if="loadingPlannerActions" class="muted">Loading review actions...</p>
         <div v-else-if="activeReviewActions.length" class="review-action-list">

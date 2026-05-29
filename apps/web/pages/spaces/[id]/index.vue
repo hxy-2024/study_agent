@@ -174,6 +174,8 @@ const loadingAgentRuns = ref(false)
 const generatingRoute = ref(false)
 const runningPlanner = ref(false)
 const creatingPlannerActions = ref(false)
+const creatingRuntimeActions = ref(false)
+const runtimeActionsMessage = ref('')
 const activatingRouteId = ref<string | null>(null)
 const updatingPlannerActionId = ref<string | null>(null)
 const uploadPhase = ref<UploadPhase>('idle')
@@ -489,6 +491,33 @@ async function createPlannerActions() {
   }
 }
 
+async function createRuntimeActions() {
+  creatingRuntimeActions.value = true
+  runtimeActionsMessage.value = ''
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<{ actions: PlannerAction[] }>(
+      `${config.public.apiBaseUrl}/planner-actions/from-runtime-signals`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: { study_space_id: spaceId.value }
+      }
+    )
+    const actions = response.actions ?? []
+    plannerActions.value = [
+      ...actions,
+      ...plannerActions.value.filter(existingAction => !actions.some(action => action.id === existingAction.id))
+    ]
+    runtimeActionsMessage.value =
+      actions.length > 0 ? `Created ${actions.length} runtime actions.` : 'No new runtime actions found.'
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to create runtime actions.', error)
+  } finally {
+    creatingRuntimeActions.value = false
+  }
+}
+
 async function updatePlannerAction(action: PlannerAction, status: string) {
   updatingPlannerActionId.value = action.id
   errorMessage.value = ''
@@ -800,16 +829,28 @@ onMounted(() => {
               <h2>Planner actions</h2>
               <p class="muted">Confirm planner suggestions before they affect your study flow.</p>
             </div>
-            <button
-              data-testid="create-planner-actions"
-              type="button"
-              class="secondary-button"
-              :disabled="creatingPlannerActions"
-              @click="createPlannerActions"
-            >
-              {{ creatingPlannerActions ? 'Creating...' : 'Create actions' }}
-            </button>
+            <div class="row-actions planner-action-controls">
+              <button
+                data-testid="create-planner-actions"
+                type="button"
+                class="secondary-button"
+                :disabled="creatingPlannerActions"
+                @click="createPlannerActions"
+              >
+                {{ creatingPlannerActions ? 'Creating...' : 'Create actions' }}
+              </button>
+              <button
+                data-testid="create-runtime-actions"
+                type="button"
+                class="secondary-button"
+                :disabled="creatingRuntimeActions"
+                @click="createRuntimeActions"
+              >
+                {{ creatingRuntimeActions ? 'Creating...' : 'Create runtime actions' }}
+              </button>
+            </div>
           </div>
+          <p v-if="runtimeActionsMessage" class="muted">{{ runtimeActionsMessage }}</p>
 
           <p v-if="loadingPlannerActions" class="muted">Loading planner actions...</p>
           <p v-else-if="plannerActions.length === 0" class="empty-state">No planner actions queued.</p>
