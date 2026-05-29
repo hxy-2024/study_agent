@@ -5,7 +5,18 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import PlannerAction, PlannerActionStatus, PlannerActionType, SpacePlannerState, StudySpace
+from app.db.models import (
+    AgentRun,
+    AgentRunStatus,
+    AgentType,
+    Chapter,
+    PlannerAction,
+    PlannerActionStatus,
+    PlannerActionType,
+    Session,
+    SpacePlannerState,
+    StudySpace,
+)
 from app.domain.planner_actions.schemas import PlannerActionListResponse, PlannerActionResponse
 
 
@@ -67,6 +78,53 @@ def build_actions_from_planner_state(state: SpacePlannerState) -> list[PlannerAc
     return actions
 
 
+def _runtime_signal_types(output_payload: dict | None) -> list[str]:
+    signal_types: list[str] = []
+    if not isinstance(output_payload, dict):
+        return signal_types
+
+    for signal in output_payload.get("learning_signals") or []:
+        if not isinstance(signal, dict):
+            continue
+        signal_type = signal.get("type")
+        signal_value = signal.get("value")
+        if not isinstance(signal_type, str):
+            continue
+        if signal_value is True:
+            signal_types.append(signal_type)
+        elif signal_type == "evidence_used" and signal_value is False:
+            signal_types.append("evidence_missing")
+    return signal_types
+
+
+def _runtime_action_kind(signal_types: list[str]) -> str | None:
+    if "confusion_detected" in signal_types:
+        return "review_confusion"
+    if "needs_review" in signal_types:
+        return "review_chapter"
+    if "evidence_missing" in signal_types:
+        return "strengthen_evidence"
+    return None
+
+
+def _runtime_action_title(kind: str, chapter_title: str) -> str:
+    if kind == "review_confusion":
+        return f"Review confusion in {chapter_title}"
+    if kind == "strengthen_evidence":
+        return f"Strengthen evidence for {chapter_title}"
+    return f"Review {chapter_title}"
+
+
+def _runtime_action_rationale(signal_types: list[str]) -> str:
+    if "confusion_detected" in signal_types:
+        return "The session tutor detected learner confusion in recent completed session signals."
+    if "needs_review" in signal_types:
+        return "Recent completed session signals indicate this chapter needs review."
+    if "evidence_missing" in signal_types:
+        return "Recent completed session signals indicate the answer was not grounded in retrieved evidence."
+    return "Recent completed session signals indicate follow-up review is needed."
+
+
 async def ensure_study_space_for_actions(
     session: AsyncSession,
     tenant_id: uuid.UUID,
@@ -83,6 +141,24 @@ async def ensure_study_space_for_actions(
     if study_space is None:
         raise ValueError("Study space not found for user")
     return study_space
+
+
+async def _ensure_chapter_for_runtime_actions(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    study_space_id: uuid.UUID,
+    chapter_id: uuid.UUID,
+) -> Chapter:
+    chapter = await session.scalar(
+        select(Chapter).where(
+            Chapter.id == chapter_id,
+            Chapter.tenant_id == tenant_id,
+            Chapter.study_space_id == study_space_id,
+        )
+    )
+    if chapter is None:
+        raise ValueError("Chapter not found for study space")
+    return chapter
 
 
 async def list_planner_actions(
@@ -124,6 +200,114 @@ async def create_actions_from_latest_planner_state(
         raise ValueError("Space planner state not found")
 
     actions = build_actions_from_planner_state(state)
+    for action in actions:
+        session.add(action)
+    await session.commit()
+    return PlannerActionListResponse(actions=[planner_action_response(action) for action in actions])
+
+
+def _has_runtime_duplicate(
+    existing_actions: list[PlannerAction],
+    *,
+    chapter_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+    action_kind: str,
+) -> bool:
+    for action in existing_actions:
+        payload = action.payload or {}
+        if (
+            action.chapter_id == chapter_id
+            and payload.get("source") == "runtime_signal"
+            and payload.get("agent_run_id") == str(agent_run_id)
+            and payload.get("action_kind") == action_kind
+        ):
+            return True
+    return False
+
+
+def _planner_action_from_row(row: Any) -> PlannerAction:
+    return row if isinstance(row, PlannerAction) else row[0]
+
+
+async def create_actions_from_runtime_signals(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    study_space_id: uuid.UUID,
+    chapter_id: uuid.UUID | None = None,
+) -> PlannerActionListResponse:
+    await ensure_study_space_for_actions(session, tenant_id, user_id, study_space_id)
+    if chapter_id is not None:
+        await _ensure_chapter_for_runtime_actions(session, tenant_id, study_space_id, chapter_id)
+
+    runs_statement = (
+        select(AgentRun, Session, Chapter)
+        .join(Session, AgentRun.session_id == Session.id)
+        .join(Chapter, Session.chapter_id == Chapter.id)
+        .where(
+            AgentRun.tenant_id == tenant_id,
+            AgentRun.study_space_id == study_space_id,
+            AgentRun.agent_type == AgentType.session_tutor,
+            AgentRun.status == AgentRunStatus.completed,
+            Session.tenant_id == tenant_id,
+            Session.study_space_id == study_space_id,
+            Chapter.tenant_id == tenant_id,
+            Chapter.study_space_id == study_space_id,
+        )
+        .order_by(AgentRun.completed_at.desc().nulls_last(), AgentRun.created_at.desc(), AgentRun.id)
+    )
+    if chapter_id is not None:
+        runs_statement = runs_statement.where(Chapter.id == chapter_id)
+
+    run_rows = (await session.execute(runs_statement)).all()
+    existing_statement = select(PlannerAction).where(
+        PlannerAction.tenant_id == tenant_id,
+        PlannerAction.user_id == user_id,
+        PlannerAction.study_space_id == study_space_id,
+        PlannerAction.action_type == PlannerActionType.review_chapter,
+        PlannerAction.status.notin_([PlannerActionStatus.dismissed, PlannerActionStatus.completed]),
+    )
+    if chapter_id is not None:
+        existing_statement = existing_statement.where(PlannerAction.chapter_id == chapter_id)
+    existing_actions = [_planner_action_from_row(row) for row in (await session.execute(existing_statement)).all()]
+
+    actions: list[PlannerAction] = []
+    for agent_run, runtime_session, chapter in run_rows:
+        signal_types = _runtime_signal_types(agent_run.output_payload)
+        action_kind = _runtime_action_kind(signal_types)
+        if action_kind is None:
+            continue
+        if _has_runtime_duplicate(
+            existing_actions,
+            chapter_id=chapter.id,
+            agent_run_id=agent_run.id,
+            action_kind=action_kind,
+        ):
+            continue
+
+        action = PlannerAction(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            study_space_id=study_space_id,
+            chapter_id=chapter.id,
+            action_type=PlannerActionType.review_chapter,
+            status=PlannerActionStatus.proposed,
+            title=_runtime_action_title(action_kind, chapter.title),
+            rationale=_runtime_action_rationale(signal_types),
+            payload={
+                "source": "runtime_signal",
+                "action_kind": action_kind,
+                "agent_run_id": str(agent_run.id),
+                "session_id": str(runtime_session.id),
+                "signal_types": signal_types,
+            },
+        )
+        actions.append(action)
+        existing_actions.append(action)
+        if len(actions) >= 5:
+            break
+
     for action in actions:
         session.add(action)
     await session.commit()

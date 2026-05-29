@@ -28,6 +28,13 @@ class CreatePlannerActionsRequest(BaseModel):
     study_space_id: uuid.UUID
 
 
+class CreateRuntimeActionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    study_space_id: uuid.UUID
+    chapter_id: uuid.UUID | None = None
+
+
 class UpdatePlannerActionStatusRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
