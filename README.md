@@ -85,6 +85,31 @@ cd F:\AIproject\study_agent
 docker compose -f infra/docker-compose.yml up -d postgres redis minio
 ```
 
+Local one-command startup:
+
+```powershell
+cd F:\AIproject\study_agent
+.\scripts\dev-up.ps1
+```
+
+Python one-command startup:
+
+```powershell
+cd F:\AIproject\study_agent
+python main.py
+```
+
+Both commands start local infrastructure, prepare the API database, and run the
+API and web dev servers. Use `Ctrl+C` to stop API/Web processes. The Docker
+services remain running so local data is preserved.
+
+Run local checks:
+
+```powershell
+.\scripts\dev-check.ps1
+python main.py check
+```
+
 Prepare the API database:
 
 ```powershell

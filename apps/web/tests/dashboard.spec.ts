@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const fetchMock = vi.fn()
 const storeState = {
   loading: false,
   spaces: [] as Array<{
@@ -13,6 +14,12 @@ const storeState = {
   loadSpaces: vi.fn()
 }
 
+vi.stubGlobal('$fetch', fetchMock)
+vi.stubGlobal('useRuntimeConfig', () => ({
+  public: {
+    apiBaseUrl: 'http://localhost:8000/api/v1'
+  }
+}))
 vi.stubGlobal('useStudySpacesStore', () => storeState)
 
 const { default: DashboardPage } = await import('../pages/index.vue')
@@ -35,6 +42,8 @@ describe('DashboardPage', () => {
     storeState.loading = false
     storeState.spaces = []
     storeState.loadSpaces.mockReset()
+    fetchMock.mockReset()
+    fetchMock.mockRejectedValue(new Error('Dashboard not ready'))
   })
 
   it('renders an empty continue-learning workspace with create action', () => {
@@ -76,5 +85,45 @@ describe('DashboardPage', () => {
     expect(wrapper.text()).toContain('Recent Spaces')
     expect(wrapper.find('a[href="/spaces/space-1"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('2 active spaces')
+  })
+
+  it('renders local dashboard summary metrics when available', async () => {
+    fetchMock.mockResolvedValue({
+      spaces: [
+        {
+          id: 'space-1',
+          name: 'Linear Algebra',
+          goal: 'Master eigenvectors and matrices',
+          status: 'active',
+          target_days: 21
+        }
+      ],
+      pending_actions: [
+        {
+          id: 'action-1',
+          study_space_id: 'space-1',
+          chapter_id: 'chapter-1',
+          title: 'Review Retrieval',
+          status: 'proposed'
+        }
+      ],
+      supervision_refresh_count: 2,
+      recent_agent_runs: [
+        {
+          id: 'run-1',
+          agent_type: 'session_tutor',
+          status: 'completed',
+          summary: 'Tutor answered with citations.'
+        }
+      ]
+    })
+
+    const wrapper = mountPage()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(wrapper.text()).toContain('Today')
+    expect(wrapper.text()).toContain('1 pending action')
+    expect(wrapper.text()).toContain('2 supervision refreshes')
+    expect(wrapper.text()).toContain('Tutor answered with citations.')
   })
 })

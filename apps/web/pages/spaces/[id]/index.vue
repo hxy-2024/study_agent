@@ -28,6 +28,10 @@ interface UploadPresignResponse {
   method: string
 }
 
+interface SourceUploadedResponse {
+  source: SourceItem
+}
+
 interface SourceChunk {
   id: string
   source_id: string
@@ -170,6 +174,9 @@ const spaceId = computed(() => String(route.params.id))
 const sources = ref<SourceItem[]>([])
 const activeFilter = ref<SourceFilter>('all')
 const selectedFile = ref<File | null>(null)
+const pastedSourceFilename = ref('pasted-notes.md')
+const pastedSourceContentType = ref<'text/markdown' | 'text/plain'>('text/markdown')
+const pastedSourceContent = ref('')
 const selectedSourceId = ref<string | null>(null)
 const selectedSourceName = ref('')
 const chunks = ref<SourceChunk[]>([])
@@ -192,12 +199,16 @@ const runtimeActionsMessage = ref('')
 const activatingRouteId = ref<string | null>(null)
 const updatingPlannerActionId = ref<string | null>(null)
 const uploadPhase = ref<UploadPhase>('idle')
+const creatingTextSource = ref(false)
 const ingestingSourceId = ref<string | null>(null)
 const loadingChunks = ref(false)
 const errorMessage = ref('')
 
 const uploading = computed(() => uploadPhase.value !== 'idle')
 const canUpload = computed(() => selectedFile.value !== null && !uploading.value)
+const canCreatePastedSource = computed(() => {
+  return pastedSourceFilename.value.trim().length > 0 && pastedSourceContent.value.trim().length > 0 && !creatingTextSource.value
+})
 const selectedSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value) ?? null)
 const hasSelectedSource = computed(() => selectedSourceId.value !== null)
 const activeRoute = computed(() => routes.value.find(item => item.route.status === 'active') ?? null)
@@ -698,6 +709,33 @@ async function uploadSource() {
   }
 }
 
+async function createPastedSource() {
+  if (!canCreatePastedSource.value) return
+
+  creatingTextSource.value = true
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<SourceUploadedResponse>(`${config.public.apiBaseUrl}/sources/from-text`, {
+      method: 'POST',
+      headers: protectedHeaders(),
+      body: {
+        study_space_id: spaceId.value,
+        filename: pastedSourceFilename.value.trim(),
+        content_type: pastedSourceContentType.value,
+        content: pastedSourceContent.value
+      }
+    })
+    pastedSourceContent.value = ''
+    selectedSourceId.value = response.source.id
+    selectedSourceName.value = response.source.filename
+    await loadSources()
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to add pasted source.', error)
+  } finally {
+    creatingTextSource.value = false
+  }
+}
+
 async function runIngestion(source: SourceItem) {
   ingestingSourceId.value = source.id
   selectedSourceId.value = source.id
@@ -1099,33 +1137,74 @@ onMounted(() => {
           <div>
             <p class="eyebrow">Source library</p>
             <h2>Upload learning material</h2>
-            <p class="muted">Supports .txt and .md. PDF, OCR, and webpage import will be added later.</p>
+            <p class="muted">Supports .txt, .md, and pasted notes. PDF, OCR, and webpage import will be added later.</p>
           </div>
 
-          <label class="file-picker">
-            <span>Choose source file</span>
-            <input type="file" accept=".txt,.md,text/plain,text/markdown" @change="onFileSelected">
-          </label>
+          <div class="source-input-grid">
+            <div class="source-input-panel">
+              <label class="file-picker">
+                <span>Choose source file</span>
+                <input type="file" accept=".txt,.md,text/plain,text/markdown" @change="onFileSelected">
+              </label>
 
-          <div class="selected-file-panel">
-            <p class="selected-file">{{ selectedFile?.name || 'No file selected' }}</p>
-            <dl v-if="selectedFile" class="file-meta">
-              <div>
-                <dt>Type</dt>
-                <dd>{{ inferredContentType }}</dd>
+              <div class="selected-file-panel">
+                <p class="selected-file">{{ selectedFile?.name || 'No file selected' }}</p>
+                <dl v-if="selectedFile" class="file-meta">
+                  <div>
+                    <dt>Type</dt>
+                    <dd>{{ inferredContentType }}</dd>
+                  </div>
+                  <div>
+                    <dt>Size</dt>
+                    <dd>{{ selectedFileSize }}</dd>
+                  </div>
+                </dl>
+                <p v-if="uploading" class="upload-phase">{{ uploadPhaseLabel }}</p>
               </div>
-              <div>
-                <dt>Size</dt>
-                <dd>{{ selectedFileSize }}</dd>
-              </div>
-            </dl>
-            <p v-if="uploading" class="upload-phase">{{ uploadPhaseLabel }}</p>
-          </div>
 
-          <div class="upload-actions">
-            <button class="primary-button" type="button" :disabled="!canUpload" @click="uploadSource">
-              {{ uploadPhaseLabel }}
-            </button>
+              <div class="upload-actions">
+                <button class="primary-button" type="button" :disabled="!canUpload" @click="uploadSource">
+                  {{ uploadPhaseLabel }}
+                </button>
+              </div>
+            </div>
+
+            <div class="source-input-panel pasted-source-panel">
+              <div class="inline-fields">
+                <label>
+                  <span>Paste filename</span>
+                  <input
+                    v-model="pastedSourceFilename"
+                    data-testid="pasted-source-filename"
+                    type="text"
+                    maxlength="255"
+                    placeholder="pasted-notes.md"
+                  >
+                </label>
+                <label>
+                  <span>Format</span>
+                  <select v-model="pastedSourceContentType" data-testid="pasted-source-type">
+                    <option value="text/markdown">Markdown</option>
+                    <option value="text/plain">Plain text</option>
+                  </select>
+                </label>
+              </div>
+              <textarea
+                v-model="pastedSourceContent"
+                data-testid="pasted-source-content"
+                rows="7"
+                placeholder="Paste notes, excerpts, or copied Markdown here."
+              />
+              <button
+                data-testid="add-pasted-source"
+                class="secondary-button"
+                type="button"
+                :disabled="!canCreatePastedSource"
+                @click="createPastedSource"
+              >
+                {{ creatingTextSource ? 'Adding...' : 'Add pasted source' }}
+              </button>
+            </div>
           </div>
         </section>
 
@@ -1643,6 +1722,81 @@ p {
   font-weight: 700;
 }
 
+.source-input-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.85fr) minmax(280px, 1.15fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.source-input-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pasted-source-panel {
+  border: 1px solid rgba(20, 184, 166, 0.26);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, rgba(240, 253, 250, 0.8), rgba(255, 255, 255, 0.96)),
+    var(--color-surface);
+  padding: 12px;
+  box-shadow: 0 14px 32px rgba(15, 118, 110, 0.08);
+}
+
+.inline-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 0.38fr);
+  gap: 10px;
+}
+
+.inline-fields label,
+.pasted-source-panel {
+  min-width: 0;
+}
+
+.inline-fields span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.inline-fields input,
+.inline-fields select,
+.pasted-source-panel textarea {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  outline: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.inline-fields input,
+.inline-fields select {
+  min-height: 40px;
+  padding: 0 10px;
+}
+
+.pasted-source-panel textarea {
+  min-height: 142px;
+  resize: vertical;
+  padding: 10px;
+  line-height: 1.5;
+}
+
+.inline-fields input:focus,
+.inline-fields select:focus,
+.pasted-source-panel textarea:focus {
+  border-color: rgba(20, 184, 166, 0.72);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
+}
+
 .selected-file-panel {
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -1827,6 +1981,11 @@ p {
   }
 
   .planner-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .source-input-grid,
+  .inline-fields {
     grid-template-columns: 1fr;
   }
 

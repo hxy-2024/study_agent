@@ -1,17 +1,71 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 const store = useStudySpacesStore()
+const config = useRuntimeConfig()
 
-const activeSpaces = computed(() => store.spaces.filter(space => space.status !== 'archived'))
+interface DashboardSpace {
+  id: string
+  name: string
+  goal: string
+  status: string
+  target_days: number
+}
+
+interface DashboardAction {
+  id: string
+  title: string
+  status: string
+  study_space_id: string
+  chapter_id?: string | null
+}
+
+interface DashboardAgentRun {
+  id?: string
+  agent_type: string
+  status: string
+  summary: string
+}
+
+interface DashboardSummary {
+  spaces: DashboardSpace[]
+  pending_actions: DashboardAction[]
+  supervision_refresh_count: number
+  recent_agent_runs: DashboardAgentRun[]
+}
+
+const dashboard = ref<DashboardSummary | null>(null)
+const dashboardLoading = ref(false)
+
+const fallbackSpaces = computed(() => store.spaces.filter(space => space.status !== 'archived'))
+const activeSpaces = computed(() => dashboard.value?.spaces ?? fallbackSpaces.value)
 const currentSpace = computed(() => activeSpaces.value[0] ?? null)
+const pendingActionCount = computed(() => dashboard.value?.pending_actions?.length ?? 0)
+const pendingActionLabel = computed(() => `${pendingActionCount.value} ${pendingActionCount.value === 1 ? 'pending action' : 'pending actions'}`)
+const supervisionRefreshCount = computed(() => dashboard.value?.supervision_refresh_count ?? 0)
+const supervisionRefreshLabel = computed(() => {
+  return `${supervisionRefreshCount.value} ${supervisionRefreshCount.value === 1 ? 'supervision refresh' : 'supervision refreshes'}`
+})
+const recentAgentRuns = computed(() => dashboard.value?.recent_agent_runs ?? [])
 const progressPercent = computed(() => {
   if (!currentSpace.value) return 0
   return Math.max(12, Math.min(78, Math.round(100 / Math.max(1, currentSpace.value.target_days) * 7)))
 })
 
+async function loadDashboard() {
+  dashboardLoading.value = true
+  try {
+    dashboard.value = await $fetch<DashboardSummary>(`${config.public.apiBaseUrl}/dashboard`)
+  } catch {
+    dashboard.value = null
+  } finally {
+    dashboardLoading.value = false
+  }
+}
+
 onMounted(() => {
   store.loadSpaces()
+  loadDashboard()
 })
 </script>
 
@@ -77,14 +131,24 @@ onMounted(() => {
       <aside class="dashboard-rail">
         <section class="panel">
           <p class="eyebrow">Today</p>
-          <h2>Reviews</h2>
-          <p>No due review queue yet.</p>
+          <h2>Study queue</h2>
+          <p v-if="dashboardLoading">Loading local dashboard...</p>
+          <p v-else>{{ pendingActionLabel }}</p>
+          <p>{{ supervisionRefreshLabel }}</p>
+          <NuxtLink
+            v-if="currentSpace && pendingActionCount"
+            class="secondary-button"
+            :to="`/spaces/${currentSpace.id}`"
+          >
+            Review queue
+          </NuxtLink>
         </section>
 
         <section class="panel mentor-panel">
           <p class="eyebrow">AI Mentor</p>
-          <h2>Ready for sources</h2>
-          <p>Upload text or Markdown in a study space to prepare retrieval and route generation.</p>
+          <h2>{{ recentAgentRuns.length ? 'Recent runtime' : 'Ready for sources' }}</h2>
+          <p v-if="recentAgentRuns.length">{{ recentAgentRuns[0].summary }}</p>
+          <p v-else>Upload text or Markdown in a study space to prepare retrieval and route generation.</p>
         </section>
 
         <section class="metric-card">

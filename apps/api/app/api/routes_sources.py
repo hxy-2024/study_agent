@@ -5,8 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUserContext, get_authorized_user_context
 from app.db.session import get_db_session
-from app.domain.sources.schemas import SourceChunkListResponse, SourceListResponse, SourceUploadedResponse
-from app.domain.sources.service import list_source_chunks, list_sources_for_space, mark_source_uploaded
+from app.domain.sources.schemas import (
+    SourceChunkListResponse,
+    SourceListResponse,
+    SourceUploadedResponse,
+    TextSourceCreateRequest,
+)
+from app.domain.sources.service import create_text_source, list_source_chunks, list_sources_for_space, mark_source_uploaded
+from app.infrastructure.storage import create_runtime_text_source_writer
 
 router = APIRouter(tags=["sources"])
 
@@ -22,6 +28,24 @@ async def list_sources(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return SourceListResponse(sources=sources)
+
+
+@router.post("/sources/from-text", response_model=SourceUploadedResponse)
+async def create_source_from_text(
+    payload: TextSourceCreateRequest,
+    session: AsyncSession = Depends(get_db_session),
+    context: CurrentUserContext = Depends(get_authorized_user_context),
+) -> SourceUploadedResponse:
+    try:
+        source = await create_text_source(
+            session,
+            payload,
+            tenant_id=context.tenant_id,
+            writer=create_runtime_text_source_writer(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SourceUploadedResponse(source=source)
 
 
 @router.post("/sources/{source_id}/uploaded", response_model=SourceUploadedResponse)
