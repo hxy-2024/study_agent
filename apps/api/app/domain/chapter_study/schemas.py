@@ -1,6 +1,6 @@
 import uuid
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ChapterStudyChapterResponse(BaseModel):
@@ -40,6 +40,7 @@ class ChapterEvidenceResponse(BaseModel):
 
 class ChapterStudyDetailResponse(BaseModel):
     chapter: ChapterStudyChapterResponse
+    chapters: list[ChapterStudyChapterResponse] = Field(default_factory=list)
     route: ChapterStudyRouteResponse
     study_space: ChapterStudySpaceResponse
     evidence: list[ChapterEvidenceResponse]

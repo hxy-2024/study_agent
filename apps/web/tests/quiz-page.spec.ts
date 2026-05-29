@@ -76,6 +76,18 @@ function quizDetail() {
   }
 }
 
+function markdownQuizDetail() {
+  const detail = quizDetail()
+  return {
+    ...detail,
+    title: '# Retrieval Quiz',
+    questions: detail.questions.map((question, index) => ({
+      ...question,
+      prompt: index === 0 ? '# Which option is grounded in retrieval evidence?' : question.prompt
+    }))
+  }
+}
+
 function submissionResult() {
   return {
     id: '00000000-0000-0000-0000-000000000C01',
@@ -169,6 +181,23 @@ describe('QuizPage', () => {
     await wrapper.find('[data-testid="answer-0-0"]').setValue()
     await wrapper.vm.$nextTick()
     expect((submit.element as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('strips markdown heading markers from quiz title and prompts', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith(`/quizzes/${quizId}`)) {
+        return Promise.resolve(markdownQuizDetail())
+      }
+      return Promise.resolve({})
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Retrieval Quiz')
+    expect(wrapper.text()).toContain('Which option is grounded in retrieval evidence?')
+    expect(wrapper.text()).not.toContain('# Retrieval Quiz')
+    expect(wrapper.text()).not.toContain('# Which option is grounded')
   })
 
   it('submits answers in question order and renders score, explanations, mastery, and weak points', async () => {

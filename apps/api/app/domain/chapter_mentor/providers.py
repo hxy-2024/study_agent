@@ -7,10 +7,14 @@ from app.domain.chapter_mentor.schemas import ChapterMentorResponse
 from app.domain.chapter_mentor.service import compose_grounded_answer
 from app.domain.rag.retrieval import RetrievedChunk
 
+WebSearchResult = dict[str, str]
+
 
 SYSTEM_PROMPT = (
-    "You are an AI study mentor. Answer only from the provided chapter evidence. "
-    "If evidence is insufficient, say so clearly. Keep the answer concise and actionable."
+    "You are an AI study mentor. Prefer the provided chapter evidence. "
+    "Use web search context only as supplemental fresh context, and clearly distinguish it "
+    "from uploaded study material. If evidence is insufficient, say so clearly. "
+    "Keep the answer concise and actionable."
 )
 
 
@@ -20,6 +24,7 @@ class AnswerProvider(Protocol):
         question: str,
         chunks: list[RetrievedChunk],
         source_filenames: dict,
+        web_search_results: list[WebSearchResult] | None = None,
     ) -> ChapterMentorResponse:
         """Generate a grounded chapter answer."""
 
@@ -30,6 +35,7 @@ class DeterministicAnswerProvider:
         question: str,
         chunks: list[RetrievedChunk],
         source_filenames: dict,
+        web_search_results: list[WebSearchResult] | None = None,
     ) -> ChapterMentorResponse:
         return compose_grounded_answer(
             question=question,
@@ -58,20 +64,30 @@ class OpenAICompatibleAnswerProvider:
         question: str,
         chunks: list[RetrievedChunk],
         source_filenames: dict,
+        web_search_results: list[WebSearchResult] | None = None,
     ) -> ChapterMentorResponse:
         fallback = compose_grounded_answer(
             question=question,
             chunks=chunks,
             source_filenames=source_filenames,
         )
-        if not chunks:
+        web_results = web_search_results or []
+        if not chunks and not web_results:
             return fallback
 
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": self._build_user_prompt(question, chunks, source_filenames)},
+                {
+                    "role": "user",
+                    "content": self._build_user_prompt(
+                        question,
+                        chunks,
+                        source_filenames,
+                        web_results,
+                    ),
+                },
             ],
             "temperature": 0.2,
         }
@@ -103,6 +119,7 @@ class OpenAICompatibleAnswerProvider:
         question: str,
         chunks: list[RetrievedChunk],
         source_filenames: dict,
+        web_search_results: list[WebSearchResult] | None = None,
     ) -> str:
         evidence = "\n\n".join(
             (
@@ -111,7 +128,19 @@ class OpenAICompatibleAnswerProvider:
             )
             for index, chunk in enumerate(chunks, start=1)
         )
-        return f"Question:\n{question}\n\nChapter evidence:\n{evidence}"
+        web_context = "\n\n".join(
+            (
+                f"[web:{index}] title={result.get('title', 'Web result')}\n"
+                f"url={result.get('url', '')}\n"
+                f"snippet={result.get('snippet', '')}"
+            )
+            for index, result in enumerate(web_search_results or [], start=1)
+        )
+        return (
+            f"Question:\n{question}\n\n"
+            f"Chapter evidence:\n{evidence or 'No uploaded chapter evidence retrieved.'}\n\n"
+            f"Web search context:\n{web_context or 'No web search context returned.'}"
+        )
 
     def _extract_answer(self, payload: dict) -> str:
         choices = payload.get("choices") or []

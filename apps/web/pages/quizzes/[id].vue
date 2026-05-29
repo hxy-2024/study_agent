@@ -104,6 +104,13 @@ function appendBackendMessage(base: string, error: unknown) {
   return base
 }
 
+function displayText(value?: string | null) {
+  return (value ?? '')
+    .replace(/^\s{0,3}#{1,6}\s+/, '')
+    .replace(/\*\*/g, '')
+    .trim()
+}
+
 function selectAnswer(questionId: string, optionIndex: number) {
   if (result.value || submitting.value) return
   answers.value = {
@@ -190,7 +197,7 @@ onMounted(() => {
       <div class="topbar quiz-topbar">
         <div>
           <p class="eyebrow">Quiz / {{ quiz.status }}</p>
-          <h1>{{ quiz.title }}</h1>
+          <h1>{{ displayText(quiz.title) }}</h1>
           <p>{{ answeredCount }} / {{ questions.length }} answered</p>
         </div>
         <NuxtLink class="secondary-button back-link" :to="`/chapters/${quiz.chapter_id}`">
@@ -243,9 +250,9 @@ onMounted(() => {
             </span>
           </div>
 
-          <h2>{{ question.prompt }}</h2>
+          <h2>{{ displayText(question.prompt) }}</h2>
 
-          <div class="option-list" role="radiogroup" :aria-label="question.prompt">
+          <div class="option-list" role="radiogroup" :aria-label="displayText(question.prompt)">
             <label
               v-for="(option, optionIndex) in question.options"
               :key="option"
@@ -315,7 +322,7 @@ onMounted(() => {
               {{ item.is_correct ? 'Correct' : 'Needs review' }}
             </span>
           </div>
-          <h3>{{ item.prompt }}</h3>
+          <h3>{{ displayText(item.prompt) }}</h3>
           <p>{{ item.explanation }}</p>
           <aside v-if="hasEvidence(item.evidence)" class="evidence-box">
             <strong>{{ evidenceTitle(item.evidence) }}</strong>
@@ -574,5 +581,117 @@ onMounted(() => {
   .submit-panel {
     position: static;
   }
+}
+
+/* Taste pass: quiz reads like an assessment sheet, with options as rows instead of nested cards. */
+.quiz-page {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.quiz-topbar {
+  border-bottom: 1px solid rgba(161, 211, 202, 0.55);
+  margin-bottom: 4px;
+  padding-bottom: 14px;
+}
+
+.quiz-topbar h1 {
+  font-size: clamp(26px, 3vw, 40px);
+  letter-spacing: 0;
+  margin-bottom: 4px;
+}
+
+.result-panel,
+.question-card,
+.submit-panel,
+.feedback-card {
+  border: 0;
+  border-bottom: 1px solid rgba(161, 211, 202, 0.5);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 18px 0;
+}
+
+.question-card {
+  gap: 16px;
+}
+
+.question-card h2 {
+  max-width: 840px;
+}
+
+.question-header {
+  align-items: start;
+}
+
+.option-list {
+  gap: 0;
+  border-top: 1px solid rgba(161, 211, 202, 0.42);
+}
+
+.option-row {
+  min-height: 62px;
+  border: 0;
+  border-bottom: 1px solid rgba(161, 211, 202, 0.42);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.option-row:hover,
+.option-row:focus-within {
+  background: rgba(236, 253, 245, 0.58);
+  box-shadow: none;
+}
+
+.option-row.selected {
+  background: rgba(204, 251, 241, 0.62);
+}
+
+.evidence-box,
+.feedback-panel {
+  border: 0;
+  border-left: 3px solid rgba(20, 184, 166, 0.45);
+  border-radius: 0;
+  background: rgba(236, 253, 245, 0.5);
+}
+
+.submit-panel {
+  bottom: 12px;
+  border: 1px solid rgba(161, 211, 202, 0.58);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 12px 14px;
+}
+
+.option-row.correct {
+  border-bottom-color: rgba(22, 163, 74, 0.38);
+  background: rgba(187, 247, 208, 0.74);
+}
+
+.option-row.correct .option-index {
+  background: rgba(134, 239, 172, 0.72);
+  color: #166534;
+}
+
+.option-row.correct .option-marker {
+  background: rgba(240, 253, 244, 0.92);
+  color: #166534;
+}
+
+.option-row.missed {
+  border-bottom-color: rgba(220, 38, 38, 0.34);
+  background: rgba(254, 226, 226, 0.72);
+}
+
+.option-row.missed .option-index {
+  background: rgba(254, 202, 202, 0.78);
+  color: #b91c1c;
+}
+
+.option-row.missed .option-marker {
+  background: rgba(255, 241, 242, 0.94);
+  color: #b91c1c;
 }
 </style>

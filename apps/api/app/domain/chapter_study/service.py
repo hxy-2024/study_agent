@@ -93,6 +93,7 @@ def build_chapter_detail(
     next_chapter = find_next_chapter(chapter, route_chapters)
     return ChapterStudyDetailResponse(
         chapter=chapter_response(chapter),
+        chapters=[chapter_response(route_chapter) for route_chapter in route_chapters],
         route=route_response(route),
         study_space=study_space_response(study_space),
         evidence=evidence,

@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUserContext, get_authorized_user_context
 from app.db.session import get_db_session
 from app.domain.study_spaces.schemas import StudySpaceCreate, StudySpaceRead
-from app.domain.study_spaces.service import create_study_space, list_study_spaces
+from app.domain.study_spaces.service import archive_study_space, create_study_space, list_study_spaces
 
 router = APIRouter(prefix="/study-spaces", tags=["study-spaces"])
 
@@ -29,3 +31,19 @@ async def create_space(
         tenant_id=context.tenant_id,
         owner_user_id=context.user_id,
     )
+
+
+@router.delete("/{study_space_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_space(
+    study_space_id: uuid.UUID,
+    context: CurrentUserContext = Depends(get_authorized_user_context),
+    session: AsyncSession = Depends(get_db_session),
+) -> None:
+    try:
+        await archive_study_space(
+            session=session,
+            tenant_id=context.tenant_id,
+            study_space_id=study_space_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

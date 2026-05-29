@@ -87,6 +87,46 @@ async def test_openai_compatible_provider_posts_grounded_prompt() -> None:
 
 
 @pytest.mark.anyio
+async def test_openai_compatible_provider_includes_web_search_context() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "Use the web context carefully."}}]},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerProvider(
+            base_url="https://llm.example/v1",
+            api_key="test-key",
+            model="mentor-model",
+            timeout_seconds=10,
+            client=client,
+        )
+        response = await provider.answer(
+            question="What changed recently?",
+            chunks=[],
+            source_filenames={},
+            web_search_results=[
+                {
+                    "title": "Recent RAG context",
+                    "url": "https://example.test/rag",
+                    "snippet": "A recent note about retrieval augmented generation.",
+                }
+            ],
+        )
+
+    user_prompt = captured["payload"]["messages"][1]["content"]
+    assert "No uploaded chapter evidence retrieved." in user_prompt
+    assert "Web search context:" in user_prompt
+    assert "Recent RAG context" in user_prompt
+    assert "https://example.test/rag" in user_prompt
+    assert response.answer == "Use the web context carefully."
+
+
+@pytest.mark.anyio
 async def test_openai_compatible_provider_falls_back_when_no_chunks() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(500))) as client:
         provider = OpenAICompatibleAnswerProvider(

@@ -19,8 +19,10 @@ from app.domain.session_tutor_graph.state import (
     MessageResponsePayload,
     RetrievedEvidence,
     SessionTutorGraphState,
+    WebSearchResult,
     build_learning_signals,
 )
+from app.domain.session_tutor_graph.tools import web_search_tool
 
 
 def _trace(state: SessionTutorGraphState, node_name: str) -> None:
@@ -174,6 +176,7 @@ async def generate_answer(
         question=state["content"],
         chunks=chunks,
         source_filenames=_source_filenames_by_uuid(state),
+        web_search_results=state.get("web_search_results", []),
     )
     state["answer"] = answer.answer
     state["citations"] = [
@@ -186,6 +189,43 @@ async def generate_answer(
             score=_citation_score(citation.chunk_id, chunks),
         )
         for citation in answer.citations
+    ]
+    return state
+
+
+async def web_search(
+    state: SessionTutorGraphState,
+    *,
+    enabled: bool,
+    max_results: int,
+    timeout_seconds: int,
+) -> SessionTutorGraphState:
+    _trace(state, "web_search")
+    if not enabled:
+        state["web_search_results"] = []
+        return state
+
+    try:
+        result = await web_search_tool.ainvoke(
+            {
+                "query": state["content"],
+                "max_results": max_results,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+    except Exception as exc:
+        state["web_search_results"] = []
+        state["web_search_error"] = str(exc)
+        return state
+
+    state["web_search_results"] = [
+        WebSearchResult(
+            title=str(item.get("title", "")),
+            url=str(item.get("url", "")),
+            snippet=str(item.get("snippet", "")),
+        )
+        for item in result
+        if isinstance(item, dict)
     ]
     return state
 

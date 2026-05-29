@@ -25,6 +25,7 @@ class AnswerProvider(Protocol):
         question: str,
         chunks: list[RetrievedChunk],
         source_filenames: dict[uuid.UUID, str],
+        web_search_results: list[dict[str, str]] | None = None,
     ) -> ChapterMentorResponse:
         """Generate a grounded chapter answer."""
 

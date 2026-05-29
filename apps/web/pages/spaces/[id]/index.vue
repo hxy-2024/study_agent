@@ -1998,4 +1998,96 @@ p {
     grid-template-columns: 1fr;
   }
 }
+
+/* Taste pass: internal tools page uses dividers and strips, not nested elevated cards. */
+.space-layout {
+  gap: 0;
+  border-top: 1px solid rgba(161, 211, 202, 0.5);
+}
+
+.space-main {
+  padding-right: 18px;
+}
+
+.space-rail {
+  border-left: 1px solid rgba(161, 211, 202, 0.58);
+  padding-left: 18px;
+}
+
+.route-overview,
+.planner-panel,
+.planner-actions-panel,
+.agent-runtime-panel,
+.source-upload-card,
+.source-list-card,
+.chunk-preview {
+  border: 0;
+  border-bottom: 1px solid rgba(161, 211, 202, 0.5);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 18px 0;
+}
+
+.route-overview {
+  padding-top: 0;
+}
+
+.planner-summary,
+.planner-list,
+.planner-action-row,
+.agent-runtime-row,
+.selected-file-panel,
+.pasted-source-panel,
+.source-row,
+.chunk-card {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.planner-summary,
+.planner-list {
+  border: 0;
+  border-top: 1px solid rgba(161, 211, 202, 0.45);
+  background: rgba(248, 253, 251, 0.56);
+}
+
+.chapter-row,
+.planner-action-row,
+.agent-runtime-row,
+.source-row {
+  border: 0;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid rgba(161, 211, 202, 0.42);
+  background: transparent;
+}
+
+.chapter-row:hover,
+.source-row.active {
+  border-left-color: #14b8a6;
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: none;
+}
+
+.pasted-source-panel,
+.selected-file-panel {
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.chunk-card {
+  border: 0;
+  border-left: 2px solid rgba(20, 184, 166, 0.42);
+  background: rgba(236, 253, 245, 0.52);
+}
+
+@media (max-width: 1120px) {
+  .space-main {
+    padding-right: 0;
+  }
+
+  .space-rail {
+    border-left: 0;
+    padding-left: 0;
+  }
+}
 </style>
