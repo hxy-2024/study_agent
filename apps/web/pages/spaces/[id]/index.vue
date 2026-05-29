@@ -128,6 +128,11 @@ interface PlannerActionExecutionResponse {
   }
 }
 
+interface PlannerActionRouteDraftResponse {
+  action: PlannerAction
+  route_draft: RouteWithChapters
+}
+
 interface AgentRunLearningSignal {
   kind: string
   [key: string]: unknown
@@ -197,7 +202,7 @@ const selectedSource = computed(() => sources.value.find(source => source.id ===
 const hasSelectedSource = computed(() => selectedSourceId.value !== null)
 const activeRoute = computed(() => routes.value.find(item => item.route.status === 'active') ?? null)
 const latestDraftRoute = computed(() => routes.value.find(item => item.route.status === 'draft') ?? null)
-const visibleRoute = computed(() => activeRoute.value ?? latestDraftRoute.value ?? null)
+const visibleRoute = computed(() => latestDraftRoute.value ?? activeRoute.value ?? null)
 const plannerNextChapter = computed(() => {
   if (!plannerState.value?.next_chapter_id || !visibleRoute.value) return null
   return visibleRoute.value.chapters.find(chapter => chapter.id === plannerState.value?.next_chapter_id) ?? null
@@ -571,6 +576,31 @@ async function startReviewAction(action: PlannerAction) {
   }
 }
 
+async function generateRouteDraftFromAction(action: PlannerAction) {
+  if (action.action_type !== 'route_adjustment') return
+
+  updatingPlannerActionId.value = action.id
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<PlannerActionRouteDraftResponse>(
+      `${config.public.apiBaseUrl}/planner-actions/${action.id}/route-draft`,
+      {
+        method: 'POST',
+        headers: protectedHeaders()
+      }
+    )
+    plannerActions.value = plannerActions.value.map(item => (item.id === action.id ? response.action : item))
+    routes.value = [
+      response.route_draft,
+      ...routes.value.filter(item => item.route.id !== response.route_draft.route.id)
+    ]
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to generate route draft from action.', error)
+  } finally {
+    updatingPlannerActionId.value = null
+  }
+}
+
 async function generateRouteDraft() {
   generatingRoute.value = true
   errorMessage.value = ''
@@ -917,6 +947,16 @@ onMounted(() => {
                   @click="startReviewAction(action)"
                 >
                   Start review
+                </button>
+                <button
+                  v-if="action.action_type === 'route_adjustment' && action.status !== 'completed' && action.status !== 'dismissed'"
+                  data-testid="generate-route-draft-action"
+                  type="button"
+                  class="primary-button"
+                  :disabled="updatingPlannerActionId === action.id"
+                  @click="generateRouteDraftFromAction(action)"
+                >
+                  Generate draft
                 </button>
                 <button
                   v-if="action.status !== 'completed'"

@@ -5,8 +5,10 @@ const fetchMock = vi.fn()
 const navigateToMock = vi.fn()
 const spaceId = '00000000-0000-0000-0000-000000000101'
 const actionId = '00000000-0000-0000-0000-000000000801'
+const routeActionId = '00000000-0000-0000-0000-000000000805'
 const chapterId = '00000000-0000-0000-0000-000000000601'
 const sessionId = '00000000-0000-0000-0000-000000000901'
+const routeDraftId = '00000000-0000-0000-0000-000000000902'
 
 vi.stubGlobal('$fetch', fetchMock)
 vi.stubGlobal('navigateTo', navigateToMock)
@@ -91,6 +93,47 @@ function plannerActions(status = 'proposed') {
         payload: {},
         created_at: null,
         updated_at: null
+      },
+      {
+        id: routeActionId,
+        study_space_id: spaceId,
+        chapter_id: chapterId,
+        source_planner_state_id: '00000000-0000-0000-0000-000000000701',
+        action_type: 'route_adjustment',
+        status,
+        title: 'Review before continuing: Retrieval Basics',
+        rationale: 'Low mastery suggests adding a focused review checkpoint.',
+        payload: { kind: 'insert_review', chapter_id: chapterId },
+        created_at: null,
+        updated_at: null
+      }
+    ]
+  }
+}
+
+function routeDraft() {
+  return {
+    route: {
+      id: routeDraftId,
+      study_space_id: spaceId,
+      version: 2,
+      status: 'draft',
+      title: 'Planner draft: Review before continuing',
+      summary: 'Draft with a focused review.',
+      generation_strategy: 'planner_action:insert_review',
+      created_at: null,
+      activated_at: null
+    },
+    chapters: [
+      activeRoute().chapters[0],
+      {
+        ...activeRoute().chapters[0],
+        id: '00000000-0000-0000-0000-000000000603',
+        learning_route_id: routeDraftId,
+        order_index: 2,
+        title: 'Focused review: Retrieval Basics',
+        estimated_days: 1,
+        status: 'not_started'
       }
     ]
   }
@@ -155,6 +198,19 @@ describe('StudySpacePage planner actions panel', () => {
             created_at: null,
             updated_at: null
           }
+        })
+      }
+      if (url.endsWith(`/planner-actions/${routeActionId}/route-draft`) && options?.method === 'POST') {
+        return Promise.resolve({
+          action: {
+            ...plannerActions('accepted').actions[1],
+            payload: {
+              kind: 'insert_review',
+              chapter_id: chapterId,
+              execution: { route_draft_id: routeDraftId }
+            }
+          },
+          route_draft: routeDraft()
         })
       }
       throw new Error(`Unexpected request: ${url}`)
@@ -227,5 +283,23 @@ describe('StudySpacePage planner actions panel', () => {
       })
     )
     expect(navigateToMock).toHaveBeenCalledWith(`/chapters/${chapterId}?session_id=${sessionId}`)
+  })
+
+  it('generates a draft route from a route adjustment action', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="generate-route-draft-action"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://localhost:8000/api/v1/planner-actions/${routeActionId}/route-draft`,
+      expect.objectContaining({
+        method: 'POST'
+      })
+    )
+    expect(wrapper.text()).toContain('Planner draft: Review before continuing')
+    expect(wrapper.text()).toContain('Focused review: Retrieval Basics')
+    expect(wrapper.text()).toContain('accepted')
   })
 })
