@@ -107,7 +107,12 @@ tests and can be replaced behind the domain service boundary later.
 
 Chapter Mentor state generation also reads Session Tutor `learning_signals`
 from completed graph-backed tutor runs. Those signals enrich weak points,
-next actions, and evidence without changing the public API response shape.
+next actions, and evidence.
+
+Mentor state responses include supervision freshness fields. The API compares
+the latest completed L3 Session Tutor run for the chapter with the L2 Chapter
+Mentor state's `updated_at` timestamp and returns whether the assessment needs
+refreshing.
 
 ## Quiz + mastery
 
@@ -141,6 +146,10 @@ The planner is deterministic in this phase. It recommends the next chapter,
 flags risk chapters, proposes review actions, and records route adjustment
 proposals. It does not automatically mutate learning routes; route changes stay
 as proposals until a future explicit approval workflow is added.
+
+Planner evidence also carries chapter supervision freshness so the L1 planner
+can show which chapters have new L3 tutor signals that have not yet been
+absorbed by L2 Chapter Mentor assessment.
 
 ## Planner actions
 
