@@ -8,13 +8,21 @@ from app.core.config import get_settings
 from app.db.session import get_db_session
 from app.domain.chapter_mentor.providers import create_answer_provider
 from app.domain.rag.embeddings import DeterministicEmbeddingProvider
-from app.domain.sessions.schemas import MessageResponse, SessionCreate, SessionResponse, TutorMessageRequest
+from app.domain.sessions.schemas import (
+    MessageResponse,
+    SessionCreate,
+    SessionResponse,
+    SessionUpdate,
+    TutorMessageRequest,
+)
 from app.domain.sessions.service import (
     answer_session_message,
     build_session_response,
     create_session_for_chapter,
+    delete_session,
     list_messages_for_session,
     list_sessions_for_chapter,
+    rename_session,
 )
 
 router = APIRouter(tags=["sessions"])
@@ -81,6 +89,41 @@ async def read_session_messages(
         raise map_session_error(exc) from exc
 
 
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_tutor_session(
+    session_id: uuid.UUID,
+    context: CurrentUserContext = Depends(get_authorized_user_context),
+    session: AsyncSession = Depends(get_db_session),
+) -> None:
+    try:
+        await delete_session(
+            session=session,
+            tenant_id=context.tenant_id,
+            session_id=session_id,
+        )
+    except ValueError as exc:
+        raise map_session_error(exc) from exc
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionResponse)
+async def rename_tutor_session(
+    session_id: uuid.UUID,
+    payload: SessionUpdate,
+    context: CurrentUserContext = Depends(get_authorized_user_context),
+    session: AsyncSession = Depends(get_db_session),
+) -> SessionResponse:
+    try:
+        row = await rename_session(
+            session=session,
+            tenant_id=context.tenant_id,
+            session_id=session_id,
+            title=payload.title,
+        )
+    except ValueError as exc:
+        raise map_session_error(exc) from exc
+    return build_session_response(row)
+
+
 @router.post("/sessions/{session_id}/messages", response_model=MessageResponse)
 async def create_tutor_message(
     session_id: uuid.UUID,
@@ -98,6 +141,7 @@ async def create_tutor_message(
             content=payload.content,
             embedding_provider=DeterministicEmbeddingProvider(settings.rag_embedding_dimension),
             answer_provider=create_answer_provider(settings),
+            web_search_enabled=payload.web_search_enabled,
         )
     except ValueError as exc:
         raise map_session_error(exc) from exc

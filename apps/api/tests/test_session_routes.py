@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import AsyncGenerator
+from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -121,6 +122,65 @@ async def test_list_session_messages_uses_authorized_tenant(monkeypatch) -> None
 
 
 @pytest.mark.anyio
+async def test_delete_session_uses_authorized_tenant(monkeypatch) -> None:
+    captured = {}
+    session_id = uuid.uuid4()
+
+    async def fake_delete_session(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(routes_sessions, "delete_session", fake_delete_session)
+    app.dependency_overrides[get_db_session] = fake_db
+    app.dependency_overrides[get_authorized_user_context] = fake_context
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.delete(f"/api/v1/sessions/{session_id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 204
+    assert captured["session_id"] == session_id
+    assert captured["tenant_id"] == uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+@pytest.mark.anyio
+async def test_rename_session_uses_authorized_tenant(monkeypatch) -> None:
+    captured = {}
+    session_id = uuid.uuid4()
+
+    async def fake_rename_session(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            id=session_id,
+            study_space_id=uuid.uuid4(),
+            chapter_id=uuid.uuid4(),
+            title=kwargs["title"],
+            status="active",
+            summary=None,
+            created_at=None,
+            updated_at=None,
+        )
+
+    monkeypatch.setattr(routes_sessions, "rename_session", fake_rename_session)
+    app.dependency_overrides[get_db_session] = fake_db
+    app.dependency_overrides[get_authorized_user_context] = fake_context
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.patch(
+                f"/api/v1/sessions/{session_id}",
+                json={"title": "Focused review"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "Focused review"
+    assert captured["session_id"] == session_id
+    assert captured["tenant_id"] == uuid.UUID("00000000-0000-0000-0000-000000000001")
+    assert captured["title"] == "Focused review"
+
+
+@pytest.mark.anyio
 async def test_session_tutor_message_rejects_client_tenant() -> None:
     app.dependency_overrides[get_db_session] = fake_db
     app.dependency_overrides[get_authorized_user_context] = fake_context
@@ -158,7 +218,7 @@ async def test_create_session_message_uses_answer_service(monkeypatch) -> None:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 f"/api/v1/sessions/{session_id}/messages",
-                json={"content": "Explain"},
+                json={"content": "Explain", "web_search_enabled": False},
             )
     finally:
         app.dependency_overrides.clear()
@@ -167,3 +227,4 @@ async def test_create_session_message_uses_answer_service(monkeypatch) -> None:
     assert captured["session_id"] == session_id
     assert captured["user_id"] == uuid.UUID("00000000-0000-0000-0000-000000000002")
     assert captured["content"] == "Explain"
+    assert captured["web_search_enabled"] is False

@@ -113,8 +113,14 @@ async def run_session_tutor_graph(
     content: str,
     embedding_provider: EmbeddingProvider,
     answer_provider: AnswerProvider,
+    web_search_enabled: bool | None = None,
 ) -> MessageResponse:
     settings = get_settings()
+    effective_web_search_enabled = (
+        settings.session_tutor_web_search_enabled
+        if web_search_enabled is None
+        else web_search_enabled
+    )
     runtime_config = graph_runtime_config_from_settings(settings)
     thread_id = session_tutor_thread_id(session_id)
     checkpointer = create_checkpointer(runtime_config)
@@ -190,6 +196,17 @@ async def run_session_tutor_graph(
         ),
     )
     graph_builder.add_node(
+        "web_search",
+        observed_async(
+            lambda state: nodes.web_search(
+                state,
+                enabled=effective_web_search_enabled,
+                max_results=settings.session_tutor_web_search_max_results,
+                timeout_seconds=settings.session_tutor_web_search_timeout_seconds,
+            ),
+        ),
+    )
+    graph_builder.add_node(
         "generate_answer",
         observed_async(
             lambda state: nodes.generate_answer(
@@ -229,11 +246,14 @@ async def run_session_tutor_graph(
                 "content": state["content"],
                 "user_message_id": str(state.get("user_message_id")),
                 "chapter_supervision_used": state.get("chapter_supervision") is not None,
+                "web_search_enabled": effective_web_search_enabled,
             },
             output_payload={
                 **metadata,
                 "assistant_message_id": str(state.get("assistant_message_id")),
                 "citation_count": len(state.get("citations", [])),
+                "web_search_result_count": len(state.get("web_search_results", [])),
+                "web_search_error": state.get("web_search_error"),
                 "learning_signals": state["learning_signals"],
                 "chapter_supervision_used": state.get("chapter_supervision") is not None,
             },
@@ -250,7 +270,8 @@ async def run_session_tutor_graph(
     graph_builder.add_edge("load_session_context", "persist_user_message")
     graph_builder.add_edge("persist_user_message", "load_chapter_supervision")
     graph_builder.add_edge("load_chapter_supervision", "retrieve_evidence")
-    graph_builder.add_edge("retrieve_evidence", "generate_answer")
+    graph_builder.add_edge("retrieve_evidence", "web_search")
+    graph_builder.add_edge("web_search", "generate_answer")
     graph_builder.add_edge("generate_answer", "persist_assistant_message")
     graph_builder.add_edge("persist_assistant_message", "extract_learning_signals")
     graph_builder.add_edge("extract_learning_signals", "record_agent_run")

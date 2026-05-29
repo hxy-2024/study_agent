@@ -20,12 +20,17 @@ class FakeEmbeddingProvider:
 
 
 class FakeAnswerProvider:
+    def __init__(self) -> None:
+        self.web_search_results = None
+
     async def answer(
         self,
         question: str,
         chunks: list[RetrievedChunk],
         source_filenames: dict[uuid.UUID, str],
+        web_search_results: list[dict[str, str]] | None = None,
     ) -> ChapterMentorResponse:
+        self.web_search_results = web_search_results
         return ChapterMentorResponse(
             question=question,
             answer=f"Grounded answer for: {question}",
@@ -47,8 +52,19 @@ class FailingAnswerProvider:
         question: str,
         chunks: list[RetrievedChunk],
         source_filenames: dict[uuid.UUID, str],
+        web_search_results: list[dict[str, str]] | None = None,
     ) -> ChapterMentorResponse:
         raise RuntimeError("provider unavailable")
+
+
+class FakeWebSearchTool:
+    def __init__(self, results: list[dict[str, str]] | None = None) -> None:
+        self.calls = []
+        self.results = results or []
+
+    async def ainvoke(self, payload: dict) -> list[dict[str, str]]:
+        self.calls.append(payload)
+        return self.results
 
 
 @pytest.mark.anyio
@@ -134,6 +150,21 @@ async def test_graph_records_messages_agent_run_and_supervision(monkeypatch) -> 
         fake_load_source_filenames,
     )
 
+    fake_web_search = FakeWebSearchTool(
+        [
+            {
+                "title": "Citation practice",
+                "url": "https://example.test/citation",
+                "snippet": "Fresh context about citation practice.",
+            }
+        ]
+    )
+    answer_provider = FakeAnswerProvider()
+    monkeypatch.setattr(
+        "app.domain.session_tutor_graph.nodes.web_search_tool",
+        fake_web_search,
+    )
+
     response = await run_session_tutor_graph(
         session=FakeSession(),
         tenant_id=tenant_id,
@@ -141,7 +172,8 @@ async def test_graph_records_messages_agent_run_and_supervision(monkeypatch) -> 
         session_id=session_id,
         content="I am confused about citations.",
         embedding_provider=FakeEmbeddingProvider(),
-        answer_provider=FakeAnswerProvider(),
+        answer_provider=answer_provider,
+        web_search_enabled=True,
     )
 
     messages = [obj for obj in added if isinstance(obj, Message)]
@@ -156,6 +188,24 @@ async def test_graph_records_messages_agent_run_and_supervision(monkeypatch) -> 
     assert runs[0].output_payload["checkpoint_backend"] == "memory"
     assert runs[0].output_payload["state_schema_version"] == 1
     assert runs[0].output_payload["node_trace"][-1] == "record_agent_run"
+    assert runs[0].input_payload["web_search_enabled"] is True
+    assert "web_search" in runs[0].output_payload["node_trace"]
+    assert runs[0].output_payload["web_search_result_count"] == 1
+    assert runs[0].output_payload["web_search_error"] is None
+    assert fake_web_search.calls == [
+        {
+            "query": "I am confused about citations.",
+            "max_results": 3,
+            "timeout_seconds": 5,
+        }
+    ]
+    assert answer_provider.web_search_results == [
+        {
+            "title": "Citation practice",
+            "url": "https://example.test/citation",
+            "snippet": "Fresh context about citation practice.",
+        }
+    ]
     assert runs[0].output_payload["chapter_supervision_used"] is True
     assert any(
         signal["type"] == "confusion_detected"
@@ -214,6 +264,10 @@ async def test_graph_records_failed_agent_run_after_user_message(monkeypatch) ->
         "app.domain.session_tutor_graph.nodes.load_source_filenames",
         fake_load_source_filenames,
     )
+    monkeypatch.setattr(
+        "app.domain.session_tutor_graph.nodes.web_search_tool",
+        FakeWebSearchTool(),
+    )
 
     with pytest.raises(RuntimeError, match="provider unavailable"):
         await run_session_tutor_graph(
@@ -244,6 +298,7 @@ async def test_graph_records_failed_agent_run_after_user_message(monkeypatch) ->
         "persist_user_message",
         "load_chapter_supervision",
         "retrieve_evidence",
+        "web_search",
         "generate_answer",
     ]
 
@@ -341,6 +396,10 @@ async def test_graph_rolls_back_before_recording_failed_agent_run_after_db_error
     monkeypatch.setattr(
         "app.domain.session_tutor_graph.nodes.load_source_filenames",
         fake_load_source_filenames,
+    )
+    monkeypatch.setattr(
+        "app.domain.session_tutor_graph.nodes.web_search_tool",
+        FakeWebSearchTool(),
     )
 
     fake_session = RollbackRequiredSession()

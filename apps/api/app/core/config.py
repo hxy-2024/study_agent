@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 30
     session_tutor_graph_enabled: bool = True
     session_tutor_graph_checkpoint_backend: str = "memory"
+    session_tutor_web_search_enabled: bool = False
+    session_tutor_web_search_timeout_seconds: int = 5
+    session_tutor_web_search_max_results: int = 3
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
