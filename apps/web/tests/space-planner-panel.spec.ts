@@ -88,7 +88,15 @@ function plannerState(summary = 'AI Study: 0/1 chapters complete with 52% averag
         rationale: 'Low mastery suggests adding a focused review checkpoint before new material.'
       }
     ],
-    evidence: [],
+    evidence: [
+      {
+        chapter_id: chapterId,
+        title: 'Retrieval Basics',
+        needs_supervision_refresh: true,
+        latest_session_tutor_run_at: '2026-05-28T05:05:00Z',
+        mentor_state_updated_at: '2026-05-28T05:00:00Z'
+      }
+    ],
     updated_at: '2026-05-28T05:00:00Z'
   }
 }
@@ -126,6 +134,7 @@ describe('StudySpacePage space planner panel', () => {
     expect(wrapper.text()).toContain('Recommended next: 1. Retrieval Basics')
     expect(wrapper.text()).toContain('Mastery score is 52%')
     expect(wrapper.text()).toContain('Review before continuing: Retrieval Basics')
+    expect(wrapper.text()).toContain('1 chapter needs supervision refresh')
   })
 
   it('runs the planner and refreshes the panel', async () => {

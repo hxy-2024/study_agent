@@ -198,6 +198,9 @@ const plannerUpdatedAt = computed(() => {
   if (!plannerState.value?.updated_at) return ''
   return new Date(plannerState.value.updated_at).toLocaleString()
 })
+const supervisionRefreshCount = computed(() => {
+  return (plannerState.value?.evidence ?? []).filter(item => item.needs_supervision_refresh === true).length
+})
 const sourceFilters = computed(() => [
   { key: 'all' as const, label: 'All', count: sources.value.length },
   { key: 'uploaded' as const, label: 'Uploaded', count: sources.value.filter(source => source.status === 'uploaded').length },
@@ -782,6 +785,9 @@ onMounted(() => {
               <h3>{{ plannerState.summary }}</h3>
               <p v-if="plannerNextChapter">Recommended next: {{ plannerNextChapter.order_index }}. {{ plannerNextChapter.title }}</p>
               <p v-else class="muted">No specific next chapter is required.</p>
+              <p v-if="supervisionRefreshCount" class="supervision-refresh-note">
+                {{ supervisionRefreshCount }} {{ supervisionRefreshCount === 1 ? 'chapter needs' : 'chapters need' }} supervision refresh
+              </p>
               <small v-if="plannerUpdatedAt">Updated {{ plannerUpdatedAt }}</small>
             </article>
 
@@ -1239,6 +1245,20 @@ onMounted(() => {
 .planner-list small {
   color: var(--color-primary);
   font-weight: 800;
+}
+
+.supervision-refresh-note {
+  width: fit-content;
+  border: 1px solid rgba(20, 184, 166, 0.32);
+  border-radius: 999px;
+  background: rgba(240, 253, 250, 0.9);
+  color: #115e59;
+  box-shadow: 0 12px 30px rgba(15, 118, 110, 0.08);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
+  margin: 0;
+  padding: 6px 10px;
 }
 
 .planner-list h3 {

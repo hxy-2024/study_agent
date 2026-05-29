@@ -75,6 +75,8 @@ interface ChapterMentorState {
   evidence: Record<string, unknown>[]
   source_session_count: number
   source_message_count: number
+  latest_session_tutor_run_at?: string | null
+  needs_supervision_refresh?: boolean
   updated_at?: string
 }
 
@@ -609,6 +611,14 @@ onMounted(() => {
         </div>
 
         <template v-if="hasMentorState && mentorState">
+          <div v-if="mentorState.needs_supervision_refresh" class="state-refresh-callout">
+            <div>
+              <strong>New tutor signals need assessment</strong>
+              <p>Refresh the mentor assessment so L2 can absorb the latest L3 session signals.</p>
+            </div>
+            <span class="status-badge">L2 refresh</span>
+          </div>
+
           <p v-if="mentorState.summary" class="state-summary">{{ mentorState.summary }}</p>
 
           <div class="state-grid">
@@ -1282,6 +1292,28 @@ onMounted(() => {
   color: var(--color-text);
   font-size: 16px;
   line-height: 1.6;
+}
+
+.state-refresh-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(20, 184, 166, 0.32);
+  border-radius: 8px;
+  background: rgba(240, 253, 250, 0.88);
+  box-shadow: 0 12px 34px rgba(15, 118, 110, 0.08);
+  padding: 12px 14px;
+}
+
+.state-refresh-callout strong {
+  color: #0f766e;
+}
+
+.state-refresh-callout p {
+  margin: 4px 0 0;
+  color: #115e59;
+  line-height: 1.45;
 }
 
 .state-grid {

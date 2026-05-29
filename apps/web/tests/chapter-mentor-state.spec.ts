@@ -143,6 +143,32 @@ describe('Chapter mentor state panel', () => {
     expect(wrapper.text()).toContain('Updated mentor assessment.')
   })
 
+  it('shows supervision refresh callout when tutor signals are newer than the mentor state', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith(`/chapters/${chapterId}/mentor-state`)) {
+        return Promise.resolve(
+          mentorState({
+            needs_supervision_refresh: true,
+            latest_session_tutor_run_at: '2026-05-27T10:05:00Z'
+          })
+        )
+      }
+      if (url.endsWith(`/chapters/${chapterId}/sessions`)) {
+        return Promise.resolve([])
+      }
+      if (url.endsWith(`/chapters/${chapterId}`)) {
+        return Promise.resolve(chapterDetail())
+      }
+      return Promise.resolve({})
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('New tutor signals need assessment')
+    expect(wrapper.text()).toContain('Update assessment')
+  })
+
   it('renders empty state when mentor-state request fails', async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url.endsWith(`/chapters/${chapterId}/mentor-state`)) {
