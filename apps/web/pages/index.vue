@@ -59,6 +59,14 @@ const supervisionRefreshLabel = computed(() => {
   return `${supervisionRefreshCount.value} ${supervisionRefreshCount.value === 1 ? 'supervision refresh' : 'supervision refreshes'}`
 })
 const recentAgentRuns = computed(() => dashboard.value?.recent_agent_runs ?? [])
+const continueChapterId = computed(() => {
+  if (!currentSpace.value) return null
+  return dashboard.value?.pending_actions.find(action => {
+    return action.study_space_id === currentSpace.value?.id && Boolean(action.chapter_id)
+  })?.chapter_id ?? null
+})
+const continueHref = computed(() => continueChapterId.value ? `/chapters/${continueChapterId.value}` : '/spaces/new')
+const continueLabel = computed(() => continueChapterId.value ? 'Continue' : 'Prepare route')
 const today = new Date()
 const currentDay = today.getDate()
 const calendarDays = Array.from({ length: 35 }, (_, index) => index + 1)
@@ -149,7 +157,7 @@ onMounted(() => {
           </div>
           <div class="continue-actions">
             <span class="status-badge">{{ currentSpace.status }}</span>
-            <NuxtLink class="primary-button" :to="`/spaces/${currentSpace.id}`">Continue</NuxtLink>
+            <NuxtLink class="primary-button" :to="continueHref">{{ continueLabel }}</NuxtLink>
           </div>
         </section>
 
