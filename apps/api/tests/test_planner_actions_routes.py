@@ -237,3 +237,83 @@ async def test_start_review_uses_authorized_context(monkeypatch) -> None:
     assert captured_kwargs["tenant_id"] == tenant_id
     assert captured_kwargs["user_id"] == user_id
     assert captured_kwargs["action_id"] == action_id
+
+
+async def test_start_route_draft_uses_authorized_context(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    action_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    route_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    captured_kwargs = {}
+
+    async def fake_get_db_session() -> AsyncGenerator[object, None]:
+        yield object()
+
+    async def fake_get_authorized_user_context() -> CurrentUserContext:
+        return CurrentUserContext(user_id=user_id, tenant_id=tenant_id)
+
+    async def fake_start_route_draft_for_planner_action(**kwargs):
+        captured_kwargs.update(kwargs)
+        return SimpleNamespace(
+            action=SimpleNamespace(
+                id=action_id,
+                study_space_id=study_space_id,
+                chapter_id=chapter_id,
+                source_planner_state_id=None,
+                action_type="route_adjustment",
+                status="accepted",
+                title="Review before continuing",
+                rationale="Reason",
+                payload={"execution": {"route_draft_id": str(route_id)}},
+                created_at=None,
+                updated_at=None,
+            ),
+            route_draft=SimpleNamespace(
+                route=SimpleNamespace(
+                    id=route_id,
+                    study_space_id=study_space_id,
+                    version=2,
+                    status="draft",
+                    title="Planner draft",
+                    summary="Draft route",
+                    generation_strategy="planner_action:insert_review",
+                    created_at=None,
+                    activated_at=None,
+                ),
+                chapters=[
+                    SimpleNamespace(
+                        id=chapter_id,
+                        learning_route_id=route_id,
+                        order_index=1,
+                        title="Retrieval",
+                        goal="Goal",
+                        summary="Summary",
+                        estimated_days=2,
+                        status="not_started",
+                        source_chunk_refs=[],
+                    )
+                ],
+            ),
+        )
+
+    monkeypatch.setattr(
+        routes_planner_actions,
+        "start_route_draft_for_planner_action",
+        fake_start_route_draft_for_planner_action,
+    )
+    app.dependency_overrides[get_db_session] = fake_get_db_session
+    app.dependency_overrides[get_authorized_user_context] = fake_get_authorized_user_context
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(f"/api/v1/planner-actions/{action_id}/route-draft")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["route_draft"]["route"]["id"] == str(route_id)
+    assert response.json()["action"]["status"] == "accepted"
+    assert captured_kwargs["tenant_id"] == tenant_id
+    assert captured_kwargs["user_id"] == user_id
+    assert captured_kwargs["action_id"] == action_id

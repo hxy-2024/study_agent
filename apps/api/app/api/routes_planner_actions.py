@@ -10,6 +10,7 @@ from app.domain.planner_actions.schemas import (
     CreateRuntimeActionsRequest,
     PlannerActionExecutionResponse,
     PlannerActionListResponse,
+    PlannerActionRouteDraftResponse,
     PlannerActionResponse,
     UpdatePlannerActionStatusRequest,
 )
@@ -17,6 +18,7 @@ from app.domain.planner_actions.service import (
     create_actions_from_latest_planner_state,
     create_actions_from_runtime_signals,
     list_planner_actions,
+    start_route_draft_for_planner_action,
     start_review_for_planner_action,
     update_planner_action_status,
 )
@@ -113,6 +115,27 @@ async def start_action_review(
 ) -> PlannerActionExecutionResponse:
     try:
         return await start_review_for_planner_action(
+            session=session,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            action_id=action_id,
+        )
+    except ValueError as exc:
+        raise map_planner_action_error(exc) from exc
+
+
+@router.post(
+    "/planner-actions/{action_id}/route-draft",
+    response_model=PlannerActionRouteDraftResponse,
+    status_code=201,
+)
+async def start_action_route_draft(
+    action_id: uuid.UUID,
+    context: CurrentUserContext = Depends(get_authorized_user_context),
+    session: AsyncSession = Depends(get_db_session),
+) -> PlannerActionRouteDraftResponse:
+    try:
+        return await start_route_draft_for_planner_action(
             session=session,
             tenant_id=context.tenant_id,
             user_id=context.user_id,

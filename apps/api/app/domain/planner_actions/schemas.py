@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.sessions.schemas import SessionResponse
+from app.domain.learning_routes.schemas import RouteWithChaptersResponse
 
 
 class PlannerActionResponse(BaseModel):
@@ -27,6 +28,11 @@ class PlannerActionListResponse(BaseModel):
 class PlannerActionExecutionResponse(BaseModel):
     action: PlannerActionResponse
     session: SessionResponse
+
+
+class PlannerActionRouteDraftResponse(BaseModel):
+    action: PlannerActionResponse
+    route_draft: RouteWithChaptersResponse
 
 
 class CreatePlannerActionsRequest(BaseModel):
