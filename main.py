@@ -140,9 +140,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
-    if args.command is None:
-        args = parser.parse_args(["dev", *(argv or [])])
+    raw_args = list(argv or [])
+    if not raw_args or (raw_args[0].startswith("-") and raw_args[0] not in {"-h", "--help"}):
+        raw_args = ["dev", *raw_args]
+    args = parser.parse_args(raw_args)
     if getattr(args, "api_only", False) and getattr(args, "web_only", False):
         parser.error("--api-only and --web-only cannot be used together")
     return int(args.func(args))
