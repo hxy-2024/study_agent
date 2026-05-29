@@ -2,12 +2,15 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const fetchMock = vi.fn()
+const navigateToMock = vi.fn()
 const chapterId = '00000000-0000-0000-0000-000000000601'
 const otherChapterId = '00000000-0000-0000-0000-000000000602'
 const spaceId = '00000000-0000-0000-0000-000000000101'
 const actionId = '00000000-0000-0000-0000-000000000801'
+const sessionId = '00000000-0000-0000-0000-000000000901'
 
 vi.stubGlobal('$fetch', fetchMock)
+vi.stubGlobal('navigateTo', navigateToMock)
 vi.stubGlobal('useRuntimeConfig', () => ({
   public: {
     apiBaseUrl: 'http://localhost:8000/api/v1'
@@ -85,6 +88,7 @@ async function flushPromises() {
 describe('Chapter review callout', () => {
   beforeEach(() => {
     fetchMock.mockReset()
+    navigateToMock.mockReset()
     fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
       if (url.endsWith(`/chapters/${chapterId}/mastery`)) {
         return Promise.reject(new Error('Not found'))
@@ -128,6 +132,21 @@ describe('Chapter review callout', () => {
       }
       if (url.endsWith(`/planner-actions/${actionId}/status`) && options?.method === 'POST') {
         return Promise.resolve(plannerAction({ status: 'accepted' }))
+      }
+      if (url.endsWith(`/planner-actions/${actionId}/start-review`) && options?.method === 'POST') {
+        return Promise.resolve({
+          action: plannerAction({ status: 'accepted' }),
+          session: {
+            id: sessionId,
+            study_space_id: spaceId,
+            chapter_id: chapterId,
+            title: 'Review: Review retrieval evidence before continuing.',
+            status: 'active',
+            summary: null,
+            created_at: null,
+            updated_at: null
+          }
+        })
       }
       throw new Error(`Unexpected request: ${url}`)
     })
@@ -179,5 +198,21 @@ describe('Chapter review callout', () => {
       })
     )
     expect(wrapper.text()).toContain('Review runtime signal evidence.')
+  })
+
+  it('starts a focused review session for the current chapter action', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="start-review-action"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://localhost:8000/api/v1/planner-actions/${actionId}/start-review`,
+      expect.objectContaining({
+        method: 'POST'
+      })
+    )
+    expect(navigateToMock).toHaveBeenCalledWith(`/chapters/${chapterId}?session_id=${sessionId}`)
   })
 })

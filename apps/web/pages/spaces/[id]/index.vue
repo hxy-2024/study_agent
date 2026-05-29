@@ -120,6 +120,14 @@ interface PlannerAction {
   updated_at: string | null
 }
 
+interface PlannerActionExecutionResponse {
+  action: PlannerAction
+  session: {
+    id: string
+    chapter_id: string
+  }
+}
+
 interface AgentRunLearningSignal {
   kind: string
   [key: string]: unknown
@@ -541,6 +549,28 @@ async function updatePlannerAction(action: PlannerAction, status: string) {
   }
 }
 
+async function startReviewAction(action: PlannerAction) {
+  if (!action.chapter_id || action.action_type !== 'review_chapter') return
+
+  updatingPlannerActionId.value = action.id
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<PlannerActionExecutionResponse>(
+      `${config.public.apiBaseUrl}/planner-actions/${action.id}/start-review`,
+      {
+        method: 'POST',
+        headers: protectedHeaders()
+      }
+    )
+    plannerActions.value = plannerActions.value.map(item => (item.id === action.id ? response.action : item))
+    await navigateTo(`/chapters/${response.session.chapter_id}?session_id=${response.session.id}`)
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to start review.', error)
+  } finally {
+    updatingPlannerActionId.value = null
+  }
+}
+
 async function generateRouteDraft() {
   generatingRoute.value = true
   errorMessage.value = ''
@@ -877,6 +907,16 @@ onMounted(() => {
                   @click="updatePlannerAction(action, 'accepted')"
                 >
                   Accept
+                </button>
+                <button
+                  v-if="action.action_type === 'review_chapter' && action.chapter_id && action.status !== 'completed' && action.status !== 'dismissed'"
+                  data-testid="start-review-action"
+                  type="button"
+                  class="primary-button"
+                  :disabled="updatingPlannerActionId === action.id"
+                  @click="startReviewAction(action)"
+                >
+                  Start review
                 </button>
                 <button
                   v-if="action.status !== 'completed'"

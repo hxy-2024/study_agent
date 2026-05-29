@@ -110,6 +110,14 @@ interface PlannerAction {
   updated_at?: string | null
 }
 
+interface PlannerActionExecutionResponse {
+  action: PlannerAction
+  session: {
+    id: string
+    chapter_id: string
+  }
+}
+
 interface AgentRunLearningSignal {
   kind: string
   [key: string]: unknown
@@ -222,6 +230,11 @@ function normalizeMessages(response: MentorMessage[] | { messages?: MentorMessag
 
 function normalizePlannerActions(response: PlannerAction[] | { actions?: PlannerAction[] }) {
   return Array.isArray(response) ? response : response.actions ?? []
+}
+
+function preferredSessionId() {
+  const sessionId = route.query?.session_id
+  return typeof sessionId === 'string' ? sessionId : null
 }
 
 function normalizeAgentRuns(response: { runs?: AgentRunTimelineItem[] } | null | undefined): AgentRunTimelineItem[] {
@@ -370,7 +383,9 @@ async function loadMentorSession() {
       `${config.public.apiBaseUrl}/chapters/${chapterId.value}/sessions`,
       { headers: protectedHeaders() }
     )
-    mentorSession.value = normalizeSessions(response)[0] ?? null
+    const sessions = normalizeSessions(response)
+    const selectedSessionId = preferredSessionId()
+    mentorSession.value = sessions.find(session => session.id === selectedSessionId) ?? sessions[0] ?? null
     if (mentorSession.value) {
       await loadMentorMessages(mentorSession.value.id)
     } else {
@@ -485,6 +500,30 @@ async function updatePlannerAction(action: PlannerAction, status: string) {
     )
   } catch (error) {
     errorMessage.value = appendBackendMessage('Failed to update planner action.', error)
+  } finally {
+    updatingPlannerActionId.value = null
+  }
+}
+
+async function startReviewAction(action: PlannerAction) {
+  if (!action.chapter_id || action.action_type !== 'review_chapter') return
+
+  updatingPlannerActionId.value = action.id
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<PlannerActionExecutionResponse>(
+      `${config.public.apiBaseUrl}/planner-actions/${action.id}/start-review`,
+      {
+        method: 'POST',
+        headers: protectedHeaders()
+      }
+    )
+    plannerActions.value = plannerActions.value.map(existingAction =>
+      existingAction.id === response.action.id ? response.action : existingAction
+    )
+    await navigateTo(`/chapters/${response.session.chapter_id}?session_id=${response.session.id}`)
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to start review.', error)
   } finally {
     updatingPlannerActionId.value = null
   }
@@ -853,6 +892,15 @@ onMounted(() => {
                 @click="updatePlannerAction(action, 'accepted')"
               >
                 Accept
+              </button>
+              <button
+                data-testid="start-review-action"
+                class="primary-button"
+                type="button"
+                :disabled="updatingPlannerActionId === action.id"
+                @click="startReviewAction(action)"
+              >
+                Start review
               </button>
               <button
                 v-if="action.status !== 'completed'"
