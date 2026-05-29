@@ -3,6 +3,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.domain.sessions.schemas import SessionResponse
+
 
 class PlannerActionResponse(BaseModel):
     id: uuid.UUID
@@ -20,6 +22,11 @@ class PlannerActionResponse(BaseModel):
 
 class PlannerActionListResponse(BaseModel):
     actions: list[PlannerActionResponse]
+
+
+class PlannerActionExecutionResponse(BaseModel):
+    action: PlannerActionResponse
+    session: SessionResponse
 
 
 class CreatePlannerActionsRequest(BaseModel):

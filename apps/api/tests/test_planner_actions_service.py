@@ -2,12 +2,13 @@ import uuid
 
 import pytest
 
-from app.db.models import PlannerAction, PlannerActionStatus, PlannerActionType, SpacePlannerState, StudySpace
+from app.db.models import PlannerAction, PlannerActionStatus, PlannerActionType, Session, SpacePlannerState, StudySpace
 from app.domain.planner_actions.service import (
     build_actions_from_planner_state,
     create_actions_from_latest_planner_state,
     list_planner_actions,
     planner_action_response,
+    start_review_for_planner_action,
     update_planner_action_status,
 )
 
@@ -222,3 +223,106 @@ def test_planner_action_response_uses_enum_values() -> None:
     assert response.action_type == "review_chapter"
     assert response.status == "accepted"
     assert response.payload == {"score": 52}
+
+
+@pytest.mark.anyio
+async def test_start_review_for_planner_action_creates_session_and_accepts_action() -> None:
+    action = PlannerAction(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        study_space_id=uuid.uuid4(),
+        chapter_id=uuid.uuid4(),
+        action_type=PlannerActionType.review_chapter,
+        status=PlannerActionStatus.proposed,
+        title="Review Retrieval",
+        rationale="Recent tutor signals need review.",
+        payload={"source": "runtime_signal"},
+    )
+    added = []
+
+    class FakeSession:
+        async def scalar(self, _statement):
+            return action
+
+        def add(self, obj) -> None:
+            added.append(obj)
+
+        async def flush(self) -> None:
+            for obj in added:
+                if isinstance(obj, Session) and obj.id is None:
+                    obj.id = uuid.uuid4()
+
+        async def commit(self) -> None:
+            pass
+
+        async def refresh(self, obj) -> None:
+            if obj.id is None:
+                obj.id = uuid.uuid4()
+
+    response = await start_review_for_planner_action(
+        session=FakeSession(),
+        tenant_id=action.tenant_id,
+        user_id=action.user_id,
+        action_id=action.id,
+    )
+
+    review_session = next(obj for obj in added if isinstance(obj, Session))
+    assert review_session.chapter_id == action.chapter_id
+    assert review_session.title == "Review: Review Retrieval"
+    assert action.status == PlannerActionStatus.accepted
+    assert action.payload["execution"]["review_session_id"] == str(review_session.id)
+    assert response.session.id == review_session.id
+    assert response.action.status == "accepted"
+
+
+@pytest.mark.anyio
+async def test_start_review_for_planner_action_reuses_existing_review_session() -> None:
+    review_session = Session(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        study_space_id=uuid.uuid4(),
+        chapter_id=uuid.uuid4(),
+        title="Review: Retrieval",
+    )
+    action = PlannerAction(
+        id=uuid.uuid4(),
+        tenant_id=review_session.tenant_id,
+        user_id=uuid.uuid4(),
+        study_space_id=review_session.study_space_id,
+        chapter_id=review_session.chapter_id,
+        action_type=PlannerActionType.review_chapter,
+        status=PlannerActionStatus.accepted,
+        title="Review Retrieval",
+        rationale="Recent tutor signals need review.",
+        payload={"execution": {"review_session_id": str(review_session.id)}},
+    )
+    added = []
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.scalar_calls = 0
+
+        async def scalar(self, _statement):
+            self.scalar_calls += 1
+            return action if self.scalar_calls == 1 else review_session
+
+        def add(self, obj) -> None:
+            added.append(obj)
+
+        async def commit(self) -> None:
+            pass
+
+        async def refresh(self, _obj) -> None:
+            pass
+
+    response = await start_review_for_planner_action(
+        session=FakeSession(),
+        tenant_id=action.tenant_id,
+        user_id=action.user_id,
+        action_id=action.id,
+    )
+
+    assert added == []
+    assert response.session.id == review_session.id
+    assert response.action.payload["execution"]["review_session_id"] == str(review_session.id)

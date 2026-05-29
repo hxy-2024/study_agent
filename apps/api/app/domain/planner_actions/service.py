@@ -14,10 +14,16 @@ from app.db.models import (
     PlannerActionStatus,
     PlannerActionType,
     Session,
+    SessionStatus,
     SpacePlannerState,
     StudySpace,
 )
-from app.domain.planner_actions.schemas import PlannerActionListResponse, PlannerActionResponse
+from app.domain.planner_actions.schemas import (
+    PlannerActionExecutionResponse,
+    PlannerActionListResponse,
+    PlannerActionResponse,
+)
+from app.domain.sessions.service import build_session_response
 
 
 def _enum_value(value: Any) -> str:
@@ -345,3 +351,98 @@ async def update_planner_action_status(
     await session.commit()
     await session.refresh(action)
     return planner_action_response(action)
+
+
+def _review_session_id_from_payload(payload: dict) -> uuid.UUID | None:
+    execution = payload.get("execution")
+    if not isinstance(execution, dict):
+        return None
+    raw_session_id = execution.get("review_session_id")
+    if not isinstance(raw_session_id, str):
+        return None
+    try:
+        return uuid.UUID(raw_session_id)
+    except ValueError:
+        return None
+
+
+async def _load_review_session(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    study_space_id: uuid.UUID,
+    chapter_id: uuid.UUID,
+    session_id: uuid.UUID,
+) -> Session | None:
+    return await session.scalar(
+        select(Session).where(
+            Session.id == session_id,
+            Session.tenant_id == tenant_id,
+            Session.study_space_id == study_space_id,
+            Session.chapter_id == chapter_id,
+        )
+    )
+
+
+async def start_review_for_planner_action(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    action_id: uuid.UUID,
+) -> PlannerActionExecutionResponse:
+    action = await session.scalar(
+        select(PlannerAction).where(
+            PlannerAction.id == action_id,
+            PlannerAction.tenant_id == tenant_id,
+            PlannerAction.user_id == user_id,
+        )
+    )
+    if action is None:
+        raise ValueError("Planner action not found")
+    if action.action_type != PlannerActionType.review_chapter:
+        raise ValueError("Only review chapter actions can start a review session")
+    if action.chapter_id is None:
+        raise ValueError("Review action is missing a chapter")
+    if action.status == PlannerActionStatus.dismissed:
+        raise ValueError("Cannot start review for dismissed planner action")
+    if action.status == PlannerActionStatus.completed:
+        raise ValueError("Cannot start review for completed planner action")
+
+    payload = dict(action.payload or {})
+    existing_session_id = _review_session_id_from_payload(payload)
+    review_session = None
+    if existing_session_id is not None:
+        review_session = await _load_review_session(
+            session=session,
+            tenant_id=tenant_id,
+            study_space_id=action.study_space_id,
+            chapter_id=action.chapter_id,
+            session_id=existing_session_id,
+        )
+
+    if review_session is None:
+        review_session = Session(
+            tenant_id=tenant_id,
+            study_space_id=action.study_space_id,
+            chapter_id=action.chapter_id,
+            title=f"Review: {action.title}"[:200],
+            status=SessionStatus.active,
+            summary=action.rationale,
+        )
+        session.add(review_session)
+        await session.flush()
+
+    payload["execution"] = {
+        **(payload.get("execution") if isinstance(payload.get("execution"), dict) else {}),
+        "review_session_id": str(review_session.id),
+        "started_from_action_id": str(action.id),
+    }
+    action.payload = payload
+    action.status = PlannerActionStatus.accepted
+    action.updated_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(action)
+    await session.refresh(review_session)
+    return PlannerActionExecutionResponse(
+        action=planner_action_response(action),
+        session=build_session_response(review_session),
+    )
