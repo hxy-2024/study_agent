@@ -1,7 +1,12 @@
 import uuid
+from collections.abc import AsyncGenerator
+from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
 
+from app.api import routes_planner_actions
+from app.core.auth import CurrentUserContext, get_authorized_user_context
 from app.db.models import (
     AgentRun,
     AgentRunStatus,
@@ -20,6 +25,8 @@ from app.domain.planner_actions.service import (
     _runtime_signal_types,
     create_actions_from_runtime_signals,
 )
+from app.db.session import get_db_session
+from app.main import app
 
 
 def test_runtime_signal_types_maps_truthy_signals_and_missing_evidence() -> None:
@@ -36,6 +43,110 @@ def test_runtime_signal_types_maps_truthy_signals_and_missing_evidence() -> None
     )
 
     assert signal_types == ["confusion_detected", "evidence_missing"]
+
+
+def test_create_runtime_actions_route_uses_authorized_context(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    action_id = uuid.uuid4()
+    captured_kwargs = {}
+
+    async def fake_get_db_session() -> AsyncGenerator[object, None]:
+        yield object()
+
+    async def fake_get_authorized_user_context() -> CurrentUserContext:
+        return CurrentUserContext(user_id=user_id, tenant_id=tenant_id)
+
+    async def fake_create_actions_from_runtime_signals(**kwargs):
+        captured_kwargs.update(kwargs)
+        return SimpleNamespace(
+            actions=[
+                SimpleNamespace(
+                    id=action_id,
+                    study_space_id=study_space_id,
+                    chapter_id=chapter_id,
+                    source_planner_state_id=None,
+                    action_type="review_chapter",
+                    status="proposed",
+                    title="Review Retrieval",
+                    rationale="Runtime signal indicates review is needed.",
+                    payload={"source": "runtime_signal"},
+                    created_at=None,
+                    updated_at=None,
+                )
+            ]
+        )
+
+    monkeypatch.setattr(
+        routes_planner_actions,
+        "create_actions_from_runtime_signals",
+        fake_create_actions_from_runtime_signals,
+    )
+    app.dependency_overrides[get_db_session] = fake_get_db_session
+    app.dependency_overrides[get_authorized_user_context] = fake_get_authorized_user_context
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/planner-actions/from-runtime-signals",
+                json={"study_space_id": str(study_space_id), "chapter_id": str(chapter_id)},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "actions": [
+            {
+                "id": str(action_id),
+                "study_space_id": str(study_space_id),
+                "chapter_id": str(chapter_id),
+                "source_planner_state_id": None,
+                "action_type": "review_chapter",
+                "status": "proposed",
+                "title": "Review Retrieval",
+                "rationale": "Runtime signal indicates review is needed.",
+                "payload": {"source": "runtime_signal"},
+                "created_at": None,
+                "updated_at": None,
+            }
+        ]
+    }
+    assert captured_kwargs["tenant_id"] == tenant_id
+    assert captured_kwargs["user_id"] == user_id
+    assert captured_kwargs["study_space_id"] == study_space_id
+    assert captured_kwargs["chapter_id"] == chapter_id
+
+
+def test_create_runtime_actions_route_maps_missing_study_space_to_404(monkeypatch) -> None:
+    async def fake_get_db_session() -> AsyncGenerator[object, None]:
+        yield object()
+
+    async def fake_get_authorized_user_context() -> CurrentUserContext:
+        return CurrentUserContext(user_id=uuid.uuid4(), tenant_id=uuid.uuid4())
+
+    async def fake_create_actions_from_runtime_signals(**kwargs):
+        raise ValueError("Study space not found for user")
+
+    monkeypatch.setattr(
+        routes_planner_actions,
+        "create_actions_from_runtime_signals",
+        fake_create_actions_from_runtime_signals,
+    )
+    app.dependency_overrides[get_db_session] = fake_get_db_session
+    app.dependency_overrides[get_authorized_user_context] = fake_get_authorized_user_context
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/planner-actions/from-runtime-signals",
+                json={"study_space_id": str(uuid.uuid4())},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Study space not found for user"}
 
 
 @pytest.mark.parametrize(
