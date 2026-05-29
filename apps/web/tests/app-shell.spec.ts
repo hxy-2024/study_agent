@@ -20,36 +20,42 @@ function mountShell() {
 }
 
 describe('App shell', () => {
-  it('renders the fresh teal workspace shell', () => {
+  it('renders the compact top workspace shell', () => {
     const wrapper = mountShell()
 
     expect(wrapper.text()).toContain('study_agent')
+    expect(wrapper.text()).toContain('Local runtime')
+    expect(wrapper.find('.hamburger-button').exists()).toBe(true)
+    expect(wrapper.find('.avatar-button').text()).toBe('U')
+    expect(wrapper.find('[data-testid="page-slot"]').exists()).toBe(true)
+  })
+
+  it('opens drawer navigation from the hamburger menu', async () => {
+    const wrapper = mountShell()
+
+    expect(wrapper.find('.app-shell').exists()).toBe(true)
+    expect(wrapper.find('.nav-drawer').exists()).toBe(false)
+
+    await wrapper.find('.hamburger-button').trigger('click')
+
+    expect(wrapper.find('.nav-drawer').exists()).toBe(true)
     expect(wrapper.text()).toContain('Spaces')
     expect(wrapper.text()).toContain('Library')
     expect(wrapper.text()).toContain('Reviews')
     expect(wrapper.text()).toContain('Progress')
     expect(wrapper.text()).toContain('Settings')
-    expect(wrapper.text()).toContain('Search learning materials')
-    expect(wrapper.text()).toContain('Model Ready')
-    expect(wrapper.find('[data-testid="page-slot"]').exists()).toBe(true)
   })
 
-  it('loads the shared shell class names used by the design system', () => {
+  it('opens local settings from drawer navigation', async () => {
     const wrapper = mountShell()
 
-    expect(wrapper.find('.app-shell').exists()).toBe(true)
-    expect(wrapper.find('.sidebar').exists()).toBe(true)
-    expect(wrapper.find('.primary-button').exists()).toBe(false)
-    expect(wrapper.find('.runtime-pill').text()).toBe('Model Ready')
-  })
+    await wrapper.find('.hamburger-button').trigger('click')
+    await wrapper.findAll('.drawer-nav button').find(button => button.text() === 'Settings')?.trigger('click')
 
-  it('links only implemented navigation destinations', () => {
-    const wrapper = mountShell()
-    const links = wrapper.findAll('.sidebar-nav a')
-    const disabledItems = wrapper.findAll('.sidebar-nav [aria-disabled="true"]')
-
-    expect(links.map(link => link.attributes('href'))).toEqual(['/'])
-    expect(disabledItems).toHaveLength(4)
-    expect(disabledItems.map(item => item.text())).toEqual(['Library', 'Reviews', 'Progress', 'Settings'])
+    expect(wrapper.find('.settings-modal').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Base URL')
+    expect(wrapper.text()).toContain('API key')
+    expect(wrapper.text()).toContain('Default model')
+    expect(wrapper.text()).toContain('Embedding model')
   })
 })

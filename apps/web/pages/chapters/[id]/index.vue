@@ -178,6 +178,7 @@ const mentorQuestion = ref('')
 const mentorSession = ref<MentorSession | null>(null)
 const mentorMessages = ref<MentorMessage[]>([])
 const mentorState = ref<ChapterMentorState | null>(null)
+const chapterRailCollapsed = ref(false)
 const updatingMentorState = ref(false)
 const mastery = ref<MasteryRecord | null>(null)
 const generatingQuiz = ref(false)
@@ -226,6 +227,10 @@ const canSaveNote = computed(() => noteDraft.value.trim().length > 0 && !savingN
 const selectedAgentRun = computed(() => {
   if (!selectedAgentRunId.value) return null
   return agentRuns.value.find(run => runtimeRunKey(run) === selectedAgentRunId.value) ?? null
+})
+const introMessage = computed(() => {
+  if (!chapter.value) return ''
+  return `我是你的本章 AI Mentor。本章会围绕「${chapter.value.title}」展开，先帮你抓住目标：${chapter.value.goal}。你可以直接提问，也可以问我下一步学什么。`
 })
 
 function protectedHeaders() {
@@ -742,6 +747,151 @@ onMounted(() => {
         </div>
       </section>
 
+      <section class="chapter-console" aria-label="Chapter study console">
+        <aside class="chapter-rail" :class="{ collapsed: chapterRailCollapsed }">
+          <button class="rail-collapse" type="button" @click="chapterRailCollapsed = !chapterRailCollapsed">
+            {{ chapterRailCollapsed ? '>>' : '<<' }}
+          </button>
+          <template v-if="!chapterRailCollapsed">
+            <p class="eyebrow">Chapters</p>
+            <button class="chapter-rail-item active" type="button">
+              <span>{{ chapter.order_index }}</span>
+              <strong>{{ chapter.title }}</strong>
+            </button>
+            <p class="rail-hint">More chapters will appear here as route navigation expands.</p>
+          </template>
+        </aside>
+
+        <section class="chat-canvas" aria-label="AI chapter chat">
+          <div class="chat-header">
+            <div>
+              <p class="eyebrow">AI Mentor</p>
+              <h2>{{ chapter.title }}</h2>
+            </div>
+            <span class="status-badge">Markdown ready</span>
+          </div>
+
+          <div class="chat-thread" aria-live="polite">
+            <article class="chat-message assistant-message">
+              <span class="message-role">AI</span>
+              <p>{{ introMessage }}</p>
+              <div class="checkpoint-row">
+                <button type="button">Fork checkpoint</button>
+              </div>
+            </article>
+
+            <article v-if="loadingMentor" class="chat-message assistant-message">
+              <span class="message-role">AI</span>
+              <p>Loading mentor session...</p>
+            </article>
+
+            <article
+              v-for="message in mentorMessages"
+              :key="message.id"
+              class="chat-message"
+              :class="message.role === 'user' ? 'user-message' : 'assistant-message'"
+            >
+              <span class="message-role">{{ message.role === 'user' ? 'You' : 'AI' }}</span>
+              <p>{{ message.content }}</p>
+              <div v-if="message.role !== 'user'" class="checkpoint-row">
+                <button type="button">Fork checkpoint</button>
+              </div>
+              <div v-if="message.citations?.length" class="mentor-citations">
+                <p class="eyebrow">Citations</p>
+                <article
+                  v-for="citation in message.citations"
+                  :key="citation.chunk_id"
+                  class="mentor-citation"
+                >
+                  <div>
+                    <strong>{{ citation.source_filename }}</strong>
+                    <span>Chunk #{{ citation.chunk_index }}</span>
+                  </div>
+                  <p>{{ citation.text }}</p>
+                </article>
+              </div>
+            </article>
+          </div>
+
+          <p v-if="mentorErrorMessage" class="error-alert">{{ mentorErrorMessage }}</p>
+          <form class="mentor-form chat-composer" @submit.prevent="askMentor">
+            <div class="composer-tools">
+              <button type="button" class="tool-button">Attach</button>
+              <select class="select" aria-label="Model">
+                <option>Default model</option>
+                <option>Fast tutor</option>
+              </select>
+              <select class="select" aria-label="Thinking strength">
+                <option>Normal thinking</option>
+                <option>Deep thinking</option>
+              </select>
+            </div>
+            <div class="composer-input-row">
+              <textarea
+                v-model="mentorQuestion"
+                data-testid="mentor-question"
+                placeholder="Ask a question, request the next step, or paste a confusing excerpt"
+                :disabled="askingMentor"
+              />
+              <button
+                data-testid="ask-mentor"
+                class="primary-button send-button"
+                type="submit"
+                :disabled="askingMentor"
+              >
+                {{ askingMentor ? '...' : '↑' }}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <aside class="session-float">
+          <div class="session-section">
+            <p class="eyebrow">Sessions</p>
+            <h3>{{ mentorSession?.title ?? 'Default chapter session' }}</h3>
+            <button type="button" class="secondary-button compact-button">New session</button>
+          </div>
+
+          <div class="session-section">
+            <p class="eyebrow">Progress</p>
+            <span class="status-badge">{{ chapter.status }}</span>
+            <p>{{ chapter.estimated_days }} estimated days · {{ masteryLabel }}</p>
+          </div>
+
+          <div class="session-section">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow">Study notes</p>
+                <h3>Personal notes</h3>
+              </div>
+            </div>
+            <form class="note-form compact-note-form" @submit.prevent="createNote">
+              <textarea
+                v-model="noteDraft"
+                data-testid="chapter-note-input"
+                placeholder="Create a personal note"
+                :disabled="savingNote"
+              />
+              <button
+                data-testid="save-chapter-note"
+                class="secondary-button"
+                type="submit"
+                :disabled="!canSaveNote"
+              >
+                {{ savingNote ? 'Saving...' : 'Save note' }}
+              </button>
+            </form>
+            <div v-if="notes.length" class="note-list compact-note-list">
+              <article v-for="note in notes" :key="note.id" class="note-card">
+                <p>{{ note.content }}</p>
+                <button type="button" class="text-button" @click="deleteAnnotation(note)">Delete</button>
+              </article>
+            </div>
+            <p v-else class="empty-state">No notes yet.</p>
+          </div>
+        </aside>
+      </section>
+
       <section class="card chapter-state-panel">
         <div class="section-heading">
           <div>
@@ -1200,6 +1350,219 @@ onMounted(() => {
 .chapter-study {
   display: grid;
   gap: 18px;
+}
+
+.chapter-console {
+  display: grid;
+  grid-template-columns: minmax(180px, 230px) minmax(0, 1fr) minmax(260px, 320px);
+  gap: 14px;
+  min-height: min(680px, calc(100vh - 210px));
+  align-items: stretch;
+}
+
+.chapter-rail,
+.chat-canvas,
+.session-float {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow-card);
+}
+
+.chapter-rail {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 14px;
+}
+
+.chapter-rail.collapsed {
+  grid-template-columns: 1fr;
+  width: 58px;
+  padding: 10px;
+}
+
+.rail-collapse {
+  justify-self: start;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 900;
+  min-height: 34px;
+  padding: 6px 9px;
+}
+
+.chapter-rail-item {
+  border: 1px solid var(--color-primary-bright);
+  border-radius: 8px;
+  background: linear-gradient(135deg, #ecfdf5, #ffffff);
+  color: var(--color-text);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px;
+  text-align: left;
+}
+
+.chapter-rail-item span {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--color-primary);
+  color: #fff;
+  font-weight: 900;
+}
+
+.chapter-rail-item strong,
+.rail-hint {
+  overflow-wrap: anywhere;
+}
+
+.rail-hint {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.chat-canvas {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(260px, 1fr) auto auto;
+  overflow: hidden;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--color-border);
+  padding: 14px 16px;
+}
+
+.chat-header h2 {
+  margin-bottom: 0;
+}
+
+.chat-thread {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.chat-message {
+  width: min(760px, 92%);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+.assistant-message {
+  justify-self: start;
+  background: #ffffff;
+}
+
+.user-message {
+  justify-self: end;
+  border-color: var(--color-primary-bright);
+  background: var(--color-primary-soft);
+}
+
+.message-role {
+  display: inline-flex;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 900;
+  margin-bottom: 6px;
+}
+
+.checkpoint-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.checkpoint-row button,
+.tool-button {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 800;
+  min-height: 32px;
+  padding: 6px 9px;
+}
+
+.chat-composer {
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.composer-tools,
+.composer-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.composer-tools .select {
+  max-width: 180px;
+}
+
+.composer-input-row textarea {
+  min-height: 64px;
+}
+
+.send-button {
+  width: 46px;
+  min-width: 46px;
+  align-self: stretch;
+  font-size: 20px;
+}
+
+.session-float {
+  align-self: start;
+  display: grid;
+  gap: 12px;
+  max-height: min(680px, calc(100vh - 210px));
+  overflow: auto;
+  padding: 14px;
+  position: sticky;
+  top: 76px;
+}
+
+.session-section {
+  border-bottom: 1px solid var(--color-border);
+  display: grid;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+
+.session-section:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.compact-note-form textarea {
+  min-height: 80px;
+}
+
+.compact-note-list {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.study-grid .mentor-panel {
+  display: none;
 }
 
 .chapter-heading,
@@ -1795,6 +2158,33 @@ onMounted(() => {
 }
 
 @media (max-width: 960px) {
+  .chapter-console {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .chapter-rail.collapsed {
+    width: auto;
+  }
+
+  .session-float {
+    max-height: none;
+    position: static;
+  }
+
+  .composer-tools,
+  .composer-input-row {
+    flex-direction: column;
+  }
+
+  .composer-tools .select {
+    max-width: none;
+  }
+
+  .send-button {
+    width: 100%;
+  }
+
   .study-grid,
   .summary-grid,
   .state-grid {
