@@ -17,9 +17,18 @@ WEB_DIR = ROOT / "apps" / "web"
 COMPOSE_FILE = ROOT / "infra" / "docker-compose.yml"
 
 
+def resolve_command(command: Sequence[str]) -> list[str]:
+    executable = shutil.which(command[0])
+    if executable is None:
+        return list(command)
+    if os.name == "nt" and Path(executable).suffix.lower() in {".bat", ".cmd"}:
+        return [os.environ.get("COMSPEC", "cmd.exe"), "/c", executable, *command[1:]]
+    return [executable, *command[1:]]
+
+
 def run(command: Sequence[str], cwd: Path = ROOT, check: bool = True) -> subprocess.CompletedProcess:
     print(f"> {' '.join(command)}")
-    return subprocess.run(command, cwd=cwd, check=check)
+    return subprocess.run(resolve_command(command), cwd=cwd, check=check)
 
 
 def require_command(command: str) -> None:
@@ -49,7 +58,7 @@ def prepare_web(skip_install: bool) -> None:
 
 def spawn(command: Sequence[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.Popen:
     print(f"> {' '.join(command)}")
-    return subprocess.Popen(command, cwd=cwd, env=env)
+    return subprocess.Popen(resolve_command(command), cwd=cwd, env=env)
 
 
 def wait_for_processes(processes: list[subprocess.Popen]) -> int:
@@ -131,9 +140,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
-    if args.command is None:
-        args = parser.parse_args(["dev", *(argv or [])])
+    raw_args = list(argv or [])
+    if not raw_args or (raw_args[0].startswith("-") and raw_args[0] not in {"-h", "--help"}):
+        raw_args = ["dev", *raw_args]
+    args = parser.parse_args(raw_args)
     if getattr(args, "api_only", False) and getattr(args, "web_only", False):
         parser.error("--api-only and --web-only cannot be used together")
     return int(args.func(args))

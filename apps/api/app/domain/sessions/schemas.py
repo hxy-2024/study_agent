@@ -12,6 +12,12 @@ class SessionCreate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
 
 
+class SessionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=200)
+
+
 class SessionResponse(BaseModel):
     id: uuid.UUID
     study_space_id: uuid.UUID
@@ -76,3 +82,4 @@ class TutorMessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     content: str = Field(min_length=1, max_length=4000)
+    web_search_enabled: bool | None = None

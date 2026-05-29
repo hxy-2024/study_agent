@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 interface ChapterStudyChapter {
   id: string
@@ -38,6 +38,7 @@ interface ChapterEvidence {
 
 interface ChapterStudyDetail {
   chapter: ChapterStudyChapter
+  chapters?: ChapterStudyChapter[]
   route: ChapterStudyRoute
   study_space: ChapterStudySpace
   evidence: ChapterEvidence[]
@@ -64,20 +65,6 @@ interface MentorMessage {
   role: 'user' | 'assistant'
   content: string
   citations: MentorCitation[]
-}
-
-interface ChapterMentorState {
-  id: string
-  chapter_id: string
-  summary: string
-  weak_points: string[]
-  next_actions: string[]
-  evidence: Record<string, unknown>[]
-  source_session_count: number
-  source_message_count: number
-  latest_session_tutor_run_at?: string | null
-  needs_supervision_refresh?: boolean
-  updated_at?: string
 }
 
 interface MasteryRecord {
@@ -111,53 +98,6 @@ interface ChapterAnnotation {
   updated_at: string | null
 }
 
-interface PlannerAction {
-  id: string
-  study_space_id: string
-  chapter_id: string | null
-  source_planner_state_id?: string | null
-  action_type: string
-  status: string
-  title: string
-  rationale: string
-  payload: Record<string, unknown>
-  created_at?: string | null
-  updated_at?: string | null
-}
-
-interface PlannerActionExecutionResponse {
-  action: PlannerAction
-  session: {
-    id: string
-    chapter_id: string
-  }
-}
-
-interface AgentRunLearningSignal {
-  kind: string
-  [key: string]: unknown
-}
-
-interface AgentRunTimelineItem {
-  id?: string
-  agent_type: string
-  graph_name?: string | null
-  status: string
-  summary: string
-  node_trace: string[]
-  learning_signals: AgentRunLearningSignal[]
-  thread_id: string | null
-  checkpoint_backend: string | null
-  state_schema_version?: number | null
-  created_at?: string | null
-  completed_at?: string | null
-  latency_ms?: number | null
-  prompt_tokens?: number | null
-  completion_tokens?: number | null
-  total_tokens?: number | null
-  error_message?: string | null
-}
-
 const DEV_AUTH_HEADERS = {
   'X-User-Id': '00000000-0000-0000-0000-000000000002',
   'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
@@ -168,64 +108,48 @@ const config = useRuntimeConfig()
 const chapterId = computed(() => String(route.params.id))
 
 const detail = ref<ChapterStudyDetail | null>(null)
-const loading = ref(false)
-const completing = ref(false)
-const askingMentor = ref(false)
-const loadingMentor = ref(false)
-const errorMessage = ref('')
-const mentorErrorMessage = ref('')
-const mentorQuestion = ref('')
+const chapterNavigation = ref<ChapterStudyChapter[]>([])
+const mentorSessions = ref<MentorSession[]>([])
 const mentorSession = ref<MentorSession | null>(null)
 const mentorMessages = ref<MentorMessage[]>([])
-const mentorState = ref<ChapterMentorState | null>(null)
-const updatingMentorState = ref(false)
-const mastery = ref<MasteryRecord | null>(null)
-const generatingQuiz = ref(false)
-const plannerActions = ref<PlannerAction[]>([])
-const loadingPlannerActions = ref(false)
-const updatingPlannerActionId = ref<string | null>(null)
 const annotations = ref<ChapterAnnotation[]>([])
-const loadingAnnotations = ref(false)
+const mastery = ref<MasteryRecord | null>(null)
+
+const loading = ref(false)
+const loadingMentor = ref(false)
+const askingMentor = ref(false)
+const mentorAbortController = ref<AbortController | null>(null)
 const savingNote = ref(false)
-const savingHighlightChunkId = ref<string | null>(null)
+const completing = ref(false)
+const generatingQuiz = ref(false)
+const deletingSessionId = ref<string | null>(null)
+const chapterRailCollapsed = ref(false)
+const webSearchEnabled = ref(false)
+const sessionMenuSession = ref<MentorSession | null>(null)
+
+const mentorQuestion = ref('')
 const noteDraft = ref('')
-const agentRuns = ref<AgentRunTimelineItem[]>([])
-const selectedAgentRunId = ref<string | null>(null)
-const loadingAgentRuns = ref(false)
-const creatingRuntimeActions = ref(false)
-const runtimeActionsMessage = ref('')
+const errorMessage = ref('')
+const mentorErrorMessage = ref('')
 
 const chapter = computed(() => detail.value?.chapter ?? null)
-const evidence = computed(() => detail.value?.evidence ?? [])
-const isCompleted = computed(() => chapter.value?.status === 'completed')
-const hasMentorState = computed(() => {
-  return Boolean(
-    mentorState.value?.summary ||
-      mentorState.value?.weak_points?.length ||
-      mentorState.value?.next_actions?.length
-  )
-})
-const masteryLabel = computed(() => {
-  if (!mastery.value) return 'Mastery: not started'
-  return `Mastery: ${mastery.value.level} ${mastery.value.score_percent}%`
-})
-const quizWeakPoint = computed(() => mastery.value?.weak_points?.[0] ?? null)
-const activeReviewActions = computed(() => {
-  return plannerActions.value.filter(action => {
-    return (
-      action.chapter_id === chapterId.value &&
-      action.action_type === 'review_chapter' &&
-      action.status !== 'completed' &&
-      action.status !== 'dismissed'
-    )
-  })
-})
 const notes = computed(() => annotations.value.filter(annotation => annotation.kind === 'note'))
-const highlights = computed(() => annotations.value.filter(annotation => annotation.kind === 'highlight'))
+const isCompleted = computed(() => chapter.value?.status === 'completed')
 const canSaveNote = computed(() => noteDraft.value.trim().length > 0 && !savingNote.value)
-const selectedAgentRun = computed(() => {
-  if (!selectedAgentRunId.value) return null
-  return agentRuns.value.find(run => runtimeRunKey(run) === selectedAgentRunId.value) ?? null
+const masteryLabel = computed(() => {
+  if (!mastery.value) return 'not started'
+  return `${mastery.value.level} ${mastery.value.score_percent}%`
+})
+const bodyClassName = 'chapter-study-page'
+
+const introMessage = computed(() => {
+  if (!chapter.value) return ''
+  return [
+    'I am your chapter AI Mentor.',
+    `This chapter focuses on **${displayTitle(chapter.value.title)}**.`,
+    `Goal: ${chapter.value.goal}`,
+    'Ask a question directly, or ask what to learn next. I will continue at your pace.'
+  ].join('\n\n')
 })
 
 function protectedHeaders() {
@@ -237,10 +161,8 @@ function appendBackendMessage(base: string, error: unknown) {
   return base
 }
 
-function citationSummary(citation: Record<string, unknown>) {
-  const page = citation.page_number ?? citation.page
-  if (page) return `Page ${page}`
-  return Object.keys(citation).length ? JSON.stringify(citation) : 'No citation metadata'
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError'
 }
 
 function normalizeSessions(response: MentorSession[] | { sessions?: MentorSession[] }) {
@@ -251,76 +173,17 @@ function normalizeMessages(response: MentorMessage[] | { messages?: MentorMessag
   return Array.isArray(response) ? response : response.messages ?? []
 }
 
-function normalizePlannerActions(response: PlannerAction[] | { actions?: PlannerAction[] }) {
-  return Array.isArray(response) ? response : response.actions ?? []
-}
-
 function normalizeAnnotations(response: { annotations?: ChapterAnnotation[] } | ChapterAnnotation[] | null | undefined) {
   return Array.isArray(response) ? response : response?.annotations ?? []
+}
+
+function normalizeChapters(response: { chapters?: ChapterStudyChapter[] } | ChapterStudyChapter[] | null | undefined) {
+  return Array.isArray(response) ? response : response?.chapters ?? []
 }
 
 function preferredSessionId() {
   const sessionId = route.query?.session_id
   return typeof sessionId === 'string' ? sessionId : null
-}
-
-function normalizeAgentRuns(response: { runs?: AgentRunTimelineItem[] } | null | undefined): AgentRunTimelineItem[] {
-  return (response?.runs ?? [])
-    .filter(run => ['chapter_mentor', 'session_tutor'].includes(run?.agent_type) && run.status)
-    .map(run => ({
-      ...run,
-      summary: run.summary || 'No summary recorded.',
-      node_trace: Array.isArray(run.node_trace) ? run.node_trace.filter(Boolean).map(String) : [],
-      learning_signals: Array.isArray(run.learning_signals)
-        ? run.learning_signals
-            .map(signal => (typeof signal === 'string' ? { kind: signal } : signal))
-            .filter((signal): signal is AgentRunLearningSignal => Boolean(signal?.kind))
-        : [],
-      thread_id: run.thread_id ?? null,
-      checkpoint_backend: run.checkpoint_backend ?? null,
-      graph_name: run.graph_name ?? null,
-      state_schema_version: run.state_schema_version ?? null,
-      created_at: run.created_at ?? null,
-      completed_at: run.completed_at ?? null,
-      latency_ms: run.latency_ms ?? null,
-      prompt_tokens: run.prompt_tokens ?? null,
-      completion_tokens: run.completion_tokens ?? null,
-      total_tokens: run.total_tokens ?? null,
-      error_message: run.error_message ?? null
-    }))
-}
-
-function runtimeRunKey(run: AgentRunTimelineItem) {
-  return run.id ?? `${run.agent_type}-${run.thread_id ?? 'no-thread'}`
-}
-
-function toggleAgentRun(run: AgentRunTimelineItem) {
-  const runKey = runtimeRunKey(run)
-  selectedAgentRunId.value = selectedAgentRunId.value === runKey ? null : runKey
-}
-
-function formatRuntimeMetric(value: number | string | null | undefined, suffix = '') {
-  if (value === null || value === undefined || value === '') return 'Not recorded'
-  return `${value}${suffix}`
-}
-
-function formatRuntimeDate(value: string | null | undefined) {
-  if (!value) return 'Not recorded'
-  const runtimeDate = new Date(value)
-  if (Number.isNaN(runtimeDate.getTime())) return 'Not recorded'
-  return runtimeDate.toLocaleString()
-}
-
-function agentTypeLabel(agentType: string) {
-  const labels: Record<string, string> = {
-    chapter_mentor: 'L2 Mentor',
-    session_tutor: 'L3 Tutor'
-  }
-  return labels[agentType] ?? agentType
-}
-
-function annotationsForChunk(chunkId: string) {
-  return highlights.value.filter(annotation => annotation.source_chunk_id === chunkId)
 }
 
 function isMasteryRecord(response: unknown): response is MasteryRecord {
@@ -339,6 +202,33 @@ function localUserMessage(sessionId: string, content: string): MentorMessage {
   }
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+function renderMarkdown(value: string) {
+  const escaped = escapeHtml(value)
+  return escaped
+    .replace(/^### (.*)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.*)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.*)$/gm, '<h1>$1</h1>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\n/g, '<br>')
+}
+
+function displayTitle(value?: string | null) {
+  return (value ?? '')
+    .replace(/^\s{0,3}#{1,6}\s+/, '')
+    .replace(/\*\*/g, '')
+    .trim()
+}
+
 async function loadChapter() {
   loading.value = true
   errorMessage.value = ''
@@ -347,17 +237,32 @@ async function loadChapter() {
       `${config.public.apiBaseUrl}/chapters/${chapterId.value}`,
       { headers: protectedHeaders() }
     )
-    await loadPlannerActions(detail.value.chapter.study_space_id)
+    if (detail.value.chapters?.length) {
+      chapterNavigation.value = detail.value.chapters
+    } else {
+      await loadChapterNavigation(detail.value.chapter.study_space_id)
+    }
   } catch (error) {
     errorMessage.value = appendBackendMessage('Failed to load chapter.', error)
-    plannerActions.value = []
   } finally {
     loading.value = false
   }
 }
 
+async function loadChapterNavigation(studySpaceId: string) {
+  try {
+    const response = await $fetch<{ chapters: ChapterStudyChapter[] }>(
+      `${config.public.apiBaseUrl}/study-spaces/${studySpaceId}/chapters`,
+      { headers: protectedHeaders() }
+    )
+    const chapters = normalizeChapters(response)
+    chapterNavigation.value = chapters.length ? chapters : detail.value?.chapter ? [detail.value.chapter] : []
+  } catch {
+    chapterNavigation.value = detail.value?.chapter ? [detail.value.chapter] : []
+  }
+}
+
 async function loadAnnotations() {
-  loadingAnnotations.value = true
   try {
     const response = await $fetch<{ annotations: ChapterAnnotation[] }>(
       `${config.public.apiBaseUrl}/chapters/${chapterId.value}/annotations`,
@@ -366,8 +271,6 @@ async function loadAnnotations() {
     annotations.value = normalizeAnnotations(response)
   } catch {
     annotations.value = []
-  } finally {
-    loadingAnnotations.value = false
   }
 }
 
@@ -396,31 +299,6 @@ async function createNote() {
   }
 }
 
-async function highlightEvidence(item: ChapterEvidence) {
-  savingHighlightChunkId.value = item.chunk_id
-  errorMessage.value = ''
-  try {
-    const response = await $fetch<{ annotation: ChapterAnnotation }>(
-      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/annotations`,
-      {
-        method: 'POST',
-        headers: protectedHeaders(),
-        body: {
-          kind: 'highlight',
-          source_chunk_id: item.chunk_id,
-          quote: item.text,
-          anchor: { citation: item.citation }
-        }
-      }
-    )
-    annotations.value = [response.annotation, ...annotations.value]
-  } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to save highlight.', error)
-  } finally {
-    savingHighlightChunkId.value = null
-  }
-}
-
 async function deleteAnnotation(annotation: ChapterAnnotation) {
   errorMessage.value = ''
   try {
@@ -431,36 +309,6 @@ async function deleteAnnotation(annotation: ChapterAnnotation) {
     annotations.value = annotations.value.filter(item => item.id !== annotation.id)
   } catch (error) {
     errorMessage.value = appendBackendMessage('Failed to delete annotation.', error)
-  }
-}
-
-async function loadPlannerActions(studySpaceId: string) {
-  loadingPlannerActions.value = true
-  try {
-    const response = await $fetch<PlannerAction[] | { actions?: PlannerAction[] }>(
-      `${config.public.apiBaseUrl}/study-spaces/${studySpaceId}/planner-actions`,
-      { headers: protectedHeaders() }
-    )
-    plannerActions.value = normalizePlannerActions(response)
-  } catch {
-    plannerActions.value = []
-  } finally {
-    loadingPlannerActions.value = false
-  }
-}
-
-async function loadAgentRuns() {
-  loadingAgentRuns.value = true
-  try {
-    const response = await $fetch<{ runs: AgentRunTimelineItem[] }>(
-      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/agent-runs?limit=8`,
-      { headers: protectedHeaders() }
-    )
-    agentRuns.value = normalizeAgentRuns(response)
-  } catch {
-    agentRuns.value = []
-  } finally {
-    loadingAgentRuns.value = false
   }
 }
 
@@ -492,9 +340,9 @@ async function loadMentorSession() {
       `${config.public.apiBaseUrl}/chapters/${chapterId.value}/sessions`,
       { headers: protectedHeaders() }
     )
-    const sessions = normalizeSessions(response)
+    mentorSessions.value = normalizeSessions(response)
     const selectedSessionId = preferredSessionId()
-    mentorSession.value = sessions.find(session => session.id === selectedSessionId) ?? sessions[0] ?? null
+    mentorSession.value = mentorSessions.value.find(session => session.id === selectedSessionId) ?? mentorSessions.value[0] ?? null
     if (mentorSession.value) {
       await loadMentorMessages(mentorSession.value.id)
     } else {
@@ -507,20 +355,18 @@ async function loadMentorSession() {
   }
 }
 
-async function loadMentorState() {
-  try {
-    mentorState.value = await $fetch<ChapterMentorState>(
-      `${config.public.apiBaseUrl}/chapters/${chapterId.value}/mentor-state`,
-      { headers: protectedHeaders() }
-    )
-  } catch {
-    mentorState.value = null
-  }
+async function selectMentorSession(session: MentorSession) {
+  sessionMenuSession.value = null
+  mentorSession.value = session
+  await loadMentorMessages(session.id)
 }
 
 async function ensureMentorSession() {
   if (mentorSession.value) return mentorSession.value
+  return createMentorSession()
+}
 
+async function createMentorSession() {
   const session = await $fetch<MentorSession>(
     `${config.public.apiBaseUrl}/chapters/${chapterId.value}/sessions`,
     {
@@ -529,7 +375,116 @@ async function ensureMentorSession() {
     }
   )
   mentorSession.value = session
+  mentorSessions.value = [session, ...mentorSessions.value.filter(existing => existing.id !== session.id)]
+  mentorMessages.value = []
   return session
+}
+
+async function createNewSession() {
+  if (!confirm('Create a new mentor session?')) return null
+  return createMentorSession()
+}
+
+function openSessionMenu(session: MentorSession) {
+  sessionMenuSession.value = session
+}
+
+function closeSessionMenu() {
+  sessionMenuSession.value = null
+}
+
+async function renameMentorSession(session: MentorSession) {
+  const currentTitle = displayTitle(session.title) || 'Chapter session'
+  const nextTitle = prompt('Rename session', currentTitle)?.trim()
+  sessionMenuSession.value = null
+  if (!nextTitle || nextTitle === currentTitle) return
+
+  mentorErrorMessage.value = ''
+  try {
+    const renamed = await $fetch<MentorSession>(
+      `${config.public.apiBaseUrl}/sessions/${session.id}`,
+      {
+        method: 'PATCH',
+        headers: protectedHeaders(),
+        body: { title: nextTitle }
+      }
+    )
+    mentorSessions.value = mentorSessions.value.map(item => (
+      item.id === renamed.id ? { ...item, ...renamed } : item
+    ))
+    if (mentorSession.value?.id === renamed.id) {
+      mentorSession.value = { ...mentorSession.value, ...renamed }
+    }
+  } catch (error) {
+    mentorErrorMessage.value = appendBackendMessage('Failed to rename session.', error)
+  }
+}
+
+async function deleteMentorSession(session: MentorSession) {
+  closeSessionMenu()
+  if (!confirm('Delete this session and its saved messages?')) return
+
+  deletingSessionId.value = session.id
+  mentorErrorMessage.value = ''
+  try {
+    await $fetch(`${config.public.apiBaseUrl}/sessions/${session.id}`, {
+      method: 'DELETE',
+      headers: protectedHeaders()
+    })
+    const remainingSessions = mentorSessions.value.filter(item => item.id !== session.id)
+    mentorSessions.value = remainingSessions
+
+    if (mentorSession.value?.id === session.id) {
+      const nextSession = remainingSessions[0] ?? null
+      mentorSession.value = nextSession
+      if (nextSession) {
+        await loadMentorMessages(nextSession.id)
+      } else {
+        mentorMessages.value = []
+      }
+    }
+  } catch (error) {
+    mentorErrorMessage.value = appendBackendMessage('Failed to delete session.', error)
+  } finally {
+    deletingSessionId.value = null
+  }
+}
+
+async function askMentor() {
+  const question = mentorQuestion.value.trim()
+  if (!question || askingMentor.value) return
+
+  askingMentor.value = true
+  mentorErrorMessage.value = ''
+  const abortController = new AbortController()
+  mentorAbortController.value = abortController
+  try {
+    const session = await ensureMentorSession()
+    mentorMessages.value = [...mentorMessages.value, localUserMessage(session.id, question)]
+    mentorQuestion.value = ''
+    const answer = await $fetch<MentorMessage>(
+      `${config.public.apiBaseUrl}/sessions/${session.id}/messages`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: { content: question, web_search_enabled: webSearchEnabled.value },
+        signal: abortController.signal
+      }
+    )
+    mentorMessages.value = [...mentorMessages.value, answer]
+  } catch (error) {
+    if (isAbortError(error)) return
+    mentorErrorMessage.value = appendBackendMessage('Failed to ask mentor.', error)
+  } finally {
+    if (mentorAbortController.value === abortController) {
+      mentorAbortController.value = null
+    }
+    askingMentor.value = false
+  }
+}
+
+function stopMentorGeneration() {
+  mentorAbortController.value?.abort()
 }
 
 async function completeCurrentChapter() {
@@ -548,25 +503,6 @@ async function completeCurrentChapter() {
     errorMessage.value = appendBackendMessage('Failed to complete chapter.', error)
   } finally {
     completing.value = false
-  }
-}
-
-async function runChapterSummary() {
-  updatingMentorState.value = true
-  mentorErrorMessage.value = ''
-  try {
-    mentorState.value = await $fetch<ChapterMentorState>(
-      `${config.public.apiBaseUrl}/agents/chapter-summary/run`,
-      {
-        method: 'POST',
-        headers: protectedHeaders(),
-        body: { chapter_id: chapterId.value }
-      }
-    )
-  } catch (error) {
-    mentorErrorMessage.value = appendBackendMessage('Failed to update chapter mentor state.', error)
-  } finally {
-    updatingMentorState.value = false
   }
 }
 
@@ -592,1244 +528,1925 @@ async function generateQuiz() {
   }
 }
 
-async function updatePlannerAction(action: PlannerAction, status: string) {
-  updatingPlannerActionId.value = action.id
-  errorMessage.value = ''
-  try {
-    const updatedAction = await $fetch<PlannerAction>(
-      `${config.public.apiBaseUrl}/planner-actions/${action.id}/status`,
-      {
-        method: 'POST',
-        headers: protectedHeaders(),
-        body: { status }
-      }
-    )
-    plannerActions.value = plannerActions.value.map(existingAction =>
-      existingAction.id === updatedAction.id ? updatedAction : existingAction
-    )
-  } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to update planner action.', error)
-  } finally {
-    updatingPlannerActionId.value = null
-  }
-}
-
-async function startReviewAction(action: PlannerAction) {
-  if (!action.chapter_id || action.action_type !== 'review_chapter') return
-
-  updatingPlannerActionId.value = action.id
-  errorMessage.value = ''
-  try {
-    const response = await $fetch<PlannerActionExecutionResponse>(
-      `${config.public.apiBaseUrl}/planner-actions/${action.id}/start-review`,
-      {
-        method: 'POST',
-        headers: protectedHeaders()
-      }
-    )
-    plannerActions.value = plannerActions.value.map(existingAction =>
-      existingAction.id === response.action.id ? response.action : existingAction
-    )
-    await navigateTo(`/chapters/${response.session.chapter_id}?session_id=${response.session.id}`)
-  } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to start review.', error)
-  } finally {
-    updatingPlannerActionId.value = null
-  }
-}
-
-async function createRuntimeActions() {
-  if (!detail.value?.chapter.study_space_id) return
-
-  creatingRuntimeActions.value = true
-  runtimeActionsMessage.value = ''
-  errorMessage.value = ''
-  try {
-    const response = await $fetch<{ actions: PlannerAction[] }>(
-      `${config.public.apiBaseUrl}/planner-actions/from-runtime-signals`,
-      {
-        method: 'POST',
-        headers: protectedHeaders(),
-        body: {
-          study_space_id: detail.value.chapter.study_space_id,
-          chapter_id: chapterId.value
-        }
-      }
-    )
-    const actions = response.actions ?? []
-    plannerActions.value = [
-      ...actions,
-      ...plannerActions.value.filter(existingAction => !actions.some(action => action.id === existingAction.id))
-    ]
-    runtimeActionsMessage.value =
-      actions.length > 0 ? `Created ${actions.length} runtime actions.` : 'No new runtime actions found.'
-  } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to create runtime actions.', error)
-  } finally {
-    creatingRuntimeActions.value = false
-  }
-}
-
-async function askMentor() {
-  const question = mentorQuestion.value.trim()
-  if (!chapter.value || !question) return
-
-  askingMentor.value = true
-  mentorErrorMessage.value = ''
-  try {
-    const session = await ensureMentorSession()
-    const answer = await $fetch<MentorMessage>(
-      `${config.public.apiBaseUrl}/sessions/${session.id}/messages`,
-      {
-        method: 'POST',
-        headers: protectedHeaders(),
-        body: { content: question }
-      }
-    )
-    mentorMessages.value = [...mentorMessages.value, localUserMessage(session.id, question), answer]
-    mentorQuestion.value = ''
-  } catch (error) {
-    mentorErrorMessage.value = appendBackendMessage('Failed to ask mentor.', error)
-  } finally {
-    askingMentor.value = false
-  }
-}
-
 onMounted(() => {
+  document.body.classList.add(bodyClassName)
   loadChapter()
-  loadAnnotations()
   loadMentorSession()
-  loadMentorState()
   loadMastery()
-  loadAgentRuns()
+  loadAnnotations()
+})
+
+onBeforeUnmount(() => {
+  document.body.classList.remove(bodyClassName)
 })
 </script>
 
 <template>
-  <section class="chapter-study page-enter">
+  <section class="chapter-workbench page-enter" :class="{ 'rail-is-collapsed': chapterRailCollapsed }">
     <p v-if="errorMessage" class="error-alert">{{ errorMessage }}</p>
     <p v-if="loading" class="muted">Loading chapter...</p>
 
     <template v-if="detail && chapter">
-      <div class="topbar chapter-heading">
-        <div>
-          <p class="eyebrow">Chapter {{ chapter.order_index }} / {{ detail.study_space.name }}</p>
-          <h1>{{ chapter.title }}</h1>
-          <p>{{ detail.route.title }}</p>
-        </div>
-        <NuxtLink class="secondary-button back-link" :to="`/spaces/${chapter.study_space_id}`">
-          Back to space
-        </NuxtLink>
-      </div>
+      <aside class="chapter-sidebar" :class="{ collapsed: chapterRailCollapsed }">
+        <button class="rail-collapse" type="button" @click="chapterRailCollapsed = !chapterRailCollapsed">
+          {{ chapterRailCollapsed ? '>>' : '<<' }}
+        </button>
 
-      <section class="card chapter-summary">
-        <div class="summary-grid">
-          <div>
-            <p class="eyebrow">Goal</p>
-            <h2>{{ chapter.goal }}</h2>
-            <p>{{ chapter.summary }}</p>
-          </div>
-          <dl class="chapter-meta">
-            <div>
-              <dt>Status</dt>
-              <dd><span class="status-badge">{{ chapter.status }}</span></dd>
-            </div>
-            <div>
-              <dt>Estimated</dt>
-              <dd>{{ chapter.estimated_days }} days</dd>
-            </div>
-          </dl>
-        </div>
-      </section>
-
-      <section class="card chapter-state-panel">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Chapter state</p>
-            <h2>Mentor assessment</h2>
-          </div>
-          <button
-            data-testid="run-chapter-summary"
-            class="secondary-button"
-            type="button"
-            :disabled="updatingMentorState"
-            @click="runChapterSummary"
-          >
-            {{ updatingMentorState ? 'Updating...' : 'Update assessment' }}
-          </button>
-        </div>
-
-        <template v-if="hasMentorState && mentorState">
-          <div v-if="mentorState.needs_supervision_refresh" class="state-refresh-callout">
-            <div>
-              <strong>New tutor signals need assessment</strong>
-              <p>Refresh the mentor assessment so L2 can absorb the latest L3 session signals.</p>
-            </div>
-            <span class="status-badge">L2 refresh</span>
+        <template v-if="!chapterRailCollapsed">
+          <div class="rail-title">
+            <span>{{ detail.study_space.name }}</span>
+            <strong>Chapters</strong>
           </div>
 
-          <p v-if="mentorState.summary" class="state-summary">{{ mentorState.summary }}</p>
-
-          <div class="state-grid">
-            <section class="state-column">
-              <h3>Weak points</h3>
-              <ul v-if="mentorState.weak_points?.length" class="state-list">
-                <li v-for="point in mentorState.weak_points" :key="point">{{ point }}</li>
-              </ul>
-              <p v-else class="empty-state">No weak points found.</p>
-            </section>
-
-            <section class="state-column">
-              <h3>Next actions</h3>
-              <ul v-if="mentorState.next_actions?.length" class="state-list">
-                <li v-for="action in mentorState.next_actions" :key="action">{{ action }}</li>
-              </ul>
-              <p v-else class="empty-state">No next actions yet.</p>
-            </section>
-          </div>
-
-          <dl class="state-meta">
-            <div>
-              <dt>Sessions</dt>
-              <dd>{{ mentorState.source_session_count ?? 0 }}</dd>
-            </div>
-            <div>
-              <dt>Messages</dt>
-              <dd>{{ mentorState.source_message_count ?? 0 }}</dd>
-            </div>
-          </dl>
+          <nav class="chapter-list" aria-label="Chapter navigation">
+            <NuxtLink
+              v-for="item in chapterNavigation"
+              :key="item.id"
+              class="chapter-link"
+              :class="{ active: item.id === chapter.id }"
+              :to="`/chapters/${item.id}`"
+            >
+              <span>{{ item.order_index }}</span>
+              <strong>{{ displayTitle(item.title) }}</strong>
+            </NuxtLink>
+          </nav>
         </template>
+      </aside>
 
-        <p v-else class="empty-state">
-          No chapter mentor state yet. Update after asking the mentor a few questions.
-        </p>
-      </section>
-
-      <section class="card chapter-runtime-panel">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Chapter runtime</p>
-            <h2>Recent agent runs</h2>
-            <p class="muted">Latest L2 Mentor and L3 Tutor traces for this chapter.</p>
+      <main class="chat-workspace">
+        <header class="chat-topbar">
+          <div class="chapter-breadcrumb">
+            <span>{{ displayTitle(detail.route.title) }}</span>
+            <span aria-hidden="true">/</span>
+            <h1>{{ displayTitle(chapter.title) }}</h1>
           </div>
-          <button
-            data-testid="refresh-chapter-agent-runs"
-            class="secondary-button"
-            type="button"
-            :disabled="loadingAgentRuns"
-            @click="loadAgentRuns"
-          >
-            Refresh
-          </button>
-        </div>
-
-        <p v-if="loadingAgentRuns" class="muted">Loading runtime...</p>
-        <p v-else-if="agentRuns.length === 0" class="empty-state">No chapter runtime yet.</p>
-        <div v-else class="chapter-runtime-list">
-          <article
-            v-for="run in agentRuns"
-            :key="run.id ?? `${run.agent_type}-${run.thread_id}`"
-            class="chapter-runtime-row"
-          >
-            <button
-              data-testid="chapter-runtime-row-button"
-              type="button"
-              class="chapter-runtime-header"
-              :aria-expanded="selectedAgentRunId === runtimeRunKey(run)"
-              @click="toggleAgentRun(run)"
-            >
-              <span class="chapter-runtime-meta">
-                <span class="status-badge">{{ agentTypeLabel(run.agent_type) }}</span>
-                <span class="runtime-status">{{ run.status }}</span>
-              </span>
-              <span class="chapter-runtime-body">
-                <span class="runtime-summary">{{ run.summary }}</span>
-                <span v-if="run.node_trace.length" class="runtime-trace">{{ run.node_trace.join(' -> ') }}</span>
-                <span v-else class="runtime-trace">No node trace recorded.</span>
-                <span v-if="run.learning_signals.length" class="signal-list" aria-label="Learning signals">
-                  <span
-                    v-for="signal in run.learning_signals"
-                    :key="signal.kind"
-                    class="signal-chip"
-                  >
-                    {{ signal.kind }}
-                  </span>
-                </span>
-                <span v-else class="muted">No learning signals.</span>
-              </span>
-            </button>
-            <div
-              v-if="selectedAgentRun && selectedAgentRunId === runtimeRunKey(run)"
-              class="chapter-runtime-detail"
-            >
-              <dl class="runtime-detail-grid">
-                <div>
-                  <dt>Thread</dt>
-                  <dd>{{ run.thread_id || 'Not recorded' }}</dd>
-                </div>
-                <div>
-                  <dt>Graph</dt>
-                  <dd>{{ run.graph_name || run.agent_type }}</dd>
-                </div>
-                <div>
-                  <dt>Checkpoint</dt>
-                  <dd>{{ run.checkpoint_backend || 'Not recorded' }}</dd>
-                </div>
-                <div>
-                  <dt>Schema</dt>
-                  <dd>{{ formatRuntimeMetric(run.state_schema_version) }}</dd>
-                </div>
-                <div>
-                  <dt>Created</dt>
-                  <dd>{{ formatRuntimeDate(run.created_at) }}</dd>
-                </div>
-                <div>
-                  <dt>Completed</dt>
-                  <dd>{{ formatRuntimeDate(run.completed_at) }}</dd>
-                </div>
-                <div>
-                  <dt>Latency</dt>
-                  <dd>{{ formatRuntimeMetric(run.latency_ms, ' ms') }}</dd>
-                </div>
-                <div>
-                  <dt>Tokens</dt>
-                  <dd>
-                    {{ formatRuntimeMetric(run.total_tokens) }}
-                    <span v-if="run.prompt_tokens != null || run.completion_tokens != null" class="runtime-token-breakdown">
-                      ({{ formatRuntimeMetric(run.prompt_tokens, ' prompt') }},
-                      {{ formatRuntimeMetric(run.completion_tokens, ' completion') }})
-                    </span>
-                  </dd>
-                </div>
-              </dl>
-
-              <div class="runtime-detail-section">
-                <h4>Node trace</h4>
-                <ol v-if="run.node_trace.length" class="runtime-node-list">
-                  <li v-for="node in run.node_trace" :key="node">{{ node }}</li>
-                </ol>
-                <p v-else class="muted">No node trace recorded.</p>
-              </div>
-
-              <div class="runtime-detail-section">
-                <h4>Learning signals</h4>
-                <div v-if="run.learning_signals.length" class="signal-list" aria-label="Learning signals detail">
-                  <span v-for="signal in run.learning_signals" :key="`detail-${signal.kind}`" class="signal-chip">
-                    {{ signal.kind }}
-                  </span>
-                </div>
-                <p v-else class="muted">No learning signals.</p>
-              </div>
-
-              <p v-if="run.error_message" class="runtime-error">{{ run.error_message }}</p>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <section class="card quiz-panel">
-        <div class="section-heading quiz-heading">
-          <div>
-            <p class="eyebrow">Quiz</p>
-            <h2>Check understanding</h2>
-          </div>
-          <span class="mastery-badge">{{ masteryLabel }}</span>
-        </div>
-
-        <div class="quiz-content">
-          <p v-if="quizWeakPoint" class="quiz-prompt">
-            Focus this quiz on the current weak point: <strong>{{ quizWeakPoint }}</strong>
-          </p>
-          <p v-else class="quiz-prompt">
-            Generate a short check-in quiz for this chapter when you are ready to test recall.
-          </p>
           <button
             data-testid="generate-quiz"
-            class="primary-button quiz-action"
+            class="quiz-button"
             type="button"
             :disabled="generatingQuiz"
             @click="generateQuiz"
           >
             {{ generatingQuiz ? 'Generating...' : 'Generate quiz' }}
           </button>
-        </div>
-      </section>
+        </header>
 
-      <section class="card review-callout">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Planner review</p>
-            <h2>Queued review actions</h2>
-          </div>
-          <div class="row-actions review-callout-actions">
-            <span v-if="activeReviewActions.length" class="review-count">
-              {{ activeReviewActions.length }} queued
-            </span>
-            <button
-              data-testid="create-chapter-runtime-actions"
-              class="secondary-button"
-              type="button"
-              :disabled="creatingRuntimeActions"
-              @click="createRuntimeActions"
-            >
-              {{ creatingRuntimeActions ? 'Creating...' : 'Create runtime actions' }}
-            </button>
-          </div>
-        </div>
-        <p v-if="runtimeActionsMessage" class="muted">{{ runtimeActionsMessage }}</p>
-
-        <p v-if="loadingPlannerActions" class="muted">Loading review actions...</p>
-        <div v-else-if="activeReviewActions.length" class="review-action-list">
-          <article
-            v-for="action in activeReviewActions"
-            :key="action.id"
-            class="review-action-row"
-          >
-            <div class="review-action-copy">
-              <div class="review-action-title">
-                <h3>{{ action.title }}</h3>
-                <span class="status-badge">{{ action.status }}</span>
-              </div>
-              <p>{{ action.rationale }}</p>
-            </div>
-            <div class="review-action-buttons">
-              <button
-                v-if="action.status === 'proposed'"
-                data-testid="accept-review-action"
-                class="primary-button"
-                type="button"
-                :disabled="updatingPlannerActionId === action.id"
-                @click="updatePlannerAction(action, 'accepted')"
-              >
-                Accept
-              </button>
-              <button
-                data-testid="start-review-action"
-                class="primary-button"
-                type="button"
-                :disabled="updatingPlannerActionId === action.id"
-                @click="startReviewAction(action)"
-              >
-                Start review
-              </button>
-              <button
-                v-if="action.status !== 'completed'"
-                class="secondary-button"
-                type="button"
-                :disabled="updatingPlannerActionId === action.id"
-                @click="updatePlannerAction(action, 'completed')"
-              >
-                Complete
-              </button>
-              <button
-                v-if="action.status === 'proposed'"
-                class="secondary-button"
-                type="button"
-                :disabled="updatingPlannerActionId === action.id"
-                @click="updatePlannerAction(action, 'dismissed')"
-              >
-                Dismiss
-              </button>
-            </div>
-          </article>
-        </div>
-        <p v-else class="empty-state">No queued review actions for this chapter.</p>
-      </section>
-
-      <div class="study-grid">
-        <section class="card evidence-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Source evidence</p>
-              <h2>Grounding material</h2>
-            </div>
-            <span v-if="evidence.length" class="chunk-count">{{ evidence.length }} excerpts</span>
-          </div>
-
-          <div v-if="evidence.length" class="evidence-list">
-            <article v-for="item in evidence" :key="item.chunk_id" class="evidence-card">
-              <div class="evidence-header">
-                <h3>{{ item.source_filename }}</h3>
-                <span>Chunk #{{ item.chunk_index }}</span>
-              </div>
-              <p>{{ item.text }}</p>
-              <div class="evidence-actions">
-                <small>{{ citationSummary(item.citation) }}</small>
-                <button
-                  data-testid="highlight-evidence"
-                  class="secondary-button compact-button"
-                  type="button"
-                  :disabled="savingHighlightChunkId === item.chunk_id"
-                  @click="highlightEvidence(item)"
-                >
-                  {{ savingHighlightChunkId === item.chunk_id ? 'Saving...' : 'Highlight' }}
+        <section class="chat-thread" aria-live="polite">
+          <article class="message-row assistant">
+            <div class="message-avatar">AI</div>
+            <div class="message-bubble">
+              <div class="markdown-body" v-html="renderMarkdown(introMessage)" />
+              <div class="message-actions">
+                <button class="fork-action" type="button" aria-label="Fork checkpoint" title="Fork checkpoint">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M7 4v7a4 4 0 0 0 4 4h6" />
+                    <path d="M7 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
+                    <path d="M17 13a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
+                    <path d="M15 9h4v4" />
+                    <path d="m19 9-5 5" />
+                  </svg>
                 </button>
               </div>
-              <div v-if="annotationsForChunk(item.chunk_id).length" class="highlight-list">
-                <article
-                  v-for="highlight in annotationsForChunk(item.chunk_id)"
-                  :key="highlight.id"
-                  class="highlight-chip"
-                >
-                  <span>{{ highlight.quote }}</span>
-                  <button type="button" class="text-button" @click="deleteAnnotation(highlight)">Delete</button>
+            </div>
+          </article>
+
+          <article v-if="loadingMentor" class="message-row assistant">
+            <div class="message-avatar">AI</div>
+            <div class="message-bubble">Loading mentor session...</div>
+          </article>
+
+          <article
+            v-for="message in mentorMessages"
+            :key="message.id"
+            class="message-row"
+            :class="message.role === 'user' ? 'user' : 'assistant'"
+          >
+            <div class="message-avatar">{{ message.role === 'user' ? 'You' : 'AI' }}</div>
+            <div class="message-bubble">
+              <div class="markdown-body" v-html="renderMarkdown(message.content)" />
+              <div v-if="message.citations?.length" class="citation-list">
+                <article v-for="citation in message.citations" :key="citation.chunk_id" class="citation-card">
+                  <strong>{{ citation.source_filename }}</strong>
+                  <span>Chunk #{{ citation.chunk_index }}</span>
+                  <p>{{ citation.text }}</p>
                 </article>
               </div>
-            </article>
-          </div>
-          <p v-else class="empty-state">No source evidence is linked to this chapter yet.</p>
+              <div v-if="message.role !== 'user'" class="message-actions">
+                <button class="fork-action" type="button" aria-label="Fork checkpoint" title="Fork checkpoint">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M7 4v7a4 4 0 0 0 4 4h6" />
+                    <path d="M7 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
+                    <path d="M17 13a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
+                    <path d="M15 9h4v4" />
+                    <path d="m19 9-5 5" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </article>
         </section>
 
-        <aside class="card notes-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Study notes</p>
-              <h2>Notes and highlights</h2>
-            </div>
-            <span v-if="highlights.length" class="chunk-count">{{ highlights.length }} highlights</span>
+        <p v-if="mentorErrorMessage" class="error-alert">{{ mentorErrorMessage }}</p>
+        <form class="mentor-form composer" @submit.prevent="askMentor">
+          <div class="composer-tools">
+            <button class="composer-icon-button" type="button" aria-label="Add attachment">
+              <span aria-hidden="true">+</span>
+            </button>
+            <button
+              data-testid="web-search-toggle"
+              class="composer-icon-button web-search-toggle"
+              type="button"
+              :class="{ active: webSearchEnabled }"
+              :aria-pressed="webSearchEnabled"
+              :aria-label="webSearchEnabled ? 'Disable web search' : 'Enable web search'"
+              title="联网补充，不属于上传资料"
+              @click="webSearchEnabled = !webSearchEnabled"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M3 12h18" />
+                <path d="M12 3a14 14 0 0 1 0 18" />
+                <path d="M12 3a14 14 0 0 0 0 18" />
+              </svg>
+            </button>
+            <select class="select" aria-label="Model">
+              <option>Default model</option>
+              <option>Fast tutor</option>
+              <option>Deep tutor</option>
+            </select>
+            <select class="select" aria-label="Thinking strength">
+              <option>Normal thinking</option>
+              <option>Deep thinking</option>
+            </select>
           </div>
 
+          <div class="composer-input">
+            <textarea
+              v-model="mentorQuestion"
+              data-testid="mentor-question"
+              placeholder="Ask a question, request the next step, or paste a confusing excerpt"
+              :disabled="askingMentor"
+            />
+            <button
+              data-testid="ask-mentor"
+              class="send-button"
+              :class="{ 'is-stopping': askingMentor }"
+              :type="askingMentor ? 'button' : 'submit'"
+              :aria-label="askingMentor ? 'Interrupt generation' : 'Send message'"
+              @click="askingMentor && stopMentorGeneration()"
+            >
+              <svg v-if="askingMentor" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="7" y="7" width="10" height="10" rx="2" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 19V5" />
+                <path d="m6 11 6-6 6 6" />
+              </svg>
+            </button>
+          </div>
+        </form>
+      </main>
+
+      <aside class="session-panel">
+        <section class="session-section">
+          <div class="panel-heading">
+            <div>
+              <p>Sessions</p>
+            </div>
+            <button data-testid="new-mentor-session" type="button" @click="createNewSession">New</button>
+          </div>
+          <div class="session-list">
+            <div
+              v-for="session in mentorSessions"
+              :key="session.id"
+              class="session-list-row"
+              :class="{ active: mentorSession?.id === session.id }"
+              @contextmenu.prevent="openSessionMenu(session)"
+            >
+              <button
+                class="session-select"
+                type="button"
+                @click="selectMentorSession(session)"
+              >
+                {{ displayTitle(session.title) || 'Chapter session' }}
+              </button>
+              <button
+                class="session-delete"
+                type="button"
+                :aria-label="`Delete session ${displayTitle(session.title) || 'Chapter session'}`"
+                :disabled="deletingSessionId === session.id"
+                @click.stop="deleteMentorSession(session)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M6 6l1 15h10l1-15" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+              </button>
+              <div
+                v-if="sessionMenuSession?.id === session.id"
+                class="session-context-menu"
+                role="menu"
+              >
+                <button
+                  data-testid="rename-mentor-session"
+                  type="button"
+                  role="menuitem"
+                  @click="renameMentorSession(session)"
+                >
+                  Rename
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="session-section">
+          <p>Progress</p>
+          <div class="progress-strip">
+            <span>{{ chapter.status }}</span>
+          </div>
+          <p>{{ chapter.estimated_days }} estimated days - Mastery: {{ masteryLabel }}</p>
+          <button
+            data-testid="complete-chapter"
+            class="complete-button"
+            type="button"
+            :disabled="isCompleted || completing"
+            @click="completeCurrentChapter"
+          >
+            {{ isCompleted ? 'Completed' : completing ? 'Completing...' : 'Mark complete' }}
+          </button>
+          <NuxtLink v-if="detail.next_chapter_id" class="next-link" :to="`/chapters/${detail.next_chapter_id}`">
+            Next chapter
+          </NuxtLink>
+        </section>
+
+        <section class="session-section">
+          <p>Study notes</p>
+          <h2>Personal notes</h2>
           <form class="note-form" @submit.prevent="createNote">
             <textarea
               v-model="noteDraft"
               data-testid="chapter-note-input"
-              placeholder="Write a note for this chapter"
+              placeholder="Create a personal note"
               :disabled="savingNote"
             />
             <button
               data-testid="save-chapter-note"
-              class="secondary-button"
               type="submit"
               :disabled="!canSaveNote"
             >
               {{ savingNote ? 'Saving...' : 'Save note' }}
             </button>
           </form>
-
-          <p v-if="loadingAnnotations" class="muted">Loading notes...</p>
-          <div v-else-if="notes.length" class="note-list">
+          <div v-if="notes.length" class="note-list">
             <article v-for="note in notes" :key="note.id" class="note-card">
               <p>{{ note.content }}</p>
-              <button type="button" class="text-button" @click="deleteAnnotation(note)">Delete</button>
+              <button class="note-delete" type="button" :aria-label="`Delete note ${note.content || ''}`" @click="deleteAnnotation(note)">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M6 6l1 15h10l1-15" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+              </button>
             </article>
           </div>
           <p v-else class="empty-state">No notes yet.</p>
-        </aside>
-
-        <aside class="card mentor-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">AI Mentor</p>
-              <h2>Chapter help</h2>
-            </div>
-          </div>
-
-          <div class="mentor-thread" aria-live="polite">
-            <article v-if="loadingMentor" class="mentor-empty">
-              <p>Loading mentor session...</p>
-            </article>
-            <article v-else-if="!mentorMessages.length" class="mentor-empty">
-              <p>Ask a question about this chapter.</p>
-            </article>
-
-            <article v-for="message in mentorMessages" :key="message.id" class="mentor-exchange">
-              <p v-if="message.role === 'user'" class="mentor-question">{{ message.content }}</p>
-              <div v-else class="mentor-answer">
-                <p>{{ message.content }}</p>
-                <div v-if="message.citations?.length" class="mentor-citations">
-                  <p class="eyebrow">Citations</p>
-                  <article
-                    v-for="citation in message.citations"
-                    :key="citation.chunk_id"
-                    class="mentor-citation"
-                  >
-                    <div>
-                      <strong>{{ citation.source_filename }}</strong>
-                      <span>Chunk #{{ citation.chunk_index }}</span>
-                    </div>
-                    <p>{{ citation.text }}</p>
-                  </article>
-                </div>
-              </div>
-            </article>
-          </div>
-
-          <p v-if="mentorErrorMessage" class="error-alert">{{ mentorErrorMessage }}</p>
-          <form class="mentor-form" @submit.prevent="askMentor">
-            <textarea
-              v-model="mentorQuestion"
-              data-testid="mentor-question"
-              placeholder="Ask about this chapter"
-              :disabled="askingMentor"
-            />
-            <button
-              data-testid="ask-mentor"
-              class="secondary-button"
-              type="submit"
-              :disabled="askingMentor"
-            >
-              {{ askingMentor ? 'Asking...' : 'Ask mentor' }}
-            </button>
-          </form>
-        </aside>
-      </div>
-
-      <section class="card chapter-actions">
-        <button
-          data-testid="complete-chapter"
-          class="primary-button"
-          type="button"
-          :disabled="isCompleted || completing"
-          @click="completeCurrentChapter"
-        >
-          {{ isCompleted ? 'Completed' : completing ? 'Completing...' : 'Mark complete' }}
-        </button>
-        <NuxtLink
-          v-if="detail.next_chapter_id"
-          class="secondary-button next-link"
-          :to="`/chapters/${detail.next_chapter_id}`"
-        >
-          Next chapter
-        </NuxtLink>
-      </section>
+        </section>
+      </aside>
     </template>
   </section>
 </template>
 
 <style scoped>
-.chapter-study {
+.chapter-workbench {
+  width: min(100%, 1600px);
+  height: calc(100dvh - 58px - 42px);
+  margin: 0 auto;
   display: grid;
-  gap: 18px;
-}
-
-.chapter-heading,
-.summary-grid,
-.study-grid,
-.chapter-actions,
-.section-heading,
-.evidence-header {
-  display: flex;
-  gap: 14px;
-}
-
-.chapter-heading,
-.section-heading,
-.evidence-header {
-  align-items: center;
-  justify-content: space-between;
-}
-
-.summary-grid {
-  align-items: start;
-  justify-content: space-between;
-}
-
-.study-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
-  align-items: start;
-}
-
-.chapter-summary,
-.chapter-state-panel,
-.chapter-runtime-panel,
-.quiz-panel,
-.review-callout,
-.evidence-panel,
-.notes-panel,
-.mentor-panel {
-  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(280px, 360px);
   gap: 16px;
+  overflow: hidden;
+  padding-top: 12px;
 }
 
-.quiz-panel {
-  border-color: rgba(20, 184, 166, 0.22);
-  background:
-    linear-gradient(135deg, rgba(20, 184, 166, 0.1), rgba(240, 253, 250, 0.64)),
-    var(--color-card);
-}
-
-.quiz-content {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.quiz-prompt {
-  min-width: 0;
-  margin: 0;
-  color: var(--color-text);
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-
-.quiz-prompt strong {
-  color: var(--color-primary);
-  overflow-wrap: anywhere;
-}
-
-.mastery-badge {
-  border: 1px solid rgba(20, 184, 166, 0.24);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.74);
-  color: var(--color-primary);
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.quiz-action {
-  flex: 0 0 auto;
-}
-
-.chapter-runtime-list {
-  display: grid;
-  gap: 12px;
-}
-
-.chapter-runtime-row {
-  border: 1px solid rgba(20, 184, 166, 0.28);
-  border-radius: 8px;
-  background: var(--color-surface);
-  box-shadow: 0 10px 26px rgba(15, 118, 110, 0.08);
-  min-width: 0;
+:global(body.chapter-study-page) {
   overflow: hidden;
 }
 
-.chapter-runtime-header {
-  display: grid;
-  grid-template-columns: minmax(124px, 0.24fr) minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  padding: 13px;
-  text-align: left;
+.chapter-workbench {
+  background: #f5fbf9;
 }
 
-.chapter-runtime-header:hover,
-.chapter-runtime-header:focus-visible {
-  background: rgba(204, 251, 241, 0.34);
-  outline: none;
-}
-
-.chapter-runtime-meta,
-.chapter-runtime-body {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-
-.runtime-summary {
-  color: var(--color-text);
-  font-size: 16px;
-  font-weight: 800;
-  line-height: 1.35;
-}
-
-.runtime-summary,
-.runtime-trace {
-  overflow-wrap: anywhere;
-}
-
-.runtime-status {
-  color: var(--color-primary);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.runtime-trace {
-  display: block;
-  border-left: 3px solid var(--color-primary-bright);
-  color: var(--color-muted);
-  font-size: 13px;
-  line-height: 1.5;
-  margin: 0;
-  padding-left: 10px;
-}
-
-.chapter-runtime-detail {
-  display: grid;
-  gap: 14px;
-  border-top: 1px solid rgba(20, 184, 166, 0.2);
-  background: #ffffff;
-  padding: 14px;
-}
-
-.runtime-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin: 0;
-}
-
-.runtime-detail-grid div {
-  min-width: 0;
-}
-
-.runtime-detail-grid dt {
-  color: var(--color-muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.runtime-detail-grid dd {
-  margin: 4px 0 0;
-  overflow-wrap: anywhere;
-}
-
-.runtime-token-breakdown {
-  color: var(--color-muted);
-  font-size: 12px;
-}
-
-.runtime-detail-section {
-  display: grid;
-  gap: 8px;
-}
-
-.runtime-detail-section h4 {
-  font-size: 13px;
-  margin: 0;
-}
-
-.runtime-node-list {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding-left: 20px;
-}
-
-.runtime-node-list li {
-  color: var(--color-muted);
-  overflow-wrap: anywhere;
-}
-
-.runtime-error {
-  border: 1px solid rgba(220, 38, 38, 0.24);
-  border-radius: 8px;
-  background: #fef2f2;
-  color: #991b1b;
-  margin: 0;
-  padding: 10px 12px;
-}
-
-.signal-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.signal-chip {
-  border: 1px solid rgba(20, 184, 166, 0.28);
-  border-radius: 999px;
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  padding: 6px 8px;
-}
-
-.review-callout {
-  border-color: rgba(20, 184, 166, 0.24);
-  background:
-    linear-gradient(135deg, rgba(204, 251, 241, 0.46), rgba(255, 255, 255, 0.82)),
-    var(--color-card);
-}
-
-.review-count {
-  border-radius: 999px;
-  padding: 5px 8px;
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.review-action-list {
-  display: grid;
-  gap: 12px;
-}
-
-.review-action-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 14px;
-  align-items: center;
-  border: 1px solid rgba(20, 184, 166, 0.2);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.76);
-  padding: 14px;
-}
-
-.review-action-copy {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-
-.review-action-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.review-action-title h3 {
-  margin: 0;
-  color: var(--color-text);
-  font-size: 15px;
-  overflow-wrap: anywhere;
-}
-
-.review-action-copy p {
-  margin: 0;
-  color: var(--color-muted);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.review-action-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.state-summary {
-  color: var(--color-text);
-  font-size: 16px;
-  line-height: 1.6;
-}
-
-.state-refresh-callout {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid rgba(20, 184, 166, 0.32);
-  border-radius: 8px;
-  background: rgba(240, 253, 250, 0.88);
-  box-shadow: 0 12px 34px rgba(15, 118, 110, 0.08);
-  padding: 12px 14px;
-}
-
-.state-refresh-callout strong {
-  color: #0f766e;
-}
-
-.state-refresh-callout p {
-  margin: 4px 0 0;
-  color: #115e59;
-  line-height: 1.45;
-}
-
-.state-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.state-column {
-  display: grid;
-  align-content: start;
-  gap: 10px;
-}
-
-.state-column h3 {
-  margin: 0;
-  color: var(--color-text);
-  font-size: 14px;
-}
-
-.state-list {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding-left: 18px;
-  color: var(--color-text);
-}
-
-.state-list li::marker {
-  color: var(--color-primary);
-}
-
-.state-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin: 0;
-}
-
-.state-meta div {
-  border: 1px solid rgba(20, 184, 166, 0.18);
-  border-radius: 8px;
-  background: var(--color-primary-soft);
-  padding: 8px 10px;
-}
-
-.state-meta dt {
-  color: var(--color-muted);
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.state-meta dd {
-  margin: 2px 0 0;
-  color: var(--color-primary);
-  font-weight: 800;
-}
-
-.chapter-meta {
-  display: grid;
-  gap: 12px;
-  min-width: 160px;
-}
-
-.chapter-meta dt {
-  color: var(--color-muted);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.chapter-meta dd {
-  margin: 4px 0 0;
-}
-
-.evidence-list {
-  display: grid;
-  gap: 12px;
-}
-
-.evidence-card {
+.chapter-sidebar,
+.chat-workspace,
+.session-panel {
+  min-height: 0;
   border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: var(--color-surface);
-  padding: 14px;
+  box-shadow: var(--shadow-card);
 }
 
-.evidence-card p {
+.chapter-sidebar,
+.session-panel {
+  backdrop-filter: blur(12px);
+}
+
+.chapter-sidebar {
+  background:
+    linear-gradient(180deg, rgba(236, 253, 245, 0.8), rgba(255, 255, 255, 0.92)),
+    var(--color-surface);
+  padding: 16px;
+  overflow: auto;
+}
+
+.chapter-sidebar.collapsed {
+  width: 66px;
+  min-width: 66px;
+}
+
+.rail-collapse {
+  width: 42px;
+  height: 38px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.rail-title {
+  display: grid;
+  gap: 3px;
+  margin: 18px 0;
+}
+
+.rail-title span,
+.panel-heading p,
+.session-section > p,
+.chat-topbar p {
+  color: var(--color-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.rail-title strong {
+  font-size: 20px;
+}
+
+.chapter-list {
+  display: grid;
+  gap: 8px;
+}
+
+.chapter-link {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
   color: var(--color-text);
-  white-space: pre-wrap;
+  padding: 10px;
 }
 
-.evidence-actions {
+.chapter-link:hover,
+.chapter-link.active {
+  border-color: var(--color-primary-bright);
+  background: #fff;
+}
+
+.chapter-link span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--color-primary);
+  color: #fff;
+  font-weight: 900;
+}
+
+.chapter-link strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-workspace {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  background: #fff;
+  overflow: hidden;
+}
+
+.chat-topbar {
+  min-height: 74px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--color-border);
+  padding: 14px 18px;
+}
+
+.chat-topbar h1 {
+  font-size: 22px;
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.quiz-button,
+.complete-button,
+.next-link,
+.panel-heading button,
+.note-form button,
+.session-list button,
+.composer-tools button,
+.message-actions button {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 800;
+  min-height: 36px;
+  padding: 7px 11px;
+}
+
+.quiz-button {
+  border-color: var(--color-primary-bright);
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.chat-thread {
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 22px min(7vw, 72px);
+  overscroll-behavior: contain;
+}
+
+.message-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 820px);
+  gap: 12px;
+}
+
+.message-row.user {
+  grid-template-columns: minmax(0, 820px) 42px;
+  justify-content: end;
+}
+
+.message-row.user .message-avatar {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.message-row.user .message-bubble {
+  grid-column: 1;
+  grid-row: 1;
+  background: var(--color-primary-soft);
+}
+
+.message-avatar {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.message-bubble {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 15px;
+}
+
+.markdown-body {
+  color: var(--color-text);
+  font-size: 16px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3) {
+  margin: 0 0 8px;
+  line-height: 1.25;
+}
+
+.markdown-body :deep(code) {
+  border-radius: 6px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  padding: 2px 5px;
+}
+
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.citation-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.citation-card {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #f8fffd;
+  padding: 10px;
+}
+
+.citation-card span,
+.citation-card p {
+  color: var(--color-muted);
+}
+
+.composer {
+  border-top: 1px solid var(--color-border);
+  background: #fff;
+  display: grid;
+  gap: 10px;
+  padding: 14px min(7vw, 72px) 16px;
+}
+
+.composer-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.composer-tools .select {
+  width: auto;
+  min-width: 170px;
+}
+
+.composer-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px;
   gap: 10px;
 }
 
-.compact-button {
-  min-height: 32px;
-  padding: 0 10px;
+.composer-input textarea {
+  width: 100%;
+  min-height: 74px;
+  max-height: 170px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  resize: vertical;
+  padding: 11px;
 }
 
-.highlight-list,
+.send-button {
+  border: 0;
+  border-radius: 8px;
+  background: var(--color-primary);
+  color: #fff;
+  cursor: pointer;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.session-panel {
+  position: sticky;
+  top: 12px;
+  height: calc(100dvh - 58px - 42px - 12px);
+  background: rgba(251, 255, 253, 0.96);
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 18px;
+}
+
+.session-section {
+  display: grid;
+  gap: 12px;
+  border-bottom: 1px solid var(--color-border);
+  padding: 0 0 18px;
+  margin-bottom: 18px;
+}
+
+.session-section:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-heading h2,
+.session-section h2 {
+  font-size: 18px;
+  margin: 4px 0 0;
+}
+
+.session-list,
 .note-list,
 .note-form {
   display: grid;
-  gap: 10px;
+  gap: 9px;
 }
 
-.highlight-chip,
-.note-card {
-  border: 1px solid rgba(20, 184, 166, 0.22);
-  border-radius: 8px;
-  background:
-    linear-gradient(135deg, rgba(204, 251, 241, 0.38), rgba(255, 255, 255, 0.88)),
-    var(--color-surface);
-  padding: 10px 12px;
+.session-list button {
+  text-align: left;
 }
 
-.highlight-chip {
-  display: grid;
-  gap: 8px;
+.session-list button.active {
+  border-color: var(--color-primary-bright);
+  background: var(--color-primary-soft);
 }
 
-.highlight-chip span,
-.note-card p {
-  color: var(--color-text);
-  line-height: 1.5;
-  margin: 0;
-  overflow-wrap: anywhere;
+.progress-strip {
+  height: 32px;
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-weight: 900;
+}
+
+.complete-button,
+.next-link,
+.note-form button {
+  width: 100%;
+  justify-content: center;
 }
 
 .note-form textarea {
-  min-height: 120px;
+  min-height: 118px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
   resize: vertical;
+  padding: 10px;
 }
 
-.text-button {
-  justify-self: start;
+.note-card,
+.empty-state {
+  border: 1px dashed var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+  padding: 10px;
+}
+
+.note-card p {
+  margin: 0 0 8px;
+}
+
+.note-card button {
   border: 0;
   background: transparent;
   color: var(--color-primary);
   cursor: pointer;
-  font: inherit;
-  font-size: 12px;
   font-weight: 800;
   padding: 0;
 }
 
-.text-button:hover,
-.text-button:focus-visible {
-  color: #115e59;
-  text-decoration: underline;
-}
-
-.evidence-card small,
-.muted,
-.chapter-heading p {
+.muted {
   color: var(--color-muted);
 }
 
-.chunk-count {
-  border-radius: 999px;
-  padding: 5px 8px;
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  font-size: 12px;
-  font-weight: 700;
+@media (max-width: 1100px) {
+  .chapter-workbench {
+    grid-template-columns: 72px minmax(0, 1fr);
+    height: auto;
+    min-height: calc(100dvh - 58px - 42px);
+    overflow: visible;
+  }
+
+  .chapter-sidebar:not(.collapsed) {
+    position: fixed;
+    top: 58px;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    width: min(310px, 86vw);
+    box-shadow: 18px 0 46px rgba(15, 118, 110, 0.16);
+  }
+
+  .session-panel {
+    grid-column: 2;
+    min-height: 0;
+    position: relative;
+    top: auto;
+    height: auto;
+  }
 }
 
-.mentor-panel {
-  position: sticky;
-  top: 18px;
+@media (max-width: 760px) {
+  .chapter-workbench {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: calc(100dvh - 58px - 42px);
+    overflow: visible;
+  }
+
+  .chapter-sidebar {
+    min-height: auto;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .chat-thread,
+  .composer {
+    padding-inline: 14px;
+  }
+
+  .message-row,
+  .message-row.user {
+    grid-template-columns: 1fr;
+  }
+
+  .message-row.user .message-avatar,
+  .message-row.user .message-bubble {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .session-panel {
+    grid-column: 1;
+    position: relative;
+    top: auto;
+    height: auto;
+  }
 }
 
-.mentor-thread {
-  display: grid;
-  gap: 14px;
-  max-height: 520px;
-  overflow: auto;
-  padding-right: 2px;
+/* Taste pass: make the study screen feel like one focused chat workspace, not stacked cards. */
+.chapter-workbench {
+  width: min(100%, 1720px);
+  height: calc(100dvh - 58px - 24px);
+  grid-template-columns: 286px minmax(0, 1fr) minmax(300px, 342px);
+  gap: 0;
+  padding-top: 8px;
+  background: transparent;
 }
 
-.mentor-empty,
-.mentor-answer,
-.mentor-citation {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-surface);
+.chapter-workbench.rail-is-collapsed {
+  grid-template-columns: 58px minmax(0, 1fr) minmax(300px, 342px);
 }
 
-.mentor-empty {
+.chapter-sidebar,
+.chat-workspace,
+.session-panel {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.chapter-sidebar {
+  border: 0;
+  border-right: 1px solid rgba(142, 202, 191, 0.55);
+  background: linear-gradient(180deg, rgba(236, 253, 245, 0.75), rgba(248, 253, 251, 0.96));
+  padding: 12px;
+}
+
+.chapter-sidebar.collapsed {
+  width: auto;
+  min-width: 0;
+  padding-inline: 8px;
+}
+
+.rail-collapse {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  background: transparent;
+  color: #0f766e;
+  font-size: 15px;
+}
+
+.rail-collapse:hover {
+  background: rgba(20, 184, 166, 0.1);
+}
+
+.rail-title {
+  margin: 14px 0 18px;
+}
+
+.chapter-list {
+  gap: 3px;
+}
+
+.chapter-link {
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  padding: 10px 9px;
+}
+
+.chapter-link:hover,
+.chapter-link.active {
+  border-color: #14b8a6;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.chapter-link span {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: #0f766e;
+}
+
+.chat-workspace {
+  border: 0;
+  background:
+    radial-gradient(circle at 50% -12%, rgba(20, 184, 166, 0.09), transparent 28%),
+    #fbfffd;
+}
+
+.chat-topbar {
+  min-height: 66px;
+  border-bottom: 1px solid rgba(142, 202, 191, 0.45);
+  padding: 10px clamp(18px, 4vw, 48px);
+}
+
+.chat-topbar h1 {
+  font-size: clamp(20px, 2vw, 28px);
+  letter-spacing: 0;
+}
+
+.quiz-button,
+.complete-button,
+.next-link,
+.panel-heading button,
+.note-form button,
+.session-list button,
+.composer-tools button,
+.message-actions button {
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.chat-thread {
+  gap: 20px;
+  padding: 24px clamp(24px, 6vw, 94px);
+  background:
+    linear-gradient(90deg, transparent 0, transparent calc(100% - 1px), rgba(142, 202, 191, 0.28) calc(100% - 1px));
+}
+
+.message-row {
+  grid-template-columns: 34px minmax(0, 860px);
+}
+
+.message-row.user {
+  grid-template-columns: minmax(0, 760px) 34px;
+}
+
+.message-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: #0f766e;
+  font-size: 11px;
+}
+
+.message-bubble {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 2px 0 14px;
+}
+
+.message-row.user .message-bubble {
+  border-left: 3px solid rgba(20, 184, 166, 0.55);
+  background: rgba(236, 253, 245, 0.62);
+  padding: 12px 14px;
+}
+
+.message-actions {
+  justify-content: flex-start;
+  opacity: 0.72;
+}
+
+.citation-card {
+  border-radius: 0;
+  border: 0;
+  border-left: 2px solid rgba(20, 184, 166, 0.45);
+  background: rgba(236, 253, 245, 0.55);
+}
+
+.composer {
+  border-top: 1px solid rgba(142, 202, 191, 0.45);
+  background: rgba(251, 255, 253, 0.92);
+  padding: 12px clamp(18px, 4vw, 48px);
+}
+
+.composer-input {
+  grid-template-columns: minmax(0, 1fr) 46px;
+}
+
+.composer-input textarea {
+  min-height: 62px;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.send-button {
+  border-radius: 7px;
+}
+
+.session-panel {
+  top: 8px;
+  height: calc(100dvh - 58px - 24px - 8px);
+  border: 0;
+  border-left: 1px solid rgba(142, 202, 191, 0.55);
+  background: rgba(248, 253, 251, 0.88);
   padding: 14px;
-  color: var(--color-muted);
 }
 
-.mentor-exchange {
-  display: grid;
+.session-section {
   gap: 10px;
+  border-bottom-color: rgba(142, 202, 191, 0.45);
+  margin-bottom: 14px;
+  padding-bottom: 14px;
 }
 
-.mentor-question {
-  justify-self: end;
-  max-width: 86%;
-  border: 1px solid rgba(20, 184, 166, 0.28);
-  border-radius: 8px;
-  background: var(--color-primary-soft);
-  color: var(--color-text);
-  padding: 10px 12px;
+.session-list button {
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
 }
 
-.mentor-answer {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  box-shadow: 0 14px 36px rgba(15, 118, 110, 0.08);
+.session-list button.active {
+  border-color: #14b8a6;
+  background: rgba(204, 251, 241, 0.52);
 }
 
-.mentor-answer > p {
-  color: var(--color-text);
-  white-space: pre-wrap;
+.note-card,
+.empty-state {
+  border-radius: 0;
+  border-color: rgba(142, 202, 191, 0.55);
+  background: rgba(236, 253, 245, 0.48);
 }
 
-.mentor-citations {
-  display: grid;
-  gap: 8px;
+@media (max-width: 1100px) {
+  .chapter-workbench,
+  .chapter-workbench.rail-is-collapsed {
+    grid-template-columns: 58px minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .chapter-sidebar:not(.collapsed) {
+    border-right: 1px solid rgba(142, 202, 191, 0.55);
+    box-shadow: 18px 0 46px rgba(15, 118, 110, 0.1);
+  }
+
+  .session-panel {
+    grid-column: 2;
+    height: auto;
+    border-top: 1px solid rgba(142, 202, 191, 0.45);
+    border-left: 0;
+  }
 }
 
-.mentor-citation {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
+@media (max-width: 760px) {
+  .chapter-workbench,
+  .chapter-workbench.rail-is-collapsed {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .chapter-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid rgba(142, 202, 191, 0.55);
+  }
+
+  .chat-thread {
+    padding-inline: 16px;
+  }
 }
 
-.mentor-citation div {
+/* Codex-inspired dark chat pass. */
+:global(body.chapter-study-page) {
+  background: #121413;
+}
+
+:global(body.chapter-study-page .app-topbar) {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  background: rgba(18, 20, 19, 0.9);
+  color: #eef5f1;
+}
+
+:global(body.chapter-study-page .brand-icon),
+:global(body.chapter-study-page .avatar-button) {
+  background: #0f766e;
+  color: #f8fffc;
+}
+
+:global(body.chapter-study-page .icon-button) {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #d9e6e1;
+}
+
+.chapter-workbench {
+  width: 100%;
+  height: calc(100dvh - 58px);
+  padding-top: 0;
+  color: #e7efeb;
+}
+
+.chapter-sidebar {
+  border-right-color: rgba(255, 255, 255, 0.08);
+  background: #171c20;
+}
+
+.rail-collapse,
+.chapter-link,
+.rail-title strong {
+  color: #e7efeb;
+}
+
+.rail-title span,
+.chat-topbar p,
+.panel-heading p,
+.session-section > p {
+  color: #8b9993;
+}
+
+.chapter-link:hover,
+.chapter-link.active {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: #14b8a6;
+}
+
+.chapter-link span,
+.message-avatar {
+  background: #0f766e;
+  color: #f7fffc;
+}
+
+.chat-workspace {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(20, 184, 166, 0.08), transparent 24%),
+    #121413;
+}
+
+.chat-topbar {
+  min-height: 76px;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  padding-inline: clamp(28px, 5vw, 74px);
+}
+
+.chat-topbar h1,
+.markdown-body,
+.panel-heading h2,
+.session-section h2 {
+  color: #f3faf6;
+}
+
+.quiz-button {
+  border-color: rgba(20, 184, 166, 0.56);
+  background: #0f766e;
+  color: #f7fffc;
+}
+
+.chat-thread {
+  background: transparent;
+  padding: 28px clamp(36px, 12vw, 210px) 22px;
+}
+
+.message-bubble {
+  color: #e7efeb;
+}
+
+.message-row.user .message-bubble {
+  border-left-color: rgba(20, 184, 166, 0.75);
+  background: rgba(20, 184, 166, 0.11);
+}
+
+.message-actions button {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #9ecdc3;
+}
+
+.citation-card {
+  background: rgba(255, 255, 255, 0.04);
+  color: #dbe7e2;
+}
+
+.composer {
+  width: min(880px, calc(100% - 72px));
+  justify-self: center;
+  position: relative;
+  display: block;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background: #2a2c2b;
+  box-shadow: 0 22px 80px rgba(0, 0, 0, 0.35);
+  margin: 0 auto 18px;
+  padding: 0;
+}
+
+.composer-tools {
+  position: absolute;
+  left: 14px;
+  right: 76px;
+  bottom: 12px;
+  z-index: 2;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+  flex-wrap: nowrap;
 }
 
-.mentor-citation span,
-.mentor-citation p {
+.composer-icon-button,
+.composer-tools button {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #c9d6d1;
+  cursor: pointer;
+  font-size: 24px;
+  font-weight: 400;
+  padding: 0;
+}
+
+.composer-icon-button:hover,
+.composer-tools button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.composer-icon-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.composer-tools .select {
+  width: auto;
+  min-width: 132px;
+  height: 34px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dfe8e4;
+  padding: 0 30px 0 10px;
+}
+
+.composer-tools .select:first-of-type {
+  margin-left: auto;
+}
+
+.composer-input {
+  display: block;
+  position: relative;
+}
+
+.composer-input textarea {
+  min-height: 112px;
+  max-height: 220px;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  color: #f4faf7;
+  line-height: 1.5;
+  padding: 20px 64px 60px 18px;
+  resize: none;
+}
+
+.composer-input textarea::placeholder {
+  color: #858d89;
+}
+
+.composer-input textarea:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.send-button {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 3;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: #d8ddda;
+  color: #172321;
+  font-size: 21px;
+}
+
+.send-button:hover {
+  background: #f4faf7;
+}
+
+.send-button:disabled {
+  opacity: 0.45;
+}
+
+.session-panel {
+  height: calc(100dvh - 58px);
+  top: 0;
+  border-left-color: rgba(255, 255, 255, 0.08);
+  background: #171817;
+  color: #dfe8e4;
+}
+
+.session-section {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.session-list button,
+.complete-button,
+.next-link,
+.note-form button {
+  border-color: rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.04);
+  color: #9de7d8;
+}
+
+.session-list button.active {
+  background: rgba(20, 184, 166, 0.14);
+  color: #8ff2df;
+}
+
+.progress-strip {
+  background: rgba(20, 184, 166, 0.18);
+  color: #8ff2df;
+}
+
+.note-form textarea {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f3faf6;
+}
+
+.note-card,
+.empty-state {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #aebbb6;
+}
+
+@media (max-width: 900px) {
+  .composer {
+    width: calc(100% - 28px);
+  }
+
+  .composer-tools {
+    right: 64px;
+    overflow-x: auto;
+  }
+
+  .composer-tools .select {
+    min-width: 118px;
+  }
+}
+
+/* Keep the Codex composer shape, but return the chapter page to a fresh light palette. */
+:global(body.chapter-study-page) {
+  background: #f4fbf9;
+}
+
+:global(body.chapter-study-page .app-topbar) {
+  border-bottom-color: rgba(161, 211, 202, 0.58);
+  background: rgba(246, 251, 249, 0.9);
+  color: var(--color-text);
+}
+
+:global(body.chapter-study-page .icon-button) {
+  border-color: rgba(20, 184, 166, 0.38);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--color-text);
+}
+
+.chapter-workbench {
+  color: var(--color-text);
+}
+
+.chapter-sidebar {
+  border-right-color: rgba(142, 202, 191, 0.55);
+  background: linear-gradient(180deg, rgba(236, 253, 245, 0.76), rgba(248, 253, 251, 0.96));
+}
+
+.rail-collapse,
+.chapter-link,
+.rail-title strong,
+.chat-topbar h1,
+.markdown-body,
+.panel-heading h2,
+.session-section h2 {
+  color: var(--color-text);
+}
+
+.rail-title span,
+.chat-topbar p,
+.panel-heading p,
+.session-section > p {
   color: var(--color-muted);
 }
 
-.mentor-form {
+.chapter-link:hover,
+.chapter-link.active {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.chat-workspace {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(20, 184, 166, 0.11), transparent 28%),
+    #fbfffd;
+}
+
+.chat-topbar {
+  border-bottom-color: rgba(142, 202, 191, 0.45);
+}
+
+.message-bubble {
+  color: var(--color-text);
+}
+
+.message-row.user .message-bubble {
+  border-left-color: rgba(20, 184, 166, 0.55);
+  background: rgba(236, 253, 245, 0.62);
+}
+
+.message-actions button {
+  border-color: rgba(161, 211, 202, 0.62);
+  background: rgba(255, 255, 255, 0.74);
+  color: #0f766e;
+}
+
+.citation-card {
+  background: rgba(236, 253, 245, 0.55);
+  color: var(--color-text);
+}
+
+.composer {
+  border-color: rgba(20, 184, 166, 0.22);
+  background: #f8fdfb;
+  box-shadow: 0 18px 55px rgba(15, 118, 110, 0.14);
+}
+
+.composer-icon-button,
+.composer-tools button {
+  color: #0f766e;
+}
+
+.composer-icon-button:hover,
+.composer-tools button:hover {
+  background: rgba(20, 184, 166, 0.1);
+  color: #0f766e;
+}
+
+.web-search-toggle svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.web-search-toggle.active {
+  background: #0f766e;
+  color: #ffffff;
+}
+
+.web-search-toggle.active:hover {
+  background: #0d9488;
+  color: #ffffff;
+}
+
+.composer-tools .select {
+  background: rgba(204, 251, 241, 0.44);
+  color: var(--color-text);
+  width: 138px;
+  min-width: 0;
+  padding-right: 24px;
+}
+
+.composer-input textarea {
+  color: var(--color-text);
+}
+
+.composer-input textarea::placeholder {
+  color: #6d817c;
+}
+
+.send-button {
+  background: #0f766e;
+  color: #ffffff;
+}
+
+.send-button:hover {
+  background: #0d9488;
+}
+
+.send-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+}
+
+.send-button svg rect {
+  fill: currentColor;
+  stroke: none;
+}
+
+.send-button span {
+  display: none;
+}
+
+.send-button.is-stopping {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.send-button.is-stopping:hover {
+  background: #b91c1c;
+}
+
+.session-panel {
+  border-left-color: rgba(142, 202, 191, 0.55);
+  background: rgba(248, 253, 251, 0.9);
+  color: var(--color-text);
+}
+
+.session-section {
+  border-bottom-color: rgba(142, 202, 191, 0.45);
+}
+
+.session-list button,
+.complete-button,
+.next-link,
+.note-form button {
+  border-color: rgba(161, 211, 202, 0.62);
+  background: rgba(255, 255, 255, 0.78);
+  color: #0f766e;
+}
+
+.session-list button.active {
+  background: rgba(204, 251, 241, 0.6);
+  color: #0f766e;
+}
+
+.progress-strip {
+  background: rgba(204, 251, 241, 0.82);
+  color: #0f766e;
+}
+
+.note-form textarea {
+  border-color: rgba(161, 211, 202, 0.62);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--color-text);
+}
+
+.note-card,
+.empty-state {
+  border-color: rgba(142, 202, 191, 0.55);
+  background: rgba(236, 253, 245, 0.48);
+  color: var(--color-muted);
+}
+
+.message-actions {
+  align-items: center;
+  gap: 6px;
+}
+
+.message-actions button {
+  min-height: 30px;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.fork-action {
+  width: 32px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+}
+
+.fork-action svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.interrupt-action {
+  padding-inline: 10px;
+  font-size: 13px;
+}
+
+.message-actions button:hover {
+  border-color: rgba(20, 184, 166, 0.35);
+  background: rgba(20, 184, 166, 0.08);
+}
+
+.session-list-row {
+  position: relative;
   display: grid;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: center;
+  border-left: 3px solid transparent;
+  transition: background 0.16s ease, border-color 0.16s ease;
 }
 
-.mentor-form textarea {
-  min-height: 120px;
-  resize: vertical;
+.session-list-row.active {
+  border-color: #14b8a6;
+  background: rgba(204, 251, 241, 0.6);
 }
 
-.back-link,
-.next-link {
-  text-decoration: none;
+.session-list-row:hover,
+.session-list-row:focus-within {
+  background: rgba(255, 255, 255, 0.78);
 }
 
-@media (max-width: 960px) {
-  .study-grid,
-  .summary-grid,
-  .state-grid {
-    grid-template-columns: 1fr;
+.session-list {
+  max-height: min(300px, 34dvh);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.session-list .session-select {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #0f766e;
+  text-align: left;
+  box-shadow: none;
+}
+
+.session-list .session-select:hover {
+  background: transparent;
+}
+
+.session-list .session-delete {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  display: inline-grid;
+  place-items: center;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #dc2626;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease, background 0.14s ease, color 0.14s ease;
+}
+
+.session-list-row:hover .session-delete,
+.session-list-row:focus-within .session-delete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.session-list .session-delete:hover {
+  background: rgba(220, 38, 38, 0.1);
+  color: #b91c1c;
+}
+
+.session-delete svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.session-context-menu {
+  position: absolute;
+  top: calc(100% - 2px);
+  right: 8px;
+  z-index: 8;
+  min-width: 118px;
+  border: 1px solid rgba(161, 211, 202, 0.72);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 42px rgba(15, 118, 110, 0.18);
+  padding: 5px;
+}
+
+.session-context-menu button {
+  width: 100%;
+  min-height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.session-context-menu button:hover {
+  background: rgba(204, 251, 241, 0.68);
+  color: #0f766e;
+}
+
+@media (hover: none) {
+  .session-list .session-delete {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.note-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: start;
+  gap: 8px;
+}
+
+.note-card p {
+  margin-bottom: 0;
+}
+
+.note-delete {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #dc2626;
+  cursor: pointer;
+  padding: 0;
+}
+
+.note-delete:hover {
+  background: rgba(220, 38, 38, 0.1);
+  color: #b91c1c;
+}
+
+.note-delete svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+/* Rounded center chat canvas. */
+.chat-workspace {
+  align-self: start;
+  height: calc(100dvh - 58px - 24px);
+  margin: 12px 0;
+  border: 1px solid rgba(125, 190, 180, 0.34);
+  border-radius: 18px;
+  box-shadow:
+    0 18px 52px rgba(15, 118, 110, 0.08),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  overflow: hidden;
+}
+
+.chapter-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.chapter-breadcrumb h1 {
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: 0;
+}
+
+.chat-topbar {
+  border-radius: 18px 18px 0 0;
+}
+
+.composer {
+  margin-bottom: 14px;
+}
+
+/* Floating Codex-style session inspector. */
+.session-panel {
+  align-self: start;
+  box-sizing: border-box;
+  height: calc(100dvh - 58px - 24px);
+  margin: 12px 14px 12px 10px;
+  border: 1px solid rgba(125, 190, 180, 0.42);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(239, 252, 248, 0.82)),
+    rgba(248, 253, 251, 0.88);
+  box-shadow:
+    0 22px 70px rgba(15, 118, 110, 0.16),
+    0 1px 0 rgba(255, 255, 255, 0.92) inset;
+  backdrop-filter: blur(18px);
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.session-section:first-child {
+  padding-top: 2px;
+}
+
+.session-list-row {
+  border-radius: 10px;
+  border-left: 0;
+  padding-left: 0;
+}
+
+.session-list-row.active {
+  border-color: transparent;
+  background: rgba(185, 245, 235, 0.72);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+}
+
+.session-list-row:hover,
+.session-list-row:focus-within {
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.session-list .session-select {
+  border-radius: 10px 0 0 10px;
+  padding-left: 12px;
+}
+
+.session-list .session-delete {
+  margin-right: 6px;
+}
+
+@media (max-width: 1100px) {
+  .session-panel {
+    margin: 12px 14px 16px;
+    height: auto;
+    border-radius: 16px;
+  }
+}
+
+/* Interaction feel pass: subtle Codex-like motion without distracting from reading. */
+@media (prefers-reduced-motion: no-preference) {
+  .chapter-workbench {
+    transition: grid-template-columns 260ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  .chapter-heading,
-  .chapter-actions,
-  .section-heading,
-  .evidence-header,
-  .quiz-content,
-  .review-action-title {
-    align-items: stretch;
-    flex-direction: column;
+  .chapter-sidebar,
+  .chat-workspace,
+  .session-panel {
+    transition:
+      border-color 180ms ease,
+      box-shadow 220ms ease,
+      background 220ms ease,
+      margin 260ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  .review-action-row {
-    grid-template-columns: 1fr;
+  .chapter-sidebar {
+    transition:
+      padding 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 180ms ease,
+      background 220ms ease,
+      box-shadow 220ms ease;
   }
 
-  .chapter-runtime-header,
-  .runtime-detail-grid {
-    grid-template-columns: 1fr;
+  .rail-collapse,
+  .chapter-link,
+  .chapter-link span,
+  .quiz-button,
+  .complete-button,
+  .next-link,
+  .panel-heading button,
+  .note-form button,
+  .composer-icon-button,
+  .composer-tools button,
+  .composer-tools .select,
+  .composer-input textarea,
+  .send-button,
+  .session-list-row,
+  .session-list .session-select,
+  .session-delete,
+  .note-delete,
+  .fork-action {
+    transition:
+      transform 160ms ease,
+      background-color 160ms ease,
+      border-color 160ms ease,
+      box-shadow 180ms ease,
+      color 160ms ease,
+      opacity 140ms ease;
   }
 
-  .review-action-buttons {
-    justify-content: stretch;
+  .chapter-link:hover {
+    transform: translateX(2px);
   }
 
-  .review-action-buttons button {
-    flex: 1 1 120px;
+  .chapter-link:active,
+  .rail-collapse:active,
+  .quiz-button:active,
+  .complete-button:active,
+  .next-link:active,
+  .panel-heading button:active,
+  .note-form button:active,
+  .composer-icon-button:active,
+  .send-button:active,
+  .session-list-row:active,
+  .note-delete:active {
+    transform: scale(0.98);
   }
 
-  .mentor-panel {
-    position: static;
+  .rail-collapse:hover,
+  .composer-tools .select:hover,
+  .composer-icon-button:hover,
+  .panel-heading button:hover,
+  .note-form button:hover {
+    transform: translateY(-1px);
+  }
+
+  .composer {
+    transition:
+      transform 180ms ease,
+      border-color 180ms ease,
+      box-shadow 220ms ease,
+      background-color 180ms ease;
+  }
+
+  .composer:focus-within {
+    transform: translateY(-1px);
+    border-color: rgba(20, 184, 166, 0.45);
+    box-shadow: 0 22px 70px rgba(15, 118, 110, 0.18);
+  }
+
+  .composer-tools .select:focus,
+  .composer-input textarea:focus {
+    border-color: rgba(20, 184, 166, 0.52);
+    box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.11);
+  }
+
+  .send-button:hover {
+    transform: translateY(-1px) scale(1.03);
+  }
+
+  .session-list-row:hover,
+  .session-list-row:focus-within {
+    transform: translateX(1px);
+  }
+
+  .message-row {
+    animation: message-soft-enter 180ms ease both;
+  }
+}
+
+@keyframes message-soft-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 </style>

@@ -1,6 +1,6 @@
 """sessions messages agent runs
 
-Revision ID: 0004_sessions_messages_agent_runs
+Revision ID: 0004_sessions_messages
 Revises: 0003_learning_routes
 Create Date: 2026-05-27
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0004_sessions_messages_agent_runs"
+revision: str = "0004_sessions_messages"
 down_revision: str | None = "0003_learning_routes"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

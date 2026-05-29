@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -153,6 +153,61 @@ async def list_sessions_for_chapter(
         .order_by(Session.created_at.desc(), Session.id)
     )
     return list(rows)
+
+
+async def delete_session(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    session_id: uuid.UUID,
+) -> None:
+    await ensure_session_in_tenant(
+        session=session,
+        tenant_id=tenant_id,
+        session_id=session_id,
+    )
+    message_ids = select(Message.id).where(
+        Message.tenant_id == tenant_id,
+        Message.session_id == session_id,
+    )
+    await session.execute(
+        delete(AgentRun).where(
+            AgentRun.tenant_id == tenant_id,
+            AgentRun.session_id == session_id,
+        )
+    )
+    await session.execute(
+        delete(MessageCitation).where(MessageCitation.message_id.in_(message_ids))
+    )
+    await session.execute(
+        delete(Message).where(
+            Message.tenant_id == tenant_id,
+            Message.session_id == session_id,
+        )
+    )
+    await session.execute(
+        delete(Session).where(
+            Session.tenant_id == tenant_id,
+            Session.id == session_id,
+        )
+    )
+    await session.commit()
+
+
+async def rename_session(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    session_id: uuid.UUID,
+    title: str,
+) -> Session:
+    tutor_session = await ensure_session_in_tenant(
+        session=session,
+        tenant_id=tenant_id,
+        session_id=session_id,
+    )
+    tutor_session.title = title.strip()
+    await session.commit()
+    await session.refresh(tutor_session)
+    return tutor_session
 
 
 async def create_message(
@@ -320,6 +375,7 @@ async def answer_session_message(
     content: str,
     embedding_provider: EmbeddingProvider,
     answer_provider: AnswerProvider,
+    web_search_enabled: bool | None = None,
 ) -> MessageResponse:
     from app.domain.session_tutor_graph.service import run_session_tutor_graph
 
@@ -331,4 +387,5 @@ async def answer_session_message(
         content=content,
         embedding_provider=embedding_provider,
         answer_provider=answer_provider,
+        web_search_enabled=web_search_enabled,
     )

@@ -17,48 +17,145 @@ vi.stubGlobal('useRouter', () => ({
 
 const { default: NewSpacePage } = await import('../pages/spaces/new.vue')
 
+function routeDraft() {
+  return {
+    chapters: [
+      {
+        id: 'chapter-1',
+        order_index: 1,
+        title: 'RAG Fundamentals',
+        goal: 'Understand retrieval augmented generation.',
+        summary: 'Learn chunking, embeddings, retrieval, and grounded answers.',
+        estimated_days: 3
+      }
+    ]
+  }
+}
+
+function mountPage() {
+  return mount(NewSpacePage, {
+    global: {
+      stubs: {
+        NuxtLink: {
+          props: ['to', 'ariaLabel'],
+          template: '<a :href="to" :aria-label="ariaLabel"><slot /></a>'
+        }
+      }
+    }
+  })
+}
+
+async function fillRequiredFields(wrapper: ReturnType<typeof mountPage>) {
+  await wrapper.find('[name="space-name"]').setValue('Linear Algebra')
+  await wrapper.find('[name="learning-goal"]').setValue('Understand matrices')
+  await wrapper.find('textarea[placeholder*="粘贴课程笔记"]').setValue('# RAG\nChunking and retrieval notes.')
+}
+
 describe('NewSpacePage', () => {
   beforeEach(() => {
     fetchMock.mockReset()
     pushMock.mockReset()
-    fetchMock.mockResolvedValue({ id: 'space-1' })
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/study-spaces')) {
+        return Promise.resolve({ id: 'space-1' })
+      }
+      if (url.endsWith('/sources/from-text')) {
+        return Promise.resolve({ source: { id: 'source-1' } })
+      }
+      if (url.endsWith('/ingestion/sources/source-1/run')) {
+        return Promise.resolve({ status: 'completed', chunk_count: 1 })
+      }
+      if (url.endsWith('/sources/source-1/chunks')) {
+        return Promise.resolve({
+          chunks: [
+            {
+              id: 'chunk-1',
+              chunk_index: 0,
+              text: 'Chunking and retrieval notes.',
+              citation: {}
+            }
+          ]
+        })
+      }
+      if (url.endsWith('/study-spaces/space-1/route-drafts')) {
+        return Promise.resolve(routeDraft())
+      }
+      return Promise.resolve({})
+    })
   })
 
-  it('renders the redesigned workspace form and create controls', () => {
-    const wrapper = mount(NewSpacePage, {
-      global: {
-        stubs: {
-          NuxtLink: {
-            props: ['to'],
-            template: '<a :href="to"><slot /></a>'
-          }
-        }
-      }
-    })
+  it('renders the ordered create and RAG workflow', () => {
+    const wrapper = mountPage()
 
-    expect(wrapper.text()).toContain('Create Study Space')
-    expect(wrapper.text()).toContain('Goal')
-    expect(wrapper.text()).toContain('Source setup')
-    expect(wrapper.text()).toContain('Route preview')
+    expect(wrapper.find('[data-testid="back-home"]').attributes('href')).toBe('/')
+    expect(wrapper.text()).toContain('创建学习空间')
+    expect(wrapper.text()).toContain('学习空间名字与主题')
+    expect(wrapper.text()).toContain('默认模型')
+    expect(wrapper.text()).toContain('上传材料并运行 RAG')
+    expect(wrapper.text()).toContain('Embedding model')
+    expect(wrapper.text()).toContain('学习路线大纲')
     expect(wrapper.text()).toContain('AI Render')
-    expect(wrapper.text()).toContain('Create Space')
+    expect(wrapper.text()).toContain('生成章节学习详情')
   })
 
-  it('creates a study space with auth headers and business fields only', async () => {
-    const wrapper = mount(NewSpacePage, {
-      global: {
-        stubs: {
-          NuxtLink: {
-            props: ['to'],
-            template: '<a :href="to"><slot /></a>'
-          }
-        }
-      }
-    })
+  it('runs RAG before showing embedded chunks', async () => {
+    const wrapper = mountPage()
+    await fillRequiredFields(wrapper)
 
-    await wrapper.find('input').setValue('Linear Algebra')
-    await wrapper.find('textarea').setValue('Understand matrices')
+    expect(wrapper.text()).not.toContain('Chunking and retrieval notes.')
+
+    await wrapper.find('[data-testid="run-rag"]').trigger('click')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/sources/from-text',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.objectContaining({
+          study_space_id: 'space-1',
+          content: '# RAG\nChunking and retrieval notes.'
+        })
+      })
+    )
+    expect(wrapper.text()).toContain('RAG Fundamentals')
+
+    await wrapper.find('[data-testid="open-chunk-modal"]').trigger('click')
+
+    expect(wrapper.find('[data-testid="chunk-modal"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Chunking and retrieval notes.')
+  })
+
+  it('generates chapter details and enters the first chapter directly', async () => {
+    const wrapper = mountPage()
+    await fillRequiredFields(wrapper)
+
     await wrapper.find('form').trigger('submit')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain('正在生成中，请稍等')
+
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="chapter-modal"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('章节列表')
+    expect(wrapper.text()).toContain('章节详情')
+    expect(wrapper.text()).toContain('RAG Fundamentals')
+
+    await wrapper.find('[data-testid="confirm-chapter-details"]').trigger('click')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(pushMock).toHaveBeenCalledWith('/chapters/chapter-1')
+    expect(pushMock).not.toHaveBeenCalledWith('/spaces/space-1')
+  })
+
+  it('does not expose the old study-space middle page as the completion target', async () => {
+    const wrapper = mountPage()
+    await fillRequiredFields(wrapper)
+
+    await wrapper.find('form').trigger('submit')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await wrapper.find('[data-testid="confirm-chapter-details"]').trigger('click')
 
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:8000/api/v1/study-spaces',
@@ -67,13 +164,9 @@ describe('NewSpacePage', () => {
         headers: {
           'X-User-Id': '00000000-0000-0000-0000-000000000002',
           'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
-        },
-        body: expect.not.objectContaining({
-          tenant_id: expect.any(String),
-          owner_user_id: expect.any(String)
-        })
+        }
       })
     )
-    expect(pushMock).toHaveBeenCalledWith('/spaces/space-1')
+    expect(pushMock.mock.calls.flat()).not.toContain('/spaces/space-1')
   })
 })
