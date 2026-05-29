@@ -11,6 +11,7 @@ from app.domain.chapter_mentor_state.service import (
     build_chapter_mentor_state_response,
     generate_chapter_mentor_state,
     get_chapter_mentor_state,
+    get_latest_session_tutor_run_at,
 )
 
 router = APIRouter(tags=["chapter-mentor-state"])
@@ -35,7 +36,15 @@ async def read_chapter_mentor_state(
     )
     if state is None:
         raise HTTPException(status_code=404, detail="Chapter mentor state not found")
-    return build_chapter_mentor_state_response(state)
+    latest_session_tutor_run_at = await get_latest_session_tutor_run_at(
+        session=session,
+        tenant_id=context.tenant_id,
+        chapter_id=chapter_id,
+    )
+    return build_chapter_mentor_state_response(
+        state,
+        latest_session_tutor_run_at=latest_session_tutor_run_at,
+    )
 
 
 @router.post("/agents/chapter-summary/run", response_model=ChapterMentorStateResponse)

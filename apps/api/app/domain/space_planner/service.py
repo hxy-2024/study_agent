@@ -16,8 +16,10 @@ from app.db.models import (
     LearningRouteStatus,
     MasteryRecord,
     SpacePlannerState,
+    Session,
     StudySpace,
 )
+from app.domain.chapter_mentor_state.service import needs_supervision_refresh
 from app.domain.space_planner.schemas import (
     PlannerChapterRisk,
     PlannerReviewRecommendation,
@@ -45,6 +47,40 @@ def _mentor_signal_count(mentor: Any) -> int:
     return sum(1 for item in evidence if isinstance(item, dict) and item.get("kind") == "learning_signal")
 
 
+def _as_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _iso_datetime(value: Any) -> str | None:
+    parsed = _as_datetime(value)
+    return parsed.isoformat() if parsed else None
+
+
+def build_supervision_freshness(
+    chapters: list[Any],
+    mentor_states: dict[uuid.UUID, Any],
+    latest_tutor_runs: dict[uuid.UUID, Any],
+) -> dict[uuid.UUID, dict[str, Any]]:
+    freshness: dict[uuid.UUID, dict[str, Any]] = {}
+    for chapter in chapters:
+        mentor = mentor_states.get(chapter.id)
+        mentor_updated_at = _as_datetime(getattr(mentor, "updated_at", None))
+        latest_tutor_run_at = _as_datetime(latest_tutor_runs.get(chapter.id))
+        freshness[chapter.id] = {
+            "mentor_state_updated_at": _iso_datetime(mentor_updated_at),
+            "latest_session_tutor_run_at": _iso_datetime(latest_tutor_run_at),
+            "needs_supervision_refresh": needs_supervision_refresh(latest_tutor_run_at, mentor_updated_at),
+        }
+    return freshness
+
+
 def choose_next_chapter(chapters: list[Any], mastery_records: dict[uuid.UUID, Any]) -> uuid.UUID | None:
     ordered_chapters = sorted(chapters, key=lambda chapter: getattr(chapter, "order_index", 0))
     for chapter in ordered_chapters:
@@ -58,20 +94,36 @@ def choose_next_chapter(chapters: list[Any], mastery_records: dict[uuid.UUID, An
     return None
 
 
-def build_risk_chapters(chapters: list[Any], mastery_records: dict[uuid.UUID, Any], mentor_states: dict[uuid.UUID, Any]) -> list[dict]:
+def build_risk_chapters(
+    chapters: list[Any],
+    mastery_records: dict[uuid.UUID, Any],
+    mentor_states: dict[uuid.UUID, Any],
+    supervision_freshness: dict[uuid.UUID, dict[str, Any]] | None = None,
+) -> list[dict]:
     risks: list[dict] = []
+    supervision_freshness = supervision_freshness or {}
     for chapter in sorted(chapters, key=lambda item: getattr(item, "order_index", 0)):
         mastery = mastery_records.get(chapter.id)
         mentor = mentor_states.get(chapter.id)
         weak_points = list(getattr(mastery, "weak_points", []) or []) + list(getattr(mentor, "weak_points", []) or [])
         mentor_signal_count = _mentor_signal_count(mentor)
         score = getattr(mastery, "score_percent", None)
+        needs_refresh = supervision_freshness.get(chapter.id, {}).get("needs_supervision_refresh") is True
         if score is not None and score < 70:
             risks.append(
                 {
                     "chapter_id": str(chapter.id),
                     "title": chapter.title,
                     "reason": f"Mastery score is {score}%, below the review threshold.",
+                    "score_percent": score,
+                }
+            )
+        elif needs_refresh:
+            risks.append(
+                {
+                    "chapter_id": str(chapter.id),
+                    "title": chapter.title,
+                    "reason": "New tutor signals need chapter mentor assessment.",
                     "score_percent": score,
                 }
             )
@@ -100,14 +152,17 @@ def build_review_recommendations(
     chapters: list[Any],
     mastery_records: dict[uuid.UUID, Any],
     mentor_states: dict[uuid.UUID, Any],
+    supervision_freshness: dict[uuid.UUID, dict[str, Any]] | None = None,
 ) -> list[dict]:
     recommendations: list[dict] = []
+    supervision_freshness = supervision_freshness or {}
     for chapter in sorted(chapters, key=lambda item: getattr(item, "order_index", 0)):
         mastery = mastery_records.get(chapter.id)
         mentor = mentor_states.get(chapter.id)
         score = getattr(mastery, "score_percent", None)
         weak_points = list(getattr(mastery, "weak_points", []) or []) + list(getattr(mentor, "weak_points", []) or [])
         mentor_signal_count = _mentor_signal_count(mentor)
+        needs_refresh = supervision_freshness.get(chapter.id, {}).get("needs_supervision_refresh") is True
         if score is not None and score < 70:
             recommendations.append(
                 {
@@ -115,6 +170,15 @@ def build_review_recommendations(
                     "title": chapter.title,
                     "action": "Retake chapter quiz after evidence review.",
                     "reason": f"Current mastery is {score}%.",
+                }
+            )
+        elif needs_refresh:
+            recommendations.append(
+                {
+                    "chapter_id": str(chapter.id),
+                    "title": chapter.title,
+                    "action": "Refresh chapter mentor assessment from recent tutor signals.",
+                    "reason": "New tutor signals are newer than the chapter mentor assessment.",
                 }
             )
         elif weak_points:
@@ -180,9 +244,16 @@ def build_summary(study_space: StudySpace, chapters: list[Any], mastery_records:
     )
 
 
-def build_evidence(chapters: list[Any], mastery_records: dict[uuid.UUID, Any], mentor_states: dict[uuid.UUID, Any]) -> list[dict]:
-    return [
-        {
+def build_evidence(
+    chapters: list[Any],
+    mastery_records: dict[uuid.UUID, Any],
+    mentor_states: dict[uuid.UUID, Any],
+    supervision_freshness: dict[uuid.UUID, dict[str, Any]] | None = None,
+) -> list[dict]:
+    supervision_freshness = supervision_freshness or {}
+    evidence: list[dict] = []
+    for chapter in sorted(chapters, key=lambda item: getattr(item, "order_index", 0)):
+        item = {
             "chapter_id": str(chapter.id),
             "title": chapter.title,
             "status": _chapter_status(chapter),
@@ -191,8 +262,9 @@ def build_evidence(chapters: list[Any], mastery_records: dict[uuid.UUID, Any], m
             "mentor_weak_points": list(getattr(mentor_states.get(chapter.id), "weak_points", []) or []),
             "mentor_signal_count": _mentor_signal_count(mentor_states.get(chapter.id)),
         }
-        for chapter in sorted(chapters, key=lambda item: getattr(item, "order_index", 0))
-    ]
+        item.update(supervision_freshness.get(chapter.id, {}))
+        evidence.append(item)
+    return evidence
 
 
 def build_space_planner_state_response(state: SpacePlannerState) -> SpacePlannerStateResponse:
@@ -279,6 +351,34 @@ async def build_space_planner_snapshot(
     return study_space, chapters, mastery_records, mentor_states
 
 
+async def load_latest_session_tutor_run_times(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    study_space_id: uuid.UUID,
+) -> dict[uuid.UUID, datetime]:
+    rows = await session.execute(
+        select(AgentRun, Session)
+        .join(Session, AgentRun.session_id == Session.id)
+        .where(
+            AgentRun.tenant_id == tenant_id,
+            AgentRun.study_space_id == study_space_id,
+            AgentRun.agent_type == AgentType.session_tutor,
+            AgentRun.status == AgentRunStatus.completed,
+            Session.tenant_id == tenant_id,
+            Session.study_space_id == study_space_id,
+        )
+        .order_by(AgentRun.completed_at.desc().nulls_last(), AgentRun.created_at.desc(), AgentRun.id)
+    )
+    latest_by_chapter: dict[uuid.UUID, datetime] = {}
+    for run, tutor_session in rows.all():
+        if tutor_session.chapter_id in latest_by_chapter:
+            continue
+        run_at = run.completed_at or run.created_at
+        if run_at is not None:
+            latest_by_chapter[tutor_session.chapter_id] = run_at
+    return latest_by_chapter
+
+
 async def get_space_planner_state(
     session: AsyncSession,
     tenant_id: uuid.UUID,
@@ -312,6 +412,12 @@ async def generate_space_planner_state(
         user_id=user_id,
         study_space_id=study_space_id,
     )
+    latest_tutor_runs = await load_latest_session_tutor_run_times(
+        session=session,
+        tenant_id=tenant_id,
+        study_space_id=study_space_id,
+    )
+    supervision_freshness = build_supervision_freshness(chapters, mentor_states, latest_tutor_runs)
     state = await session.scalar(
         select(SpacePlannerState).where(
             SpacePlannerState.tenant_id == tenant_id,
@@ -335,10 +441,15 @@ async def generate_space_planner_state(
 
     state.summary = build_summary(study_space, chapters, mastery_records)
     state.next_chapter_id = choose_next_chapter(chapters, mastery_records)
-    state.risk_chapters = build_risk_chapters(chapters, mastery_records, mentor_states)
-    state.review_recommendations = build_review_recommendations(chapters, mastery_records, mentor_states)
+    state.risk_chapters = build_risk_chapters(chapters, mastery_records, mentor_states, supervision_freshness)
+    state.review_recommendations = build_review_recommendations(
+        chapters,
+        mastery_records,
+        mentor_states,
+        supervision_freshness,
+    )
     state.route_adjustments = build_route_adjustments(chapters, mastery_records)
-    state.evidence = build_evidence(chapters, mastery_records, mentor_states)
+    state.evidence = build_evidence(chapters, mastery_records, mentor_states, supervision_freshness)
     state.updated_at = datetime.now(UTC)
 
     session.add(

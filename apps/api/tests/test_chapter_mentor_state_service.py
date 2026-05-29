@@ -23,7 +23,12 @@ from app.db.models import (
     Tenant,
     User,
 )
-from app.domain.chapter_mentor_state.service import build_signal_insights, generate_chapter_mentor_state
+from app.domain.chapter_mentor_state.service import (
+    build_chapter_mentor_state_response,
+    build_signal_insights,
+    generate_chapter_mentor_state,
+    needs_supervision_refresh,
+)
 from app.domain.chapter_mentor_state import service as chapter_mentor_service
 
 
@@ -192,6 +197,46 @@ def test_build_signal_runs_statement_filters_completed_session_tutor_runs_for_ch
     assert AgentRunStatus.completed.value in sql
     assert "sessions.chapter_id" in sql
     assert chapter_id.hex in sql
+
+
+def test_needs_supervision_refresh_when_latest_tutor_run_is_newer_than_mentor_state() -> None:
+    state_updated_at = datetime(2026, 5, 29, 8, 0, tzinfo=UTC)
+    latest_tutor_run_at = datetime(2026, 5, 29, 8, 5, tzinfo=UTC)
+
+    assert needs_supervision_refresh(latest_tutor_run_at, state_updated_at) is True
+
+
+def test_needs_supervision_refresh_is_false_when_mentor_state_is_current_or_no_signals() -> None:
+    state_updated_at = datetime(2026, 5, 29, 8, 5, tzinfo=UTC)
+
+    assert needs_supervision_refresh(datetime(2026, 5, 29, 8, 0, tzinfo=UTC), state_updated_at) is False
+    assert needs_supervision_refresh(None, state_updated_at) is False
+
+
+def test_build_chapter_mentor_state_response_includes_supervision_freshness_fields() -> None:
+    tenant_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    state_updated_at = datetime(2026, 5, 29, 8, 0, tzinfo=UTC)
+    latest_tutor_run_at = datetime(2026, 5, 29, 8, 5, tzinfo=UTC)
+    state = ChapterMentorState(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        study_space_id=study_space_id,
+        chapter_id=chapter_id,
+        summary="Assessment",
+        weak_points=[],
+        next_actions=[],
+        evidence=[],
+        source_session_count=1,
+        source_message_count=2,
+        updated_at=state_updated_at,
+    )
+
+    response = build_chapter_mentor_state_response(state, latest_session_tutor_run_at=latest_tutor_run_at)
+
+    assert response.latest_session_tutor_run_at == latest_tutor_run_at
+    assert response.needs_supervision_refresh is True
 
 
 @pytest.mark.anyio

@@ -174,6 +174,8 @@ const loadingAgentRuns = ref(false)
 const generatingRoute = ref(false)
 const runningPlanner = ref(false)
 const creatingPlannerActions = ref(false)
+const creatingRuntimeActions = ref(false)
+const runtimeActionsMessage = ref('')
 const activatingRouteId = ref<string | null>(null)
 const updatingPlannerActionId = ref<string | null>(null)
 const uploadPhase = ref<UploadPhase>('idle')
@@ -195,6 +197,9 @@ const plannerNextChapter = computed(() => {
 const plannerUpdatedAt = computed(() => {
   if (!plannerState.value?.updated_at) return ''
   return new Date(plannerState.value.updated_at).toLocaleString()
+})
+const supervisionRefreshCount = computed(() => {
+  return (plannerState.value?.evidence ?? []).filter(item => item.needs_supervision_refresh === true).length
 })
 const sourceFilters = computed(() => [
   { key: 'all' as const, label: 'All', count: sources.value.length },
@@ -489,6 +494,33 @@ async function createPlannerActions() {
   }
 }
 
+async function createRuntimeActions() {
+  creatingRuntimeActions.value = true
+  runtimeActionsMessage.value = ''
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<{ actions: PlannerAction[] }>(
+      `${config.public.apiBaseUrl}/planner-actions/from-runtime-signals`,
+      {
+        method: 'POST',
+        headers: protectedHeaders(),
+        body: { study_space_id: spaceId.value }
+      }
+    )
+    const actions = response.actions ?? []
+    plannerActions.value = [
+      ...actions,
+      ...plannerActions.value.filter(existingAction => !actions.some(action => action.id === existingAction.id))
+    ]
+    runtimeActionsMessage.value =
+      actions.length > 0 ? `Created ${actions.length} runtime actions.` : 'No new runtime actions found.'
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to create runtime actions.', error)
+  } finally {
+    creatingRuntimeActions.value = false
+  }
+}
+
 async function updatePlannerAction(action: PlannerAction, status: string) {
   updatingPlannerActionId.value = action.id
   errorMessage.value = ''
@@ -753,6 +785,9 @@ onMounted(() => {
               <h3>{{ plannerState.summary }}</h3>
               <p v-if="plannerNextChapter">Recommended next: {{ plannerNextChapter.order_index }}. {{ plannerNextChapter.title }}</p>
               <p v-else class="muted">No specific next chapter is required.</p>
+              <p v-if="supervisionRefreshCount" class="supervision-refresh-note">
+                {{ supervisionRefreshCount }} {{ supervisionRefreshCount === 1 ? 'chapter needs' : 'chapters need' }} supervision refresh
+              </p>
               <small v-if="plannerUpdatedAt">Updated {{ plannerUpdatedAt }}</small>
             </article>
 
@@ -800,16 +835,28 @@ onMounted(() => {
               <h2>Planner actions</h2>
               <p class="muted">Confirm planner suggestions before they affect your study flow.</p>
             </div>
-            <button
-              data-testid="create-planner-actions"
-              type="button"
-              class="secondary-button"
-              :disabled="creatingPlannerActions"
-              @click="createPlannerActions"
-            >
-              {{ creatingPlannerActions ? 'Creating...' : 'Create actions' }}
-            </button>
+            <div class="row-actions planner-action-controls">
+              <button
+                data-testid="create-planner-actions"
+                type="button"
+                class="secondary-button"
+                :disabled="creatingPlannerActions"
+                @click="createPlannerActions"
+              >
+                {{ creatingPlannerActions ? 'Creating...' : 'Create actions' }}
+              </button>
+              <button
+                data-testid="create-runtime-actions"
+                type="button"
+                class="secondary-button"
+                :disabled="creatingRuntimeActions"
+                @click="createRuntimeActions"
+              >
+                {{ creatingRuntimeActions ? 'Creating...' : 'Create runtime actions' }}
+              </button>
+            </div>
           </div>
+          <p v-if="runtimeActionsMessage" class="muted">{{ runtimeActionsMessage }}</p>
 
           <p v-if="loadingPlannerActions" class="muted">Loading planner actions...</p>
           <p v-else-if="plannerActions.length === 0" class="empty-state">No planner actions queued.</p>
@@ -1198,6 +1245,20 @@ onMounted(() => {
 .planner-list small {
   color: var(--color-primary);
   font-weight: 800;
+}
+
+.supervision-refresh-note {
+  width: fit-content;
+  border: 1px solid rgba(20, 184, 166, 0.32);
+  border-radius: 999px;
+  background: rgba(240, 253, 250, 0.9);
+  color: #115e59;
+  box-shadow: 0 12px 30px rgba(15, 118, 110, 0.08);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
+  margin: 0;
+  padding: 6px 10px;
 }
 
 .planner-list h3 {

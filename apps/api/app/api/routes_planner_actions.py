@@ -7,12 +7,14 @@ from app.core.auth import CurrentUserContext, get_authorized_user_context
 from app.db.session import get_db_session
 from app.domain.planner_actions.schemas import (
     CreatePlannerActionsRequest,
+    CreateRuntimeActionsRequest,
     PlannerActionListResponse,
     PlannerActionResponse,
     UpdatePlannerActionStatusRequest,
 )
 from app.domain.planner_actions.service import (
     create_actions_from_latest_planner_state,
+    create_actions_from_runtime_signals,
     list_planner_actions,
     update_planner_action_status,
 )
@@ -55,6 +57,24 @@ async def create_planner_actions(
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             study_space_id=payload.study_space_id,
+        )
+    except ValueError as exc:
+        raise map_planner_action_error(exc) from exc
+
+
+@router.post("/planner-actions/from-runtime-signals", response_model=PlannerActionListResponse, status_code=201)
+async def create_runtime_signal_actions(
+    payload: CreateRuntimeActionsRequest,
+    context: CurrentUserContext = Depends(get_authorized_user_context),
+    session: AsyncSession = Depends(get_db_session),
+) -> PlannerActionListResponse:
+    try:
+        return await create_actions_from_runtime_signals(
+            session=session,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            study_space_id=payload.study_space_id,
+            chapter_id=payload.chapter_id,
         )
     except ValueError as exc:
         raise map_planner_action_error(exc) from exc

@@ -19,5 +19,7 @@ class ChapterMentorStateResponse(BaseModel):
     evidence: list[dict]
     source_session_count: int
     source_message_count: int
+    latest_session_tutor_run_at: datetime | None = None
+    needs_supervision_refresh: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None

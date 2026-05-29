@@ -9,6 +9,7 @@ from app.domain.space_planner.service import (
     build_review_recommendations,
     build_risk_chapters,
     build_route_adjustments,
+    build_supervision_freshness,
     choose_next_chapter,
     generate_space_planner_state,
 )
@@ -71,6 +72,41 @@ def test_build_evidence_counts_learning_signal_mentor_evidence() -> None:
     evidence = build_evidence([chapter], {}, mentor_states)
 
     assert evidence[0]["mentor_signal_count"] == 2
+
+
+def test_build_supervision_freshness_marks_newer_tutor_signal_as_stale() -> None:
+    chapter = make_chapter("Citations", ChapterStatus.active, 1)
+    mentor_states = {
+        chapter.id: SimpleNamespace(updated_at="2026-05-29T08:00:00+00:00"),
+    }
+    latest_tutor_runs = {
+        chapter.id: "2026-05-29T08:05:00+00:00",
+    }
+
+    freshness = build_supervision_freshness([chapter], mentor_states, latest_tutor_runs)
+
+    assert freshness[chapter.id]["mentor_state_updated_at"] == "2026-05-29T08:00:00+00:00"
+    assert freshness[chapter.id]["latest_session_tutor_run_at"] == "2026-05-29T08:05:00+00:00"
+    assert freshness[chapter.id]["needs_supervision_refresh"] is True
+
+
+def test_build_evidence_and_recommendations_surface_stale_supervision() -> None:
+    chapter = make_chapter("Citations", ChapterStatus.active, 1)
+    freshness = {
+        chapter.id: {
+            "mentor_state_updated_at": "2026-05-29T08:00:00+00:00",
+            "latest_session_tutor_run_at": "2026-05-29T08:05:00+00:00",
+            "needs_supervision_refresh": True,
+        }
+    }
+
+    evidence = build_evidence([chapter], {}, {}, freshness)
+    risks = build_risk_chapters([chapter], {}, {}, freshness)
+    reviews = build_review_recommendations([chapter], {}, {}, freshness)
+
+    assert evidence[0]["needs_supervision_refresh"] is True
+    assert risks[0]["reason"] == "New tutor signals need chapter mentor assessment."
+    assert reviews[0]["action"] == "Refresh chapter mentor assessment from recent tutor signals."
 
 
 def test_signal_evidence_creates_risk_and_review_without_low_mastery() -> None:
@@ -176,7 +212,11 @@ async def test_generate_space_planner_state_upserts_state_and_agent_run(monkeypa
     async def fake_snapshot(**kwargs):
         return study_space, [chapter], mastery, mentor
 
+    async def fake_latest_tutor_runs(**kwargs):
+        return {}
+
     monkeypatch.setattr("app.domain.space_planner.service.build_space_planner_snapshot", fake_snapshot)
+    monkeypatch.setattr("app.domain.space_planner.service.load_latest_session_tutor_run_times", fake_latest_tutor_runs)
 
     response = await generate_space_planner_state(
         session=FakeSession(),
