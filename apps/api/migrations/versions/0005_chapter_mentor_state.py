@@ -1,7 +1,7 @@
 """chapter mentor state
 
 Revision ID: 0005_chapter_mentor_state
-Revises: 0004_sessions_messages_agent_runs
+Revises: 0004_sessions_messages
 Create Date: 2026-05-27
 """
 
@@ -12,7 +12,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0005_chapter_mentor_state"
-down_revision: str | None = "0004_sessions_messages_agent_runs"
+down_revision: str | None = "0004_sessions_messages"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

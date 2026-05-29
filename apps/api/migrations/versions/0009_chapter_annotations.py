@@ -21,6 +21,12 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     annotation_kind = postgresql.ENUM("note", "highlight", name="chapter_annotation_kind")
     annotation_kind.create(op.get_bind(), checkfirst=True)
+    annotation_kind_column = postgresql.ENUM(
+        "note",
+        "highlight",
+        name="chapter_annotation_kind",
+        create_type=False,
+    )
 
     op.create_table(
         "chapter_annotations",
@@ -30,7 +36,7 @@ def upgrade() -> None:
         sa.Column("study_space_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("chapter_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("source_chunk_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("kind", annotation_kind, nullable=False),
+        sa.Column("kind", annotation_kind_column, nullable=False),
         sa.Column("content", sa.Text(), nullable=True),
         sa.Column("quote", sa.Text(), nullable=True),
         sa.Column("anchor", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
