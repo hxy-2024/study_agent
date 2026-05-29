@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 const store = useStudySpacesStore()
 const config = useRuntimeConfig()
@@ -35,10 +35,19 @@ interface DashboardSummary {
   recent_agent_runs: DashboardAgentRun[]
 }
 
+interface ChapterListResponse {
+  chapters?: Array<{
+    id: string
+    status: string
+    order_index: number
+  }>
+}
+
 const dashboard = ref<DashboardSummary | null>(null)
 const dashboardLoading = ref(false)
 const spaceSearch = ref('')
 const selectedSpaceId = ref('')
+const continueChapterBySpace = ref<Record<string, string>>({})
 
 const fallbackSpaces = computed(() => store.spaces.filter(space => space.status !== 'archived'))
 const activeSpaces = computed(() => dashboard.value?.spaces ?? fallbackSpaces.value)
@@ -61,12 +70,13 @@ const supervisionRefreshLabel = computed(() => {
 const recentAgentRuns = computed(() => dashboard.value?.recent_agent_runs ?? [])
 const continueChapterId = computed(() => {
   if (!currentSpace.value) return null
-  return dashboard.value?.pending_actions.find(action => {
+  const pendingChapterId = dashboard.value?.pending_actions.find(action => {
     return action.study_space_id === currentSpace.value?.id && Boolean(action.chapter_id)
   })?.chapter_id ?? null
+  return pendingChapterId ?? continueChapterBySpace.value[currentSpace.value.id] ?? null
 })
 const continueHref = computed(() => continueChapterId.value ? `/chapters/${continueChapterId.value}` : '/spaces/new')
-const continueLabel = computed(() => continueChapterId.value ? 'Continue' : 'Prepare route')
+const continueLabel = computed(() => continueChapterId.value ? 'Continue study' : 'Prepare route')
 const today = new Date()
 const currentDay = today.getDate()
 const calendarDays = Array.from({ length: 35 }, (_, index) => index + 1)
@@ -90,10 +100,44 @@ async function loadDashboard() {
   }
 }
 
+async function loadContinueChapter(spaceId: string) {
+  if (continueChapterBySpace.value[spaceId]) return
+  if (dashboard.value?.pending_actions.some(action => action.study_space_id === spaceId && action.chapter_id)) return
+  try {
+    const response = await $fetch<ChapterListResponse>(`${config.public.apiBaseUrl}/study-spaces/${spaceId}/chapters`, {
+      headers: {
+        'X-User-Id': '00000000-0000-0000-0000-000000000002',
+        'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
+      }
+    })
+    const chapters = response.chapters ?? []
+    const nextChapter = chapters.find(chapter => chapter.status !== 'completed') ?? chapters[0]
+    if (nextChapter) {
+      continueChapterBySpace.value = {
+        ...continueChapterBySpace.value,
+        [spaceId]: nextChapter.id
+      }
+    }
+  } catch {
+    continueChapterBySpace.value = {
+      ...continueChapterBySpace.value,
+      [spaceId]: ''
+    }
+  }
+}
+
 onMounted(() => {
   store.loadSpaces()
   loadDashboard()
 })
+
+watch(
+  () => currentSpace.value?.id,
+  (spaceId) => {
+    if (spaceId) loadContinueChapter(spaceId)
+  },
+  { immediate: true }
+)
 </script>
 
 <template>

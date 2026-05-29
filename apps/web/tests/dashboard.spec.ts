@@ -37,6 +37,10 @@ function mountPage() {
   })
 }
 
+async function flushPromises() {
+  await new Promise(resolve => setTimeout(resolve, 0))
+}
+
 describe('DashboardPage', () => {
   beforeEach(() => {
     storeState.loading = false
@@ -86,6 +90,39 @@ describe('DashboardPage', () => {
     expect(wrapper.find('a[href="/spaces/new"]').exists()).toBe(true)
     expect(wrapper.findAll('.space-row')).toHaveLength(2)
     expect(wrapper.find('.space-row.active').text()).toContain('Linear Algebra')
+  })
+
+  it('continues an existing study space directly into its chapter chat', async () => {
+    storeState.spaces = [
+      {
+        id: 'space-1',
+        name: 'Linear Algebra',
+        goal: 'Master eigenvectors and matrices',
+        status: 'active',
+        target_days: 21
+      }
+    ]
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/study-spaces/space-1/chapters')) {
+        return Promise.resolve({
+          chapters: [
+            {
+              id: 'chapter-1',
+              status: 'active',
+              order_index: 1
+            }
+          ]
+        })
+      }
+      return Promise.reject(new Error('Dashboard not ready'))
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Continue study')
+    expect(wrapper.find('a[href="/chapters/chapter-1"]').exists()).toBe(true)
   })
 
   it('filters spaces by search text', async () => {
@@ -146,12 +183,13 @@ describe('DashboardPage', () => {
     })
 
     const wrapper = mountPage()
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await flushPromises()
 
     expect(wrapper.text()).toContain('Today')
     expect(wrapper.text()).toContain('1 pending action')
     expect(wrapper.text()).toContain('2 supervision refreshes')
     expect(wrapper.text()).toContain('Tutor answered with citations.')
+    expect(wrapper.text()).toContain('Continue study')
     expect(wrapper.find('a[href="/chapters/chapter-1"]').exists()).toBe(true)
   })
 })
