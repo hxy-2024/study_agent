@@ -25,7 +25,21 @@ class SignalInsights:
     evidence: list[dict[str, Any]]
 
 
-def build_chapter_mentor_state_response(state: ChapterMentorState) -> ChapterMentorStateResponse:
+def needs_supervision_refresh(
+    latest_session_tutor_run_at: datetime | None,
+    mentor_state_updated_at: datetime | None,
+) -> bool:
+    if latest_session_tutor_run_at is None:
+        return False
+    if mentor_state_updated_at is None:
+        return True
+    return latest_session_tutor_run_at > mentor_state_updated_at
+
+
+def build_chapter_mentor_state_response(
+    state: ChapterMentorState,
+    latest_session_tutor_run_at: datetime | None = None,
+) -> ChapterMentorStateResponse:
     return ChapterMentorStateResponse(
         id=state.id,
         tenant_id=state.tenant_id,
@@ -37,6 +51,8 @@ def build_chapter_mentor_state_response(state: ChapterMentorState) -> ChapterMen
         evidence=state.evidence or [],
         source_session_count=state.source_session_count,
         source_message_count=state.source_message_count,
+        latest_session_tutor_run_at=latest_session_tutor_run_at,
+        needs_supervision_refresh=needs_supervision_refresh(latest_session_tutor_run_at, state.updated_at),
         created_at=state.created_at,
         updated_at=state.updated_at,
     )
@@ -135,6 +151,19 @@ async def get_chapter_mentor_state(
             ChapterMentorState.chapter_id == chapter_id,
         )
     )
+
+
+async def get_latest_session_tutor_run_at(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    chapter_id: uuid.UUID,
+) -> datetime | None:
+    latest_run = await session.scalar(
+        _build_signal_runs_statement(tenant_id, chapter_id).limit(1)
+    )
+    if latest_run is None:
+        return None
+    return latest_run.completed_at or latest_run.created_at
 
 
 def _message_preview(content: str, limit: int = 160) -> str:
@@ -279,4 +308,4 @@ async def generate_chapter_mentor_state(
 
     await session.commit()
     await session.refresh(state)
-    return build_chapter_mentor_state_response(state)
+    return build_chapter_mentor_state_response(state, latest_session_tutor_run_at=state.updated_at)
