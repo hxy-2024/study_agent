@@ -104,12 +104,12 @@ describe('Chapter quiz panel', () => {
     })
   })
 
-  it('renders quiz panel with current mastery', async () => {
+  it('renders top-right quiz action with current mastery in the session panel', async () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Quiz')
-    expect(wrapper.text()).toContain('Check understanding')
+    expect(wrapper.find('[data-testid="generate-quiz"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Generate quiz')
     expect(wrapper.text()).toContain('Mastery: developing 67%')
   })
 

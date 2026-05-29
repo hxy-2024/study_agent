@@ -21,7 +21,10 @@ function mountPage() {
   return mount(ChapterStudyPage, {
     global: {
       stubs: {
-        NuxtLink: true
+        NuxtLink: {
+          props: ['to'],
+          template: '<a :href="to"><slot /></a>'
+        }
       }
     }
   })
@@ -32,7 +35,6 @@ function chapterDetail(overrides = {}) {
     chapter?: Record<string, unknown>
     route?: Record<string, unknown>
     study_space?: Record<string, unknown>
-    evidence?: unknown[]
     next_chapter_id?: string | null
   }
 
@@ -63,7 +65,7 @@ function chapterDetail(overrides = {}) {
       name: 'Linear Algebra',
       ...typedOverrides.study_space
     },
-    evidence: typedOverrides.evidence ?? [],
+    evidence: [],
     next_chapter_id: typedOverrides.next_chapter_id ?? null
   }
 }
@@ -82,7 +84,7 @@ function mentorMessage(overrides = {}) {
     id: '00000000-0000-0000-0000-000000000801',
     session_id: '00000000-0000-0000-0000-000000000701',
     role: 'assistant',
-    content: 'RAG retrieves relevant evidence before answering.',
+    content: '## Retrieval answer\nRAG retrieves relevant evidence before answering.',
     citations: [
       {
         chunk_id: '00000000-0000-0000-0000-000000000301',
@@ -131,52 +133,29 @@ describe('ChapterStudyPage', () => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/annotations')) {
         return Promise.resolve({ annotations: [] })
       }
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/chapters')) {
+        return Promise.resolve({ chapters: [chapterDetail().chapter] })
+      }
       return Promise.resolve(chapterDetail())
     })
   })
 
-  it('renders chapter details and active mentor panel', async () => {
+  it('renders a Codex-style chat workbench instead of diagnostic panels', async () => {
     const wrapper = mountPage()
     await flushPromises()
 
+    expect(wrapper.text()).toContain('Chapters')
     expect(wrapper.text()).toContain('Intro chapter')
-    expect(wrapper.text()).toContain('Learn the foundations.')
-    expect(wrapper.text()).toContain('Start with the basics.')
-    expect(wrapper.text()).toContain('Draft route')
-    expect(wrapper.text()).toContain('AI Mentor')
+    expect(wrapper.text()).toContain('Generate quiz')
+    expect(wrapper.text()).toContain('我是你的本章 AI Mentor')
+    expect(wrapper.text()).toContain('Sessions')
+    expect(wrapper.text()).toContain('Progress')
     expect(wrapper.find('[data-testid="mentor-question"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ask-mentor"]').exists()).toBe(true)
-  })
-
-  it('renders source evidence cards', async () => {
-    fetchMock.mockResolvedValueOnce(
-      chapterDetail({
-        evidence: [
-          {
-            source_id: '00000000-0000-0000-0000-000000000201',
-            chunk_id: '00000000-0000-0000-0000-000000000301',
-            chunk_index: 0,
-            source_filename: 'notes.md',
-            text: 'Embeddings convert text into vectors.',
-            citation: { page_number: 2 }
-          }
-        ]
-      })
-    )
-
-    const wrapper = mountPage()
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('notes.md')
-    expect(wrapper.text()).toContain('Embeddings convert text into vectors.')
-    expect(wrapper.text()).toContain('Page 2')
-  })
-
-  it('renders empty evidence state', async () => {
-    const wrapper = mountPage()
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('No source evidence is linked to this chapter yet.')
+    expect(wrapper.text()).not.toContain('Chapter state')
+    expect(wrapper.text()).not.toContain('Chapter runtime')
+    expect(wrapper.text()).not.toContain('Source evidence')
+    expect(wrapper.text()).not.toContain('Planner review')
   })
 
   it('renders notes and creates a new chapter note', async () => {
@@ -216,57 +195,6 @@ describe('ChapterStudyPage', () => {
     )
   })
 
-  it('adds a highlight from an evidence card', async () => {
-    const evidenceItem = {
-      source_id: '00000000-0000-0000-0000-000000000201',
-      chunk_id: '00000000-0000-0000-0000-000000000301',
-      chunk_index: 0,
-      source_filename: 'notes.md',
-      text: 'Embeddings convert text into vectors.',
-      citation: { page_number: 2 }
-    }
-    fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
-      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/annotations') && options?.method === 'POST') {
-        return Promise.resolve({
-          annotation: annotationItem({
-            kind: 'highlight',
-            source_chunk_id: evidenceItem.chunk_id,
-            quote: evidenceItem.text,
-            content: null,
-            anchor: { citation: evidenceItem.citation }
-          })
-        })
-      }
-      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/annotations')) {
-        return Promise.resolve({ annotations: [] })
-      }
-      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
-        return Promise.resolve([])
-      }
-      return Promise.resolve(chapterDetail({ evidence: [evidenceItem] }))
-    })
-
-    const wrapper = mountPage()
-    await flushPromises()
-
-    await wrapper.find('[data-testid="highlight-evidence"]').trigger('click')
-    await flushPromises()
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/api/v1/chapters/00000000-0000-0000-0000-000000000601/annotations',
-      expect.objectContaining({
-        method: 'POST',
-        body: {
-          kind: 'highlight',
-          source_chunk_id: evidenceItem.chunk_id,
-          quote: evidenceItem.text,
-          anchor: { citation: evidenceItem.citation }
-        }
-      })
-    )
-    expect(wrapper.text()).toContain('Embeddings convert text into vectors.')
-  })
-
   it('marks chapter complete and shows next chapter action', async () => {
     fetchMock.mockImplementation((url: string, options?: { method?: string }) => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/complete') && options?.method === 'POST') {
@@ -294,7 +222,7 @@ describe('ChapterStudyPage', () => {
     expect(wrapper.html()).toContain('/chapters/00000000-0000-0000-0000-000000000602')
   })
 
-  it('loads existing mentor session messages', async () => {
+  it('loads existing mentor session messages with markdown and citations', async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
         return Promise.resolve([mentorSession()])
@@ -316,18 +244,13 @@ describe('ChapterStudyPage', () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/api/v1/chapters/00000000-0000-0000-0000-000000000601/sessions',
-      expect.objectContaining({ headers: expect.any(Object) })
-    )
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
-      expect.objectContaining({ headers: expect.any(Object) })
-    )
     expect(wrapper.text()).toContain('How does RAG work?')
     expect(wrapper.text()).toContain('RAG retrieves relevant evidence before answering.')
+    expect(wrapper.html()).toContain('<h2>Retrieval answer</h2>')
     expect(wrapper.text()).toContain('rag.md')
     expect(wrapper.text()).toContain('Chunk #2')
+    expect(wrapper.text()).toContain('Fork checkpoint')
+    expect(wrapper.text()).toContain('Interrupt')
   })
 
   it('creates a mentor session before sending the first message', async () => {
@@ -367,7 +290,5 @@ describe('ChapterStudyPage', () => {
       })
     )
     expect(wrapper.text()).toContain('RAG retrieves relevant evidence before answering.')
-    expect(wrapper.text()).toContain('rag.md')
-    expect(wrapper.text()).toContain('Chunk #2')
   })
 })

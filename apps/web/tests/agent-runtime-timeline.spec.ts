@@ -283,27 +283,24 @@ describe('ChapterPage agent runtime timeline', () => {
     })
   })
 
-  it('renders chapter mentor and tutor runtime runs', async () => {
+  it('does not render chapter runtime diagnostics in the chat learning page', async () => {
     const wrapper = mountChapterPage()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Chapter runtime')
-    expect(wrapper.text()).toContain('L2 Mentor')
-    expect(wrapper.text()).toContain('L3 Tutor')
-    expect(wrapper.text()).toContain('Chapter mentor state refreshed.')
-    expect(wrapper.text()).toContain('retrieve_evidence')
+    expect(wrapper.text()).toContain('AI Mentor')
+    expect(wrapper.text()).toContain('Sessions')
+    expect(wrapper.text()).not.toContain('Chapter runtime')
+    expect(wrapper.text()).not.toContain('L2 Mentor')
+    expect(wrapper.text()).not.toContain('L3 Tutor')
+    expect(wrapper.text()).not.toContain('retrieve_evidence')
   })
 
-  it('expands a chapter runtime row with operational details', async () => {
+  it('does not expose expandable runtime rows in the chapter chat page', async () => {
     const wrapper = mountChapterPage()
     await flushPromises()
 
-    const runtimeButton = wrapper.get('[data-testid="chapter-runtime-row-button"]')
-    await runtimeButton.trigger('click')
-
-    expect(runtimeButton.attributes('aria-expanded')).toBe('true')
-    expect(wrapper.text()).toContain('thread-runtime-chapter')
-    expect(wrapper.text()).toContain('retrieve_evidence')
-    expect(wrapper.text()).toContain('Tokens')
+    expect(wrapper.find('[data-testid="chapter-runtime-row-button"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('thread-runtime-chapter')
+    expect(wrapper.text()).not.toContain('Tokens')
   })
 })
