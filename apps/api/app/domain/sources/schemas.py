@@ -19,6 +19,15 @@ class UploadPresignResponse(BaseModel):
     method: str = "PUT"
 
 
+class TextSourceCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    study_space_id: uuid.UUID
+    filename: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(default="text/markdown", min_length=1, max_length=120)
+    content: str = Field(min_length=1)
+
+
 class SourceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

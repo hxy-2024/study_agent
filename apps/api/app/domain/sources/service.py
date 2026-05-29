@@ -5,8 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Source, SourceChunk, SourceStatus, StudySpace
-from app.domain.sources.schemas import UploadPresignRequest
-from app.infrastructure.storage import create_presigned_put_url
+from app.domain.sources.schemas import TextSourceCreateRequest, UploadPresignRequest
+from app.infrastructure.storage import TextSourceWriter, create_presigned_put_url
 
 SUPPORTED_CONTENT_TYPES = {
     "application/pdf",
@@ -15,6 +15,7 @@ SUPPORTED_CONTENT_TYPES = {
     "text/plain",
     "text/markdown",
 }
+TEXT_CREATE_CONTENT_TYPES = {"text/plain", "text/markdown"}
 
 
 def validate_content_type(content_type: str) -> None:
@@ -69,6 +70,35 @@ async def create_upload_request(
     await session.refresh(source)
     upload_url = create_presigned_put_url(object_key=object_key, content_type=payload.content_type)
     return source, upload_url
+
+
+async def create_text_source(
+    session: AsyncSession,
+    payload: TextSourceCreateRequest,
+    tenant_id: uuid.UUID,
+    writer: TextSourceWriter,
+) -> Source:
+    if payload.content_type not in TEXT_CREATE_CONTENT_TYPES:
+        raise ValueError("Pasted sources support only text/plain and text/markdown")
+    await ensure_study_space_in_tenant(session, payload.study_space_id, tenant_id)
+    object_key = build_object_key(tenant_id, payload.study_space_id, payload.filename)
+    await writer.write_text(
+        object_key=object_key,
+        content=payload.content,
+        content_type=payload.content_type,
+    )
+    source = Source(
+        tenant_id=tenant_id,
+        study_space_id=payload.study_space_id,
+        filename=payload.filename,
+        content_type=payload.content_type,
+        object_key=object_key,
+        status=SourceStatus.uploaded,
+    )
+    session.add(source)
+    await session.commit()
+    await session.refresh(source)
+    return source
 
 
 async def get_source_for_tenant(

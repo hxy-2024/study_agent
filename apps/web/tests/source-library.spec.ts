@@ -426,6 +426,50 @@ describe('StudySpacePage source library', () => {
     await flushPromises()
   })
 
+  it('creates a pasted markdown source and refreshes the source list', async () => {
+    fetchMock.mockImplementation((url: string, options?: { method?: string }) => {
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/routes')) {
+        return Promise.resolve({ routes: [] })
+      }
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/agent-runs?limit=8')) {
+        return Promise.resolve({ runs: [] })
+      }
+      if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/sources')) {
+        return Promise.resolve({ sources: [] })
+      }
+      if (url.endsWith('/sources/from-text') && options?.method === 'POST') {
+        return Promise.resolve({ source: sourceItem({ filename: 'pasted.md', status: 'uploaded' }) })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="pasted-source-filename"]').setValue('pasted.md')
+    await wrapper.find('[data-testid="pasted-source-content"]').setValue('# Pasted notes')
+    await wrapper.find('[data-testid="add-pasted-source"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/api/v1/sources/from-text', {
+      method: 'POST',
+      headers: {
+        'X-User-Id': '00000000-0000-0000-0000-000000000002',
+        'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
+      },
+      body: {
+        study_space_id: '00000000-0000-0000-0000-000000000101',
+        filename: 'pasted.md',
+        content_type: 'text/markdown',
+        content: '# Pasted notes'
+      }
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/study-spaces/00000000-0000-0000-0000-000000000101/sources',
+      expect.any(Object)
+    )
+  })
+
   it('keeps the selected file after upload failure', async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url.endsWith('/study-spaces/00000000-0000-0000-0000-000000000101/routes')) {
