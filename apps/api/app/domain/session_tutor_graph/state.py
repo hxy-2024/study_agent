@@ -26,6 +26,12 @@ class AnswerCitation(TypedDict):
     score: float
 
 
+class WebSearchResult(TypedDict):
+    title: str
+    url: str
+    snippet: str
+
+
 class MessageCitationPayload(TypedDict):
     id: str
     message_id: str
@@ -60,6 +66,8 @@ class SessionTutorGraphState(TypedDict):
     assistant_message_id: NotRequired[str]
     retrieved_chunks: NotRequired[list[RetrievedEvidence]]
     source_filenames: NotRequired[dict[str, str]]
+    web_search_results: NotRequired[list[WebSearchResult]]
+    web_search_error: NotRequired[str]
     answer: NotRequired[str]
     citations: NotRequired[list[AnswerCitation]]
     assistant_response: NotRequired[MessageResponsePayload]

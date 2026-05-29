@@ -152,6 +152,7 @@ def test_build_chapter_detail_returns_next_chapter_id() -> None:
     assert detail.route.title == "Route"
     assert detail.study_space.name == "Linear Algebra"
     assert detail.next_chapter_id == next_chapter.id
+    assert [chapter.id for chapter in detail.chapters] == [current.id, next_chapter.id]
 
 
 @pytest.mark.anyio

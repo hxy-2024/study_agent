@@ -12,16 +12,20 @@ const settings = reactive({
 })
 
 const navigationItems = [
-  { label: 'Spaces', to: '/', enabled: true },
+  { label: 'Home', to: '/', enabled: true },
   { label: 'Library', to: '/', enabled: false },
   { label: 'Reviews', to: '/', enabled: false },
   { label: 'Progress', to: '/', enabled: false },
   { label: 'Settings', to: '/', enabled: true, action: 'settings' }
 ]
 
-function openNavigationItem(item: { action?: string }) {
+async function openNavigationItem(item: { action?: string; enabled?: boolean; to?: string }) {
+  if (!item.enabled) return
+
   if (item.action === 'settings') {
     settingsOpen.value = true
+  } else if (item.to) {
+    await navigateTo(item.to)
   }
   drawerOpen.value = false
 }
@@ -38,9 +42,11 @@ function openNavigationItem(item: { action?: string }) {
           :aria-expanded="drawerOpen"
           @click="drawerOpen = true"
         >
-          <span />
-          <span />
-          <span />
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 7h14" />
+            <path d="M5 12h14" />
+            <path d="M5 17h14" />
+          </svg>
         </button>
 
         <NuxtLink class="brand-mark" to="/">
@@ -73,19 +79,17 @@ function openNavigationItem(item: { action?: string }) {
         </div>
 
         <nav class="drawer-nav">
-          <component
-            :is="item.enabled && !item.action ? 'NuxtLink' : 'button'"
+          <button
             v-for="item in navigationItems"
             :key="item.label"
             class="nav-link"
             :class="{ disabled: !item.enabled }"
-            :to="item.enabled && !item.action ? item.to : undefined"
             :aria-disabled="!item.enabled"
             type="button"
-            @click="item.enabled ? openNavigationItem(item) : undefined"
+            @click="openNavigationItem(item)"
           >
             {{ item.label }}
-          </component>
+          </button>
         </nav>
       </aside>
     </div>

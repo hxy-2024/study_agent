@@ -10,6 +10,7 @@ from app.db.models import (
     PlannerActionStatus,
     SpacePlannerState,
     StudySpace,
+    StudySpaceStatus,
 )
 from app.domain.dashboard.schemas import (
     DashboardAction,
@@ -51,6 +52,7 @@ async def get_dashboard_summary(
         .where(
             StudySpace.tenant_id == tenant_id,
             StudySpace.owner_user_id == user_id,
+            StudySpace.status != StudySpaceStatus.archived,
         )
         .order_by(StudySpace.created_at.desc(), StudySpace.id)
     )

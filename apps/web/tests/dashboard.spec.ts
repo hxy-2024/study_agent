@@ -125,6 +125,50 @@ describe('DashboardPage', () => {
     expect(wrapper.find('a[href="/chapters/chapter-1"]').exists()).toBe(true)
   })
 
+  it('falls back to route drafts when active chapters are not listed yet', async () => {
+    storeState.spaces = [
+      {
+        id: 'space-1',
+        name: 'Linear Algebra',
+        goal: 'Master eigenvectors and matrices',
+        status: 'active',
+        target_days: 21
+      }
+    ]
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/study-spaces/space-1/chapters')) {
+        return Promise.resolve({ chapters: [] })
+      }
+      if (url.endsWith('/study-spaces/space-1/routes')) {
+        return Promise.resolve({
+          routes: [
+            {
+              route: {
+                id: 'route-1',
+                status: 'draft'
+              },
+              chapters: [
+                {
+                  id: 'chapter-draft-1',
+                  status: 'active',
+                  order_index: 1
+                }
+              ]
+            }
+          ]
+        })
+      }
+      return Promise.reject(new Error('Dashboard not ready'))
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Continue study')
+    expect(wrapper.find('.space-row a[href="/chapters/chapter-draft-1"]').exists()).toBe(true)
+  })
+
   it('filters spaces by search text', async () => {
     storeState.spaces = [
       {

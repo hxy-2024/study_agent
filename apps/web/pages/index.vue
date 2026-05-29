@@ -43,11 +43,22 @@ interface ChapterListResponse {
   }>
 }
 
+interface RoutesListResponse {
+  routes?: Array<{
+    chapters?: Array<{
+      id: string
+      status: string
+      order_index: number
+    }>
+  }>
+}
+
 const dashboard = ref<DashboardSummary | null>(null)
 const dashboardLoading = ref(false)
 const spaceSearch = ref('')
 const selectedSpaceId = ref('')
 const continueChapterBySpace = ref<Record<string, string>>({})
+const deletingSpaceId = ref('')
 
 const fallbackSpaces = computed(() => store.spaces.filter(space => space.status !== 'archived'))
 const activeSpaces = computed(() => dashboard.value?.spaces ?? fallbackSpaces.value)
@@ -68,13 +79,14 @@ const supervisionRefreshLabel = computed(() => {
   return `${supervisionRefreshCount.value} ${supervisionRefreshCount.value === 1 ? 'supervision refresh' : 'supervision refreshes'}`
 })
 const recentAgentRuns = computed(() => dashboard.value?.recent_agent_runs ?? [])
-const continueChapterId = computed(() => {
-  if (!currentSpace.value) return null
+function getContinueChapterId(spaceId: string) {
   const pendingChapterId = dashboard.value?.pending_actions.find(action => {
-    return action.study_space_id === currentSpace.value?.id && Boolean(action.chapter_id)
+    return action.study_space_id === spaceId && Boolean(action.chapter_id)
   })?.chapter_id ?? null
-  return pendingChapterId ?? continueChapterBySpace.value[currentSpace.value.id] ?? null
-})
+  return pendingChapterId ?? continueChapterBySpace.value[spaceId] ?? null
+}
+
+const continueChapterId = computed(() => currentSpace.value ? getContinueChapterId(currentSpace.value.id) : null)
 const continueHref = computed(() => continueChapterId.value ? `/chapters/${continueChapterId.value}` : '/spaces/new')
 const continueLabel = computed(() => continueChapterId.value ? 'Continue study' : 'Prepare route')
 const today = new Date()
@@ -89,6 +101,25 @@ function selectSpace(spaceId: string) {
   selectedSpaceId.value = spaceId
 }
 
+async function archiveSpace(spaceId: string, spaceName: string) {
+  if (deletingSpaceId.value) return
+  if (!window.confirm(`Delete "${spaceName}"? This will archive the space.`)) return
+
+  deletingSpaceId.value = spaceId
+  try {
+    await $fetch(`${config.public.apiBaseUrl}/study-spaces/${spaceId}`, {
+      method: 'DELETE',
+      headers: {
+        'X-User-Id': '00000000-0000-0000-0000-000000000002',
+        'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
+      }
+    })
+    await Promise.all([store.loadSpaces(), loadDashboard()])
+  } finally {
+    deletingSpaceId.value = ''
+  }
+}
+
 async function loadDashboard() {
   dashboardLoading.value = true
   try {
@@ -101,8 +132,10 @@ async function loadDashboard() {
 }
 
 async function loadContinueChapter(spaceId: string) {
-  if (continueChapterBySpace.value[spaceId]) return
-  if (dashboard.value?.pending_actions.some(action => action.study_space_id === spaceId && action.chapter_id)) return
+  if (getContinueChapterId(spaceId)) return
+  if (Object.prototype.hasOwnProperty.call(continueChapterBySpace.value, spaceId)) return
+
+  let nextChapterId: string | null = null
   try {
     const response = await $fetch<ChapterListResponse>(`${config.public.apiBaseUrl}/study-spaces/${spaceId}/chapters`, {
       headers: {
@@ -112,17 +145,35 @@ async function loadContinueChapter(spaceId: string) {
     })
     const chapters = response.chapters ?? []
     const nextChapter = chapters.find(chapter => chapter.status !== 'completed') ?? chapters[0]
-    if (nextChapter) {
-      continueChapterBySpace.value = {
-        ...continueChapterBySpace.value,
-        [spaceId]: nextChapter.id
-      }
-    }
+    nextChapterId = nextChapter?.id ?? null
   } catch {
-    continueChapterBySpace.value = {
-      ...continueChapterBySpace.value,
-      [spaceId]: ''
+    nextChapterId = null
+  }
+
+  if (!nextChapterId) {
+    try {
+      const routesResponse = await $fetch<RoutesListResponse>(`${config.public.apiBaseUrl}/study-spaces/${spaceId}/routes`, {
+        headers: {
+          'X-User-Id': '00000000-0000-0000-0000-000000000002',
+          'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
+        }
+      })
+      for (const route of routesResponse.routes ?? []) {
+        const chapters = route.chapters ?? []
+        const nextChapter = chapters.find(chapter => chapter.status !== 'completed') ?? chapters[0]
+        if (nextChapter) {
+          nextChapterId = nextChapter.id
+          break
+        }
+      }
+    } catch {
+      nextChapterId = null
     }
+  }
+
+  continueChapterBySpace.value = {
+    ...continueChapterBySpace.value,
+    [spaceId]: nextChapterId ?? ''
   }
 }
 
@@ -162,20 +213,42 @@ watch(
         </section>
 
         <div v-else class="space-list">
-          <button
+          <article
             v-for="space in visibleSpaces"
             :key="space.id"
             class="space-row"
             :class="{ active: currentSpace?.id === space.id }"
-            type="button"
-            @click="selectSpace(space.id)"
           >
-            <span>
+            <button class="space-row-main" type="button" @click="selectSpace(space.id)">
               <strong>{{ space.name }}</strong>
               <small>{{ space.goal }}</small>
-            </span>
-            <span class="status-badge">{{ space.status }}</span>
-          </button>
+            </button>
+            <div class="space-row-actions">
+              <NuxtLink
+                v-if="getContinueChapterId(space.id)"
+                class="space-row-continue"
+                :to="`/chapters/${getContinueChapterId(space.id)}`"
+              >
+                Continue study
+              </NuxtLink>
+              <button
+                class="space-row-delete"
+                type="button"
+                :disabled="deletingSpaceId === space.id"
+                :aria-label="`Delete ${space.name}`"
+                title="Delete space"
+                @click="archiveSpace(space.id, space.name)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 7h16" />
+                  <path d="M9 7V5h6v2" />
+                  <path d="M8 7l1 12h6l1-12" />
+                  <path d="M10 11v4" />
+                  <path d="M14 11v4" />
+                </svg>
+              </button>
+            </div>
+          </article>
           <p v-if="!visibleSpaces.length" class="empty-state">No spaces match this search.</p>
         </div>
       </aside>
@@ -345,17 +418,16 @@ watch(
 }
 
 .space-row {
+  position: relative;
   width: 100%;
   border: 1px solid var(--color-border);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.88);
   color: var(--color-text);
-  cursor: pointer;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
-  padding: 12px;
-  text-align: left;
+  padding: 12px 48px 12px 12px;
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
@@ -372,9 +444,88 @@ watch(
   overflow-wrap: anywhere;
 }
 
+.space-row-main {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: block;
+  width: 100%;
+  padding: 0;
+  text-align: left;
+}
+
 .space-row small {
   color: var(--color-muted);
   margin-top: 4px;
+}
+
+.space-row-actions {
+  align-items: end;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.space-row-continue {
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.space-row-continue:hover {
+  text-decoration: underline;
+}
+
+.space-row-delete {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--color-error);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.space-row-delete svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.space-row:hover .space-row-delete,
+.space-row:focus-within .space-row-delete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.space-row-delete:hover {
+  border-color: rgba(220, 38, 38, 0.25);
+  background: #fff5f5;
+  box-shadow: 0 8px 20px rgba(220, 38, 38, 0.12);
+  transform: translateY(-1px);
+}
+
+@media (hover: none) {
+  .space-row-delete {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .mentor-panel {
@@ -479,6 +630,120 @@ watch(
   .dashboard-empty {
     align-items: stretch;
     flex-direction: column;
+  }
+}
+
+/* Taste pass: GitHub-like dashboard density with quiet dividers instead of card piles. */
+.dashboard-grid {
+  grid-template-columns: minmax(310px, 360px) minmax(0, 1fr) minmax(240px, 286px);
+  gap: 0;
+  min-height: calc(100dvh - 92px);
+  border-top: 1px solid rgba(161, 211, 202, 0.5);
+}
+
+.spaces-column {
+  border-right: 1px solid rgba(161, 211, 202, 0.58);
+  padding: 14px 14px 0 0;
+}
+
+.dashboard-main {
+  padding: 14px 20px;
+}
+
+.calendar-column {
+  border-left: 1px solid rgba(161, 211, 202, 0.58);
+  padding: 14px 0 0 14px;
+}
+
+.dashboard-heading h1 {
+  font-size: clamp(28px, 3vw, 42px);
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.continue-panel,
+.dashboard-stats .panel,
+.calendar-panel {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.continue-panel {
+  border: 0;
+  border-top: 1px solid rgba(161, 211, 202, 0.55);
+  border-bottom: 1px solid rgba(161, 211, 202, 0.55);
+  background: linear-gradient(90deg, rgba(236, 253, 245, 0.65), rgba(255, 255, 255, 0.52));
+}
+
+.dashboard-stats {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.dashboard-stats .panel {
+  border: 0;
+  border-top: 1px solid rgba(161, 211, 202, 0.55);
+  background: transparent;
+}
+
+.space-list {
+  gap: 0;
+  max-height: calc(100dvh - 152px);
+  padding-right: 0;
+}
+
+.space-row {
+  border: 0;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid rgba(161, 211, 202, 0.36);
+  border-radius: 0;
+  background: transparent;
+  padding: 12px 42px 12px 10px;
+}
+
+.space-row:hover,
+.space-row.active {
+  border-left-color: #14b8a6;
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.6);
+  transform: none;
+}
+
+.space-row-delete {
+  top: 10px;
+  right: 8px;
+  border-radius: 7px;
+}
+
+.space-row-continue {
+  border-bottom: 1px solid currentColor;
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.calendar-panel {
+  aspect-ratio: 1;
+  border: 1px solid rgba(161, 211, 202, 0.58);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+@media (max-width: 1000px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .spaces-column,
+  .calendar-column {
+    border: 0;
+    padding: 0;
+  }
+
+  .dashboard-main {
+    padding-inline: 0;
+  }
+
+  .dashboard-stats {
+    grid-template-columns: 1fr;
   }
 }
 </style>

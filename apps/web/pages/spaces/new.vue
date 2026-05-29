@@ -796,4 +796,141 @@ async function confirmChapterDetails() {
     min-height: 82vh;
   }
 }
+
+/* Taste pass: compact production workflow, with dividers replacing nested cards. */
+.create-shell {
+  gap: 14px;
+}
+
+.create-header {
+  min-height: 58px;
+  align-items: center;
+  border-bottom: 1px solid rgba(161, 211, 202, 0.55);
+  padding-bottom: 12px;
+}
+
+.create-header h1 {
+  font-size: clamp(26px, 3vw, 40px);
+  letter-spacing: 0;
+}
+
+.back-link {
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.create-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: 0;
+}
+
+.form-stack {
+  border-right: 1px solid rgba(161, 211, 202, 0.58);
+  padding-right: 18px;
+}
+
+.form-panel {
+  border: 0;
+  border-bottom: 1px solid rgba(161, 211, 202, 0.5);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 18px 0;
+}
+
+.form-panel:first-child {
+  padding-top: 0;
+}
+
+.section-heading h2,
+.route-heading h2 {
+  font-size: 20px;
+}
+
+.upload-zone,
+.empty-route,
+.chunk-list article,
+.chapter-list,
+.chapter-detail {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.upload-zone {
+  background: rgba(236, 253, 245, 0.58);
+}
+
+.route-panel {
+  top: 70px;
+  border: 0;
+  border-radius: 0;
+  background: rgba(248, 253, 251, 0.86);
+  box-shadow: none;
+  padding: 0 0 0 18px;
+}
+
+.route-textarea {
+  min-height: 260px;
+}
+
+.route-list {
+  border-top: 1px solid rgba(161, 211, 202, 0.5);
+  padding-top: 12px;
+}
+
+.modal-backdrop {
+  background: rgba(15, 35, 32, 0.48);
+  backdrop-filter: blur(10px);
+}
+
+.modal-card {
+  border-radius: 10px;
+  box-shadow: 0 28px 90px rgba(15, 35, 32, 0.28);
+}
+
+.chapter-card {
+  width: min(1180px, 100%);
+  min-height: min(820px, 92vh);
+}
+
+.chapter-layout {
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+}
+
+.chapter-list,
+.chapter-detail {
+  background: rgba(248, 253, 251, 0.72);
+}
+
+.chapter-list button {
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+}
+
+.chapter-list button.active {
+  border-color: #14b8a6;
+}
+
+.chapter-detail {
+  min-height: 600px;
+}
+
+@media (max-width: 1000px) {
+  .create-layout {
+    gap: 18px;
+  }
+
+  .form-stack {
+    border-right: 0;
+    padding-right: 0;
+  }
+
+  .route-panel {
+    padding-left: 0;
+  }
+}
 </style>
