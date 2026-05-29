@@ -162,6 +162,8 @@ Endpoints:
 - `POST /api/v1/planner-actions/from-latest-state`
 - `POST /api/v1/planner-actions/from-runtime-signals`
 - `POST /api/v1/planner-actions/{action_id}/status`
+- `POST /api/v1/planner-actions/{action_id}/start-review`
+- `POST /api/v1/planner-actions/{action_id}/route-draft`
 
 Actions support `proposed`, `accepted`, `completed`, and `dismissed` states.
 They do not mutate learning routes automatically.
@@ -170,6 +172,17 @@ Runtime signal actions convert recent completed Session Tutor `learning_signals`
 into proposed `review_chapter` actions. They can be generated for an entire study
 space or for one chapter, skip duplicate active actions from the same agent run,
 and remain user-confirmed queue items.
+
+Review actions can start focused mentor sessions through the `start-review`
+endpoint. The endpoint marks the action `accepted`, stores the review session ID
+in the action payload, and is idempotent so repeated clicks reuse the same
+session instead of creating duplicates.
+
+Route adjustment actions can create draft routes through the `route-draft`
+endpoint. The endpoint clones the active route into a draft, applies a
+deterministic adjustment such as inserting a focused review chapter, and stores
+the draft route ID in the action payload. It never activates the draft; users
+must still confirm activation through the route activation endpoint.
 
 ## Runtime source ingestion
 

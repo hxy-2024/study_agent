@@ -120,6 +120,19 @@ interface PlannerAction {
   updated_at: string | null
 }
 
+interface PlannerActionExecutionResponse {
+  action: PlannerAction
+  session: {
+    id: string
+    chapter_id: string
+  }
+}
+
+interface PlannerActionRouteDraftResponse {
+  action: PlannerAction
+  route_draft: RouteWithChapters
+}
+
 interface AgentRunLearningSignal {
   kind: string
   [key: string]: unknown
@@ -189,7 +202,7 @@ const selectedSource = computed(() => sources.value.find(source => source.id ===
 const hasSelectedSource = computed(() => selectedSourceId.value !== null)
 const activeRoute = computed(() => routes.value.find(item => item.route.status === 'active') ?? null)
 const latestDraftRoute = computed(() => routes.value.find(item => item.route.status === 'draft') ?? null)
-const visibleRoute = computed(() => activeRoute.value ?? latestDraftRoute.value ?? null)
+const visibleRoute = computed(() => latestDraftRoute.value ?? activeRoute.value ?? null)
 const plannerNextChapter = computed(() => {
   if (!plannerState.value?.next_chapter_id || !visibleRoute.value) return null
   return visibleRoute.value.chapters.find(chapter => chapter.id === plannerState.value?.next_chapter_id) ?? null
@@ -541,6 +554,53 @@ async function updatePlannerAction(action: PlannerAction, status: string) {
   }
 }
 
+async function startReviewAction(action: PlannerAction) {
+  if (!action.chapter_id || action.action_type !== 'review_chapter') return
+
+  updatingPlannerActionId.value = action.id
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<PlannerActionExecutionResponse>(
+      `${config.public.apiBaseUrl}/planner-actions/${action.id}/start-review`,
+      {
+        method: 'POST',
+        headers: protectedHeaders()
+      }
+    )
+    plannerActions.value = plannerActions.value.map(item => (item.id === action.id ? response.action : item))
+    await navigateTo(`/chapters/${response.session.chapter_id}?session_id=${response.session.id}`)
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to start review.', error)
+  } finally {
+    updatingPlannerActionId.value = null
+  }
+}
+
+async function generateRouteDraftFromAction(action: PlannerAction) {
+  if (action.action_type !== 'route_adjustment') return
+
+  updatingPlannerActionId.value = action.id
+  errorMessage.value = ''
+  try {
+    const response = await $fetch<PlannerActionRouteDraftResponse>(
+      `${config.public.apiBaseUrl}/planner-actions/${action.id}/route-draft`,
+      {
+        method: 'POST',
+        headers: protectedHeaders()
+      }
+    )
+    plannerActions.value = plannerActions.value.map(item => (item.id === action.id ? response.action : item))
+    routes.value = [
+      response.route_draft,
+      ...routes.value.filter(item => item.route.id !== response.route_draft.route.id)
+    ]
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to generate route draft from action.', error)
+  } finally {
+    updatingPlannerActionId.value = null
+  }
+}
+
 async function generateRouteDraft() {
   generatingRoute.value = true
   errorMessage.value = ''
@@ -877,6 +937,26 @@ onMounted(() => {
                   @click="updatePlannerAction(action, 'accepted')"
                 >
                   Accept
+                </button>
+                <button
+                  v-if="action.action_type === 'review_chapter' && action.chapter_id && action.status !== 'completed' && action.status !== 'dismissed'"
+                  data-testid="start-review-action"
+                  type="button"
+                  class="primary-button"
+                  :disabled="updatingPlannerActionId === action.id"
+                  @click="startReviewAction(action)"
+                >
+                  Start review
+                </button>
+                <button
+                  v-if="action.action_type === 'route_adjustment' && action.status !== 'completed' && action.status !== 'dismissed'"
+                  data-testid="generate-route-draft-action"
+                  type="button"
+                  class="primary-button"
+                  :disabled="updatingPlannerActionId === action.id"
+                  @click="generateRouteDraftFromAction(action)"
+                >
+                  Generate draft
                 </button>
                 <button
                   v-if="action.status !== 'completed'"

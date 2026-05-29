@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -10,14 +10,25 @@ from app.db.models import (
     AgentRunStatus,
     AgentType,
     Chapter,
+    ChapterStatus,
+    LearningRoute,
+    LearningRouteStatus,
     PlannerAction,
     PlannerActionStatus,
     PlannerActionType,
     Session,
+    SessionStatus,
     SpacePlannerState,
     StudySpace,
 )
-from app.domain.planner_actions.schemas import PlannerActionListResponse, PlannerActionResponse
+from app.domain.planner_actions.schemas import (
+    PlannerActionExecutionResponse,
+    PlannerActionListResponse,
+    PlannerActionRouteDraftResponse,
+    PlannerActionResponse,
+)
+from app.domain.learning_routes.schemas import ChapterResponse, LearningRouteResponse, RouteWithChaptersResponse
+from app.domain.sessions.service import build_session_response
 
 
 def _enum_value(value: Any) -> str:
@@ -345,3 +356,352 @@ async def update_planner_action_status(
     await session.commit()
     await session.refresh(action)
     return planner_action_response(action)
+
+
+def _review_session_id_from_payload(payload: dict) -> uuid.UUID | None:
+    execution = payload.get("execution")
+    if not isinstance(execution, dict):
+        return None
+    raw_session_id = execution.get("review_session_id")
+    if not isinstance(raw_session_id, str):
+        return None
+    try:
+        return uuid.UUID(raw_session_id)
+    except ValueError:
+        return None
+
+
+async def _load_review_session(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    study_space_id: uuid.UUID,
+    chapter_id: uuid.UUID,
+    session_id: uuid.UUID,
+) -> Session | None:
+    return await session.scalar(
+        select(Session).where(
+            Session.id == session_id,
+            Session.tenant_id == tenant_id,
+            Session.study_space_id == study_space_id,
+            Session.chapter_id == chapter_id,
+        )
+    )
+
+
+def _route_response(route: LearningRoute) -> LearningRouteResponse:
+    return LearningRouteResponse(
+        id=route.id,
+        study_space_id=route.study_space_id,
+        version=route.version,
+        status=_enum_value(route.status),
+        title=route.title,
+        summary=route.summary,
+        generation_strategy=route.generation_strategy,
+        created_at=route.created_at,
+        activated_at=route.activated_at,
+    )
+
+
+def _chapter_response(chapter: Chapter) -> ChapterResponse:
+    return ChapterResponse(
+        id=chapter.id,
+        learning_route_id=chapter.learning_route_id,
+        order_index=chapter.order_index,
+        title=chapter.title,
+        goal=chapter.goal,
+        summary=chapter.summary,
+        estimated_days=chapter.estimated_days,
+        status=_enum_value(chapter.status),
+        source_chunk_refs=chapter.source_chunk_refs or [],
+    )
+
+
+def _route_with_chapters_response(route: LearningRoute, chapters: list[Chapter]) -> RouteWithChaptersResponse:
+    return RouteWithChaptersResponse(
+        route=_route_response(route),
+        chapters=[_chapter_response(chapter) for chapter in chapters],
+    )
+
+
+async def start_review_for_planner_action(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    action_id: uuid.UUID,
+) -> PlannerActionExecutionResponse:
+    action = await session.scalar(
+        select(PlannerAction).where(
+            PlannerAction.id == action_id,
+            PlannerAction.tenant_id == tenant_id,
+            PlannerAction.user_id == user_id,
+        )
+    )
+    if action is None:
+        raise ValueError("Planner action not found")
+    if action.action_type != PlannerActionType.review_chapter:
+        raise ValueError("Only review chapter actions can start a review session")
+    if action.chapter_id is None:
+        raise ValueError("Review action is missing a chapter")
+    if action.status == PlannerActionStatus.dismissed:
+        raise ValueError("Cannot start review for dismissed planner action")
+    if action.status == PlannerActionStatus.completed:
+        raise ValueError("Cannot start review for completed planner action")
+
+    payload = dict(action.payload or {})
+    existing_session_id = _review_session_id_from_payload(payload)
+    review_session = None
+    if existing_session_id is not None:
+        review_session = await _load_review_session(
+            session=session,
+            tenant_id=tenant_id,
+            study_space_id=action.study_space_id,
+            chapter_id=action.chapter_id,
+            session_id=existing_session_id,
+        )
+
+    if review_session is None:
+        review_session = Session(
+            tenant_id=tenant_id,
+            study_space_id=action.study_space_id,
+            chapter_id=action.chapter_id,
+            title=f"Review: {action.title}"[:200],
+            status=SessionStatus.active,
+            summary=action.rationale,
+        )
+        session.add(review_session)
+        await session.flush()
+
+    payload["execution"] = {
+        **(payload.get("execution") if isinstance(payload.get("execution"), dict) else {}),
+        "review_session_id": str(review_session.id),
+        "started_from_action_id": str(action.id),
+    }
+    action.payload = payload
+    action.status = PlannerActionStatus.accepted
+    action.updated_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(action)
+    await session.refresh(review_session)
+    return PlannerActionExecutionResponse(
+        action=planner_action_response(action),
+        session=build_session_response(review_session),
+    )
+
+
+def _route_draft_id_from_payload(payload: dict) -> uuid.UUID | None:
+    execution = payload.get("execution")
+    if not isinstance(execution, dict):
+        return None
+    raw_route_id = execution.get("route_draft_id")
+    if not isinstance(raw_route_id, str):
+        return None
+    try:
+        return uuid.UUID(raw_route_id)
+    except ValueError:
+        return None
+
+
+async def _load_route_with_chapters(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    study_space_id: uuid.UUID,
+    route_id: uuid.UUID,
+) -> tuple[LearningRoute, list[Chapter]] | None:
+    route = await session.scalar(
+        select(LearningRoute).where(
+            LearningRoute.id == route_id,
+            LearningRoute.tenant_id == tenant_id,
+            LearningRoute.study_space_id == study_space_id,
+        )
+    )
+    if route is None:
+        return None
+    rows = await session.scalars(
+        select(Chapter)
+        .where(
+            Chapter.tenant_id == tenant_id,
+            Chapter.study_space_id == study_space_id,
+            Chapter.learning_route_id == route.id,
+        )
+        .order_by(Chapter.order_index)
+    )
+    return route, list(rows)
+
+
+async def _load_active_route_with_chapters(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    study_space_id: uuid.UUID,
+) -> tuple[LearningRoute, list[Chapter]]:
+    route = await session.scalar(
+        select(LearningRoute).where(
+            LearningRoute.tenant_id == tenant_id,
+            LearningRoute.study_space_id == study_space_id,
+            LearningRoute.status == LearningRouteStatus.active,
+        )
+    )
+    if route is None:
+        raise ValueError("Active route not found")
+    rows = await session.scalars(
+        select(Chapter)
+        .where(
+            Chapter.tenant_id == tenant_id,
+            Chapter.study_space_id == study_space_id,
+            Chapter.learning_route_id == route.id,
+        )
+        .order_by(Chapter.order_index)
+    )
+    return route, list(rows)
+
+
+async def _next_route_version(session: AsyncSession, study_space_id: uuid.UUID) -> int:
+    current = await session.scalar(
+        select(func.max(LearningRoute.version)).where(LearningRoute.study_space_id == study_space_id)
+    )
+    return int(current or 0) + 1
+
+
+def _clone_chapter(chapter: Chapter, route: LearningRoute, order_index: int) -> Chapter:
+    return Chapter(
+        tenant_id=chapter.tenant_id,
+        study_space_id=chapter.study_space_id,
+        learning_route_id=route.id,
+        order_index=order_index,
+        title=chapter.title,
+        goal=chapter.goal,
+        summary=chapter.summary,
+        estimated_days=chapter.estimated_days,
+        status=ChapterStatus.not_started,
+        source_chunk_refs=chapter.source_chunk_refs or [],
+    )
+
+
+def _review_chapter_from_action(action: PlannerAction, target: Chapter, route: LearningRoute, order_index: int) -> Chapter:
+    return Chapter(
+        tenant_id=target.tenant_id,
+        study_space_id=target.study_space_id,
+        learning_route_id=route.id,
+        order_index=order_index,
+        title=f"Focused review: {target.title}"[:220],
+        goal="Review weak points before continuing.",
+        summary=action.rationale,
+        estimated_days=1,
+        status=ChapterStatus.not_started,
+        source_chunk_refs=target.source_chunk_refs or [],
+    )
+
+
+def _extension_chapter_from_action(action: PlannerAction, source: Chapter | None, route: LearningRoute, order_index: int) -> Chapter:
+    title_suffix = source.title if source is not None else "next steps"
+    return Chapter(
+        tenant_id=route.tenant_id,
+        study_space_id=route.study_space_id,
+        learning_route_id=route.id,
+        order_index=order_index,
+        title=f"Advanced follow-up: {title_suffix}"[:220],
+        goal="Extend the route with a deeper applied practice step.",
+        summary=action.rationale,
+        estimated_days=2,
+        status=ChapterStatus.not_started,
+        source_chunk_refs=(source.source_chunk_refs if source is not None else []) or [],
+    )
+
+
+def _build_adjusted_chapters(action: PlannerAction, draft_route: LearningRoute, active_chapters: list[Chapter]) -> list[Chapter]:
+    kind = (action.payload or {}).get("kind")
+    target_chapter_id = action.chapter_id
+    draft_chapters: list[Chapter] = []
+    order_index = 1
+    inserted_review = False
+    for chapter in sorted(active_chapters, key=lambda item: item.order_index):
+        draft_chapters.append(_clone_chapter(chapter, draft_route, order_index))
+        order_index += 1
+        if kind == "insert_review" and target_chapter_id == chapter.id:
+            draft_chapters.append(_review_chapter_from_action(action, chapter, draft_route, order_index))
+            order_index += 1
+            inserted_review = True
+
+    if kind == "insert_review" and not inserted_review:
+        raise ValueError("Route adjustment target chapter not found")
+    if kind == "extend_route":
+        source = sorted(active_chapters, key=lambda item: item.order_index)[-1] if active_chapters else None
+        draft_chapters.append(_extension_chapter_from_action(action, source, draft_route, order_index))
+    if kind not in {"insert_review", "extend_route"}:
+        raise ValueError("Unsupported route adjustment kind")
+    return draft_chapters
+
+
+async def start_route_draft_for_planner_action(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    action_id: uuid.UUID,
+) -> PlannerActionRouteDraftResponse:
+    action = await session.scalar(
+        select(PlannerAction).where(
+            PlannerAction.id == action_id,
+            PlannerAction.tenant_id == tenant_id,
+            PlannerAction.user_id == user_id,
+        )
+    )
+    if action is None:
+        raise ValueError("Planner action not found")
+    if action.action_type != PlannerActionType.route_adjustment:
+        raise ValueError("Only route adjustment actions can create route drafts")
+    if action.status == PlannerActionStatus.dismissed:
+        raise ValueError("Cannot create route draft for dismissed planner action")
+    if action.status == PlannerActionStatus.completed:
+        raise ValueError("Cannot create route draft for completed planner action")
+
+    payload = dict(action.payload or {})
+    existing_route_id = _route_draft_id_from_payload(payload)
+    route_with_chapters = None
+    if existing_route_id is not None:
+        route_with_chapters = await _load_route_with_chapters(
+            session=session,
+            tenant_id=tenant_id,
+            study_space_id=action.study_space_id,
+            route_id=existing_route_id,
+        )
+
+    if route_with_chapters is None:
+        active_route, active_chapters = await _load_active_route_with_chapters(
+            session=session,
+            tenant_id=tenant_id,
+            study_space_id=action.study_space_id,
+        )
+        draft_route = LearningRoute(
+            tenant_id=tenant_id,
+            study_space_id=action.study_space_id,
+            version=await _next_route_version(session, action.study_space_id),
+            status=LearningRouteStatus.draft,
+            title=f"Planner draft: {action.title}"[:220],
+            summary=f"{active_route.title}: {action.rationale}",
+            generation_strategy=f"planner_action:{(payload.get('kind') or 'route_adjustment')}",
+        )
+        session.add(draft_route)
+        await session.flush()
+        draft_chapters = _build_adjusted_chapters(action, draft_route, active_chapters)
+        for chapter in draft_chapters:
+            session.add(chapter)
+        await session.flush()
+        route_with_chapters = (draft_route, draft_chapters)
+
+    draft_route, draft_chapters = route_with_chapters
+    payload["execution"] = {
+        **(payload.get("execution") if isinstance(payload.get("execution"), dict) else {}),
+        "route_draft_id": str(draft_route.id),
+        "started_from_action_id": str(action.id),
+    }
+    action.payload = payload
+    action.status = PlannerActionStatus.accepted
+    action.updated_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(action)
+    await session.refresh(draft_route)
+    for chapter in draft_chapters:
+        await session.refresh(chapter)
+    return PlannerActionRouteDraftResponse(
+        action=planner_action_response(action),
+        route_draft=_route_with_chapters_response(draft_route, draft_chapters),
+    )
