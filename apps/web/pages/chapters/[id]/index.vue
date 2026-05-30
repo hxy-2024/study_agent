@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 interface ChapterStudyChapter {
   id: string
@@ -114,6 +114,7 @@ const mentorSession = ref<MentorSession | null>(null)
 const mentorMessages = ref<MentorMessage[]>([])
 const annotations = ref<ChapterAnnotation[]>([])
 const mastery = ref<MasteryRecord | null>(null)
+const chatThreadRef = ref<HTMLElement | null>(null)
 
 const loading = ref(false)
 const loadingMentor = ref(false)
@@ -125,7 +126,10 @@ const generatingQuiz = ref(false)
 const deletingSessionId = ref<string | null>(null)
 const chapterRailCollapsed = ref(false)
 const webSearchEnabled = ref(false)
-const sessionMenuSession = ref<MentorSession | null>(null)
+const renameSessionTarget = ref<MentorSession | null>(null)
+const renameSessionTitle = ref('')
+const noteComposerOpen = ref(false)
+const selectedNote = ref<ChapterAnnotation | null>(null)
 
 const mentorQuestion = ref('')
 const noteDraft = ref('')
@@ -163,6 +167,36 @@ function appendBackendMessage(base: string, error: unknown) {
 
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError'
+}
+
+function scrollChatToLatest() {
+  void nextTick(() => {
+    const run = () => {
+      const thread = chatThreadRef.value
+      if (!thread) return
+      thread.scrollTop = thread.scrollHeight
+    }
+    if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+      window.requestAnimationFrame(run)
+    } else {
+      run()
+    }
+  })
+}
+
+function noteContent(note: ChapterAnnotation) {
+  return note.content?.trim() || 'Untitled note'
+}
+
+function notePreview(note: ChapterAnnotation) {
+  const content = noteContent(note).replace(/\s+/g, ' ')
+  return content.length > 84 ? `${content.slice(0, 84)}...` : content
+}
+
+function noteDate(note: ChapterAnnotation) {
+  const value = note.updated_at || note.created_at
+  if (!value) return ''
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(value))
 }
 
 function normalizeSessions(response: MentorSession[] | { sessions?: MentorSession[] }) {
@@ -292,6 +326,7 @@ async function createNote() {
     )
     annotations.value = [response.annotation, ...annotations.value]
     noteDraft.value = ''
+    noteComposerOpen.value = false
   } catch (error) {
     errorMessage.value = appendBackendMessage('Failed to save note.', error)
   } finally {
@@ -307,9 +342,27 @@ async function deleteAnnotation(annotation: ChapterAnnotation) {
       headers: protectedHeaders()
     })
     annotations.value = annotations.value.filter(item => item.id !== annotation.id)
+    if (selectedNote.value?.id === annotation.id) selectedNote.value = null
   } catch (error) {
     errorMessage.value = appendBackendMessage('Failed to delete annotation.', error)
   }
+}
+
+function openNoteComposer() {
+  noteComposerOpen.value = true
+}
+
+function closeNoteComposer() {
+  if (savingNote.value) return
+  noteComposerOpen.value = false
+}
+
+function openNoteDetail(note: ChapterAnnotation) {
+  selectedNote.value = note
+}
+
+function closeNoteDetail() {
+  selectedNote.value = null
 }
 
 async function loadMastery() {
@@ -330,6 +383,7 @@ async function loadMentorMessages(sessionId: string) {
     { headers: protectedHeaders() }
   )
   mentorMessages.value = normalizeMessages(response)
+  scrollChatToLatest()
 }
 
 async function loadMentorSession() {
@@ -341,12 +395,17 @@ async function loadMentorSession() {
       { headers: protectedHeaders() }
     )
     mentorSessions.value = normalizeSessions(response)
+    if (!mentorSessions.value.length) {
+      await createMentorSession()
+      return
+    }
     const selectedSessionId = preferredSessionId()
     mentorSession.value = mentorSessions.value.find(session => session.id === selectedSessionId) ?? mentorSessions.value[0] ?? null
     if (mentorSession.value) {
       await loadMentorMessages(mentorSession.value.id)
     } else {
       mentorMessages.value = []
+      scrollChatToLatest()
     }
   } catch (error) {
     mentorErrorMessage.value = appendBackendMessage('Failed to load mentor session.', error)
@@ -356,7 +415,6 @@ async function loadMentorSession() {
 }
 
 async function selectMentorSession(session: MentorSession) {
-  sessionMenuSession.value = null
   mentorSession.value = session
   await loadMentorMessages(session.id)
 }
@@ -377,6 +435,7 @@ async function createMentorSession() {
   mentorSession.value = session
   mentorSessions.value = [session, ...mentorSessions.value.filter(existing => existing.id !== session.id)]
   mentorMessages.value = []
+  scrollChatToLatest()
   return session
 }
 
@@ -385,18 +444,21 @@ async function createNewSession() {
   return createMentorSession()
 }
 
-function openSessionMenu(session: MentorSession) {
-  sessionMenuSession.value = session
+function openRenameSessionModal(session: MentorSession) {
+  renameSessionTarget.value = session
+  renameSessionTitle.value = displayTitle(session.title) || 'Chapter session'
 }
 
-function closeSessionMenu() {
-  sessionMenuSession.value = null
+function closeRenameSessionModal() {
+  renameSessionTarget.value = null
+  renameSessionTitle.value = ''
 }
 
-async function renameMentorSession(session: MentorSession) {
+async function renameMentorSession() {
+  const session = renameSessionTarget.value
+  if (!session) return
   const currentTitle = displayTitle(session.title) || 'Chapter session'
-  const nextTitle = prompt('Rename session', currentTitle)?.trim()
-  sessionMenuSession.value = null
+  const nextTitle = renameSessionTitle.value.trim()
   if (!nextTitle || nextTitle === currentTitle) return
 
   mentorErrorMessage.value = ''
@@ -415,13 +477,13 @@ async function renameMentorSession(session: MentorSession) {
     if (mentorSession.value?.id === renamed.id) {
       mentorSession.value = { ...mentorSession.value, ...renamed }
     }
+    closeRenameSessionModal()
   } catch (error) {
     mentorErrorMessage.value = appendBackendMessage('Failed to rename session.', error)
   }
 }
 
 async function deleteMentorSession(session: MentorSession) {
-  closeSessionMenu()
   if (!confirm('Delete this session and its saved messages?')) return
 
   deletingSessionId.value = session.id
@@ -441,6 +503,7 @@ async function deleteMentorSession(session: MentorSession) {
         await loadMentorMessages(nextSession.id)
       } else {
         mentorMessages.value = []
+        scrollChatToLatest()
       }
     }
   } catch (error) {
@@ -461,6 +524,7 @@ async function askMentor() {
   try {
     const session = await ensureMentorSession()
     mentorMessages.value = [...mentorMessages.value, localUserMessage(session.id, question)]
+    scrollChatToLatest()
     mentorQuestion.value = ''
     const answer = await $fetch<MentorMessage>(
       `${config.public.apiBaseUrl}/sessions/${session.id}/messages`,
@@ -472,6 +536,7 @@ async function askMentor() {
       }
     )
     mentorMessages.value = [...mentorMessages.value, answer]
+    scrollChatToLatest()
   } catch (error) {
     if (isAbortError(error)) return
     mentorErrorMessage.value = appendBackendMessage('Failed to ask mentor.', error)
@@ -489,6 +554,7 @@ function stopMentorGeneration() {
 
 async function completeCurrentChapter() {
   if (!chapter.value || isCompleted.value) return
+  if (!confirm('Mark this chapter as complete?')) return
   completing.value = true
   errorMessage.value = ''
   try {
@@ -580,18 +646,12 @@ onBeforeUnmount(() => {
             <span aria-hidden="true">/</span>
             <h1>{{ displayTitle(chapter.title) }}</h1>
           </div>
-          <button
-            data-testid="generate-quiz"
-            class="quiz-button"
-            type="button"
-            :disabled="generatingQuiz"
-            @click="generateQuiz"
-          >
-            {{ generatingQuiz ? 'Generating...' : 'Generate quiz' }}
-          </button>
+          <NuxtLink v-if="detail.next_chapter_id" class="next-link topbar-next-link" :to="`/chapters/${detail.next_chapter_id}`">
+            Next chapter
+          </NuxtLink>
         </header>
 
-        <section class="chat-thread" aria-live="polite">
+        <section ref="chatThreadRef" class="chat-thread" aria-live="polite">
           <article class="message-row assistant">
             <div class="message-avatar">AI</div>
             <div class="message-bubble">
@@ -650,7 +710,10 @@ onBeforeUnmount(() => {
         <form class="mentor-form composer" @submit.prevent="askMentor">
           <div class="composer-tools">
             <button class="composer-icon-button" type="button" aria-label="Add attachment">
-              <span aria-hidden="true">+</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </svg>
             </button>
             <button
               data-testid="web-search-toggle"
@@ -721,7 +784,6 @@ onBeforeUnmount(() => {
               :key="session.id"
               class="session-list-row"
               :class="{ active: mentorSession?.id === session.id }"
-              @contextmenu.prevent="openSessionMenu(session)"
             >
               <button
                 class="session-select"
@@ -729,6 +791,18 @@ onBeforeUnmount(() => {
                 @click="selectMentorSession(session)"
               >
                 {{ displayTitle(session.title) || 'Chapter session' }}
+              </button>
+              <button
+                data-testid="rename-mentor-session"
+                class="session-rename"
+                type="button"
+                :aria-label="`Rename session ${displayTitle(session.title) || 'Chapter session'}`"
+                @click.stop="openRenameSessionModal(session)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0 0-3L17.5 5.5a2.1 2.1 0 0 0-3 0L4 16v4Z" />
+                  <path d="m13.5 6.5 4 4" />
+                </svg>
               </button>
               <button
                 class="session-delete"
@@ -745,66 +819,57 @@ onBeforeUnmount(() => {
                   <path d="M14 11v6" />
                 </svg>
               </button>
-              <div
-                v-if="sessionMenuSession?.id === session.id"
-                class="session-context-menu"
-                role="menu"
-              >
-                <button
-                  data-testid="rename-mentor-session"
-                  type="button"
-                  role="menuitem"
-                  @click="renameMentorSession(session)"
-                >
-                  Rename
-                </button>
-              </div>
             </div>
           </div>
         </section>
 
         <section class="session-section">
-          <p>Progress</p>
+          <div class="panel-heading progress-heading">
+            <p>Progress</p>
+            <button
+              data-testid="complete-chapter"
+              class="complete-button"
+              type="button"
+              :aria-label="isCompleted ? 'Chapter completed' : completing ? 'Completing chapter' : 'Mark chapter complete'"
+              :title="isCompleted ? 'Completed' : completing ? 'Completing...' : 'Mark complete'"
+              :disabled="isCompleted || completing"
+              @click="completeCurrentChapter"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m5 12 4 4L19 6" />
+              </svg>
+            </button>
+          </div>
           <div class="progress-strip">
             <span>{{ chapter.status }}</span>
           </div>
           <p>{{ chapter.estimated_days }} estimated days - Mastery: {{ masteryLabel }}</p>
           <button
-            data-testid="complete-chapter"
-            class="complete-button"
+            data-testid="generate-quiz"
+            class="quiz-button"
             type="button"
-            :disabled="isCompleted || completing"
-            @click="completeCurrentChapter"
+            :disabled="generatingQuiz"
+            @click="generateQuiz"
           >
-            {{ isCompleted ? 'Completed' : completing ? 'Completing...' : 'Mark complete' }}
+            {{ generatingQuiz ? 'Generating...' : 'Generate quiz' }}
           </button>
-          <NuxtLink v-if="detail.next_chapter_id" class="next-link" :to="`/chapters/${detail.next_chapter_id}`">
-            Next chapter
-          </NuxtLink>
         </section>
 
         <section class="session-section">
-          <p>Study notes</p>
-          <h2>Personal notes</h2>
-          <form class="note-form" @submit.prevent="createNote">
-            <textarea
-              v-model="noteDraft"
-              data-testid="chapter-note-input"
-              placeholder="Create a personal note"
-              :disabled="savingNote"
-            />
-            <button
-              data-testid="save-chapter-note"
-              type="submit"
-              :disabled="!canSaveNote"
-            >
-              {{ savingNote ? 'Saving...' : 'Save note' }}
-            </button>
-          </form>
+          <div class="panel-heading">
+            <div>
+              <p>Study notes</p>
+              <h2>Personal notes</h2>
+            </div>
+            <button data-testid="open-note-composer" type="button" @click="openNoteComposer">New</button>
+          </div>
           <div v-if="notes.length" class="note-list">
             <article v-for="note in notes" :key="note.id" class="note-card">
-              <p>{{ note.content }}</p>
-              <button class="note-delete" type="button" :aria-label="`Delete note ${note.content || ''}`" @click="deleteAnnotation(note)">
+              <button class="note-open" type="button" :aria-label="`Open note ${noteContent(note)}`" @click="openNoteDetail(note)">
+                <span>{{ notePreview(note) }}</span>
+                <small v-if="noteDate(note)">{{ noteDate(note) }}</small>
+              </button>
+              <button class="note-delete" type="button" :aria-label="`Delete note ${noteContent(note)}`" @click.stop="deleteAnnotation(note)">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M3 6h18" />
                   <path d="M8 6V4h8v2" />
@@ -815,9 +880,96 @@ onBeforeUnmount(() => {
               </button>
             </article>
           </div>
-          <p v-else class="empty-state">No notes yet.</p>
+          <button v-else class="empty-state note-empty-action" type="button" @click="openNoteComposer">No notes yet. Create one</button>
         </section>
       </aside>
+
+      <div v-if="noteComposerOpen" class="modal-backdrop note-modal-backdrop" @click.self="closeNoteComposer">
+        <section class="note-modal" role="dialog" aria-modal="true" aria-labelledby="new-note-title">
+          <header class="note-modal-header">
+            <div>
+              <p class="eyebrow">Study note</p>
+              <h2 id="new-note-title">New note</h2>
+            </div>
+            <button class="note-modal-close" type="button" aria-label="Close note dialog" @click="closeNoteComposer">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 6l12 12" />
+                <path d="M18 6 6 18" />
+              </svg>
+            </button>
+          </header>
+          <form class="note-form" @submit.prevent="createNote">
+            <textarea
+              v-model="noteDraft"
+              data-testid="chapter-note-input"
+              placeholder="Capture the point you want to remember"
+              :disabled="savingNote"
+            />
+            <div class="note-modal-actions">
+              <button class="secondary-button" type="button" :disabled="savingNote" @click="closeNoteComposer">Cancel</button>
+              <button
+                data-testid="save-chapter-note"
+                class="primary-button"
+                type="submit"
+                :disabled="!canSaveNote"
+              >
+                {{ savingNote ? 'Saving...' : 'Save note' }}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+
+      <div v-if="selectedNote" class="modal-backdrop note-modal-backdrop" @click.self="closeNoteDetail">
+        <section class="note-modal note-detail-modal" role="dialog" aria-modal="true" aria-labelledby="note-detail-title">
+          <header class="note-modal-header">
+            <div>
+              <p class="eyebrow">Study note</p>
+              <h2 id="note-detail-title">Note detail</h2>
+            </div>
+            <button class="note-modal-close" type="button" aria-label="Close note detail" @click="closeNoteDetail">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 6l12 12" />
+                <path d="M18 6 6 18" />
+              </svg>
+            </button>
+          </header>
+          <div class="note-detail-body">
+            <p>{{ noteContent(selectedNote) }}</p>
+          </div>
+          <footer class="note-modal-actions">
+            <button class="secondary-button" type="button" @click="closeNoteDetail">Close</button>
+            <button class="danger-button" type="button" @click="deleteAnnotation(selectedNote)">Delete</button>
+          </footer>
+        </section>
+      </div>
+
+      <div v-if="renameSessionTarget" class="modal-backdrop session-rename-backdrop" @click.self="closeRenameSessionModal">
+        <section class="session-rename-modal" role="dialog" aria-modal="true" aria-labelledby="rename-session-title">
+          <header class="session-rename-header">
+            <div>
+              <p class="eyebrow">Session</p>
+              <h2 id="rename-session-title">Rename session</h2>
+            </div>
+            <button class="session-rename-close" type="button" aria-label="Close rename dialog" @click="closeRenameSessionModal">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 6l12 12" />
+                <path d="M18 6 6 18" />
+              </svg>
+            </button>
+          </header>
+          <form class="session-rename-form" @submit.prevent="renameMentorSession">
+            <label class="form-field">
+              Name
+              <input v-model="renameSessionTitle" data-testid="rename-session-input" class="input" maxlength="160" autofocus>
+            </label>
+            <div class="session-rename-actions">
+              <button class="secondary-button" type="button" @click="closeRenameSessionModal">Cancel</button>
+              <button class="primary-button" type="submit" :disabled="!renameSessionTitle.trim()">Save</button>
+            </div>
+          </form>
+        </section>
+      </div>
     </template>
   </section>
 </template>
@@ -1185,7 +1337,9 @@ onBeforeUnmount(() => {
   color: var(--color-primary);
   display: flex;
   align-items: center;
+  justify-content: center;
   padding: 0 12px;
+  text-align: center;
   font-weight: 900;
 }
 
@@ -2081,7 +2235,7 @@ onBeforeUnmount(() => {
 .session-list-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 30px;
+  grid-template-columns: minmax(0, 1fr) 30px 30px;
   align-items: center;
   border-left: 3px solid transparent;
   transition: background 0.16s ease, border-color 0.16s ease;
@@ -2098,7 +2252,8 @@ onBeforeUnmount(() => {
 }
 
 .session-list {
-  max-height: min(300px, 34dvh);
+  min-height: 156px;
+  max-height: min(380px, 44dvh);
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
@@ -2117,6 +2272,7 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
+.session-list .session-rename,
 .session-list .session-delete {
   width: 28px;
   height: 28px;
@@ -2133,10 +2289,21 @@ onBeforeUnmount(() => {
   transition: opacity 0.14s ease, background 0.14s ease, color 0.14s ease;
 }
 
+.session-list .session-rename {
+  color: var(--color-primary);
+}
+
+.session-list-row:hover .session-rename,
+.session-list-row:focus-within .session-rename,
 .session-list-row:hover .session-delete,
 .session-list-row:focus-within .session-delete {
   opacity: 1;
   pointer-events: auto;
+}
+
+.session-list .session-rename:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
 }
 
 .session-list .session-delete:hover {
@@ -2144,6 +2311,7 @@ onBeforeUnmount(() => {
   color: #b91c1c;
 }
 
+.session-rename svg,
 .session-delete svg {
   width: 16px;
   height: 16px;
@@ -2152,35 +2320,6 @@ onBeforeUnmount(() => {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
-}
-
-.session-context-menu {
-  position: absolute;
-  top: calc(100% - 2px);
-  right: 8px;
-  z-index: 8;
-  min-width: 118px;
-  border: 1px solid rgba(161, 211, 202, 0.72);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 16px 42px rgba(15, 118, 110, 0.18);
-  padding: 5px;
-}
-
-.session-context-menu button {
-  width: 100%;
-  min-height: 32px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--color-text);
-  cursor: pointer;
-  text-align: left;
-}
-
-.session-context-menu button:hover {
-  background: rgba(204, 251, 241, 0.68);
-  color: #0f766e;
 }
 
 @media (hover: none) {
@@ -2315,6 +2454,7 @@ onBeforeUnmount(() => {
   padding-left: 12px;
 }
 
+.session-list .session-rename,
 .session-list .session-delete {
   margin-right: 6px;
 }
@@ -2459,6 +2599,542 @@ onBeforeUnmount(() => {
     height: auto;
     min-height: calc(100dvh - 58px);
     overflow: visible;
+  }
+}
+
+.session-rename-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgba(31, 35, 40, 0.32);
+  backdrop-filter: blur(5px);
+  padding: 20px;
+}
+
+.session-rename-modal {
+  width: min(460px, 100%);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+  overflow: hidden;
+}
+
+.session-rename-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--color-border);
+  padding: 16px;
+}
+
+.session-rename-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.session-rename-close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-muted);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+}
+
+.session-rename-close svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.session-rename-form {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+.session-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Primer redesign pass: chapter study is a one-screen workspace with floating context. */
+.chapter-workbench {
+  width: 100%;
+  height: calc(100dvh - 56px);
+  grid-template-columns: 280px minmax(0, 1fr) 328px;
+  gap: 0;
+  padding: 0;
+  background: var(--color-page);
+}
+
+.chapter-workbench.rail-is-collapsed {
+  grid-template-columns: 56px minmax(0, 1fr) 328px;
+}
+
+.chapter-sidebar {
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  border-radius: 0;
+  background: var(--color-surface);
+  box-shadow: none;
+  padding: 16px;
+}
+
+.chapter-sidebar.collapsed {
+  width: auto;
+  min-width: 0;
+  padding: 12px 10px;
+}
+
+.rail-collapse {
+  border-radius: 6px;
+  color: var(--color-muted);
+}
+
+.rail-title strong {
+  font-size: 15px;
+}
+
+.chapter-link {
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+  border-color: transparent;
+}
+
+.chapter-link:hover,
+.chapter-link.active {
+  border-color: transparent;
+  border-left-color: var(--color-primary);
+  background: var(--color-page);
+}
+
+.chapter-link span {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--color-page);
+  color: var(--color-muted);
+}
+
+.chat-workspace {
+  align-self: stretch;
+  height: auto;
+  margin: 18px 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.chat-topbar {
+  min-height: 58px;
+  border-radius: 16px 16px 0 0;
+  border-bottom-color: var(--color-border);
+  padding: 12px 16px;
+}
+
+.chapter-breadcrumb,
+.chapter-breadcrumb h1 {
+  color: var(--color-muted);
+}
+
+.quiz-button,
+.complete-button,
+.next-link,
+.panel-heading button,
+.note-form button {
+  border-radius: 6px;
+  border-color: var(--color-border);
+  color: var(--color-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.quiz-button {
+  border-color: rgba(31, 136, 61, 0.24);
+  background: var(--color-success);
+  color: #fff;
+}
+
+.topbar-next-link {
+  width: auto;
+  min-width: 136px;
+  flex: 0 0 auto;
+}
+
+.session-section > .quiz-button {
+  width: 100%;
+}
+
+.chat-thread {
+  gap: 18px;
+  padding: 22px min(6vw, 72px);
+  scroll-behavior: smooth;
+}
+
+.message-avatar {
+  border-radius: 999px;
+  background: var(--color-text);
+}
+
+.message-bubble {
+  border-color: var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.message-row.user .message-bubble {
+  background: var(--color-primary-soft);
+  border-color: #b6e3ff;
+}
+
+.citation-card {
+  border-color: var(--color-border);
+  border-radius: 12px;
+  background: var(--color-page);
+  overflow: hidden;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.citation-card:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface);
+  box-shadow: 0 8px 20px rgba(31, 35, 40, 0.06);
+  transform: translateY(-1px);
+}
+
+.composer {
+  margin: 0 18px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.08);
+}
+
+.composer-tools {
+  border-bottom-color: var(--color-border);
+}
+
+.composer-icon-button,
+.composer-tools button {
+  border-radius: 6px;
+  color: var(--color-muted);
+}
+
+.composer-tools .select {
+  width: 132px;
+  background: var(--color-page);
+  color: var(--color-text);
+}
+
+.send-button {
+  border-radius: 8px;
+  background: var(--color-success);
+}
+
+.send-button:hover {
+  background: #1a7f37;
+}
+
+.send-button.is-stopping {
+  background: var(--color-error);
+}
+
+.session-panel {
+  align-self: stretch;
+  height: auto;
+  margin: 18px 16px 18px 0;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow-floating);
+  backdrop-filter: blur(12px);
+}
+
+.session-section {
+  border-bottom-color: var(--color-border);
+}
+
+.session-list {
+  align-content: start;
+  grid-auto-rows: max-content;
+  gap: 8px;
+}
+
+.session-list-row {
+  min-height: 38px;
+  grid-template-columns: minmax(0, 1fr) 28px 28px;
+}
+
+.session-list-row.active {
+  background: var(--color-primary-soft);
+}
+
+.session-list .session-select {
+  min-height: 38px;
+  padding: 6px 8px 6px 12px;
+  color: var(--color-text);
+  line-height: 1.25;
+}
+
+.session-list .session-rename,
+.session-list .session-delete {
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+  margin-right: 4px;
+}
+
+.progress-strip {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.progress-heading {
+  align-items: center;
+}
+
+.progress-heading > p {
+  margin: 0;
+}
+
+.progress-heading .complete-button {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  flex: 0 0 34px;
+  padding: 0;
+  color: var(--color-success);
+}
+
+.complete-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.6;
+}
+
+.note-form textarea,
+.note-card,
+.empty-state {
+  border-color: var(--color-border);
+  border-radius: 6px;
+  background: var(--color-page);
+}
+
+.note-list {
+  align-content: start;
+  max-height: 188px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.note-card {
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  min-height: 42px;
+  border-style: solid;
+  padding: 0;
+  overflow: hidden;
+}
+
+.note-open {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  font-weight: 600;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.note-open span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-open small {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.note-card:hover {
+  background: var(--color-surface);
+}
+
+.note-delete {
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+  margin-right: 4px;
+}
+
+.note-empty-action {
+  width: 100%;
+  color: var(--color-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.note-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 82;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(31, 35, 40, 0.32);
+  backdrop-filter: blur(5px);
+}
+
+.note-modal {
+  width: min(560px, 100%);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+  overflow: hidden;
+}
+
+.note-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--color-border);
+  padding: 16px;
+}
+
+.note-modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.note-modal-close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-muted);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+}
+
+.note-modal-close svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.note-modal .note-form {
+  padding: 16px;
+}
+
+.note-modal .note-form textarea {
+  min-height: 220px;
+  max-height: 46dvh;
+}
+
+.note-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px;
+}
+
+.note-form .note-modal-actions {
+  padding: 0;
+}
+
+.note-modal-actions button,
+.note-form .note-modal-actions button {
+  width: auto;
+}
+
+.note-detail-body {
+  max-height: 52dvh;
+  overflow: auto;
+  padding: 18px;
+}
+
+.note-detail-body p {
+  margin: 0;
+  color: var(--color-text);
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.danger-button {
+  min-height: 34px;
+  border: 1px solid rgba(207, 34, 46, 0.24);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-error);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0 12px;
+}
+
+.danger-button:hover {
+  background: var(--color-error-soft);
+}
+
+@media (max-width: 1100px) {
+  .chapter-workbench,
+  .chapter-workbench.rail-is-collapsed {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .chapter-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .chat-workspace,
+  .session-panel {
+    margin: 14px;
   }
 }
 </style>

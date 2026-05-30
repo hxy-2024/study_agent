@@ -112,7 +112,12 @@ async function openRuntimeStatus() {
             <p class="eyebrow">Navigate</p>
             <h2>Workspace</h2>
           </div>
-          <button class="icon-button" type="button" aria-label="Close navigation" @click="drawerOpen = false">×</button>
+          <button class="icon-button" type="button" aria-label="Close navigation" @click="drawerOpen = false">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 6l12 12" />
+              <path d="M18 6 6 18" />
+            </svg>
+          </button>
         </div>
 
         <nav class="drawer-nav">
@@ -138,7 +143,12 @@ async function openRuntimeStatus() {
             <p class="eyebrow">Settings</p>
             <h2>Local model defaults</h2>
           </div>
-          <button class="icon-button" type="button" aria-label="Close settings" @click="settingsOpen = false">×</button>
+          <button class="icon-button" type="button" aria-label="Close settings" @click="settingsOpen = false">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 6l12 12" />
+              <path d="M18 6 6 18" />
+            </svg>
+          </button>
         </div>
 
         <div class="settings-grid">
@@ -172,7 +182,12 @@ async function openRuntimeStatus() {
             <p class="eyebrow">Runtime</p>
             <h2>Local status</h2>
           </div>
-          <button class="icon-button" type="button" aria-label="Close runtime status" @click="runtimeStatusOpen = false">脳</button>
+          <button class="icon-button" type="button" aria-label="Close runtime status" @click="runtimeStatusOpen = false">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 6l12 12" />
+              <path d="M18 6 6 18" />
+            </svg>
+          </button>
         </div>
 
         <p v-if="runtimeStatusLoading" class="settings-note">Checking local services...</p>

@@ -53,7 +53,7 @@ describe('DashboardPage', () => {
   it('renders an empty continue-learning workspace with create action', () => {
     const wrapper = mountPage()
 
-    expect(wrapper.text()).toContain('Learning dashboard')
+    expect(wrapper.text()).toContain('Home')
     expect(wrapper.text()).toContain('Create your first study space')
     expect(wrapper.text()).toContain('New Study Space')
     expect(wrapper.text()).toContain('Calendar')
@@ -83,7 +83,7 @@ describe('DashboardPage', () => {
 
     const wrapper = mountPage()
 
-    expect(wrapper.text()).toContain('Learning dashboard')
+    expect(wrapper.text()).toContain('Home')
     expect(wrapper.text()).toContain('Linear Algebra')
     expect(wrapper.text()).toContain('Master eigenvectors and matrices')
     expect(wrapper.text()).toContain('Prepare route')
