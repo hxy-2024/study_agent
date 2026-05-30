@@ -1,0 +1,17 @@
+.git
+.vscode
+.local
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.nuxt
+**/.output
+**/.uv-cache
+**/.venv
+**/__pycache__
+**/node_modules
+*.pyc
+*.pyo
+.env
+.env.*
+!.env.example

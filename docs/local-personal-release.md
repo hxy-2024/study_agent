@@ -11,6 +11,24 @@ headers and avoids a user login surface. The product loop is:
 4. Study chapters with the L3 Session Tutor.
 5. Use quizzes, mastery, planner actions, and review signals to decide what to do next.
 
+## Runtime Profiles
+
+| Mode | Command | DB | Source storage | Use |
+| --- | --- | --- | --- | --- |
+| local/dev | `python main.py local` | SQLite | `.local/storage` | Personal fast startup |
+| docker-dev | `python main.py docker-dev` | Postgres | MinIO | Host debugging with real infrastructure |
+| docker | `python main.py docker` | Postgres | MinIO | Migration and deployment checks |
+
+`python main.py dev` is an alias for `python main.py local`. The local/dev
+profile uses SQLite and filesystem source storage only for personal local
+runtime. Docker-backed and deployed modes still use Postgres, pgvector, Redis,
+and MinIO.
+
+Migration note: local SQLite is not the production database and is not a
+replacement for the Postgres migration path. Keep Alembic/Postgres as the
+deployment schema source, and treat `.local/study_agent.db` as local runtime
+state.
+
 ## Agent Layers
 
 - L1 Main Agent: chooses the next dashboard action from user intent, available time, review queue, quiz mastery, planner actions, and recent progress. It is deterministic for now and records explicit recommendation requests as `AgentRun` rows.
