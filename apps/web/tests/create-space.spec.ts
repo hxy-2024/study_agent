@@ -48,7 +48,7 @@ function mountPage() {
 async function fillRequiredFields(wrapper: ReturnType<typeof mountPage>) {
   await wrapper.find('[name="space-name"]').setValue('Linear Algebra')
   await wrapper.find('[name="learning-goal"]').setValue('Understand matrices')
-  await wrapper.find('textarea[placeholder*="粘贴课程笔记"]').setValue('# RAG\nChunking and retrieval notes.')
+  await wrapper.find('textarea[placeholder*="Paste course notes"]').setValue('# RAG\nChunking and retrieval notes.')
 }
 
 describe('NewSpacePage', () => {
@@ -88,14 +88,14 @@ describe('NewSpacePage', () => {
     const wrapper = mountPage()
 
     expect(wrapper.find('[data-testid="back-home"]').attributes('href')).toBe('/')
-    expect(wrapper.text()).toContain('创建学习空间')
-    expect(wrapper.text()).toContain('学习空间名字与主题')
-    expect(wrapper.text()).toContain('默认模型')
-    expect(wrapper.text()).toContain('上传材料并运行 RAG')
+    expect(wrapper.text()).toContain('Create learning space')
+    expect(wrapper.text()).toContain('Space and learning goal')
+    expect(wrapper.text()).toContain('Default model')
+    expect(wrapper.text()).toContain('Material and RAG ingestion')
     expect(wrapper.text()).toContain('Embedding model')
-    expect(wrapper.text()).toContain('学习路线大纲')
+    expect(wrapper.text()).toContain('Learning route outline')
     expect(wrapper.text()).toContain('AI Render')
-    expect(wrapper.text()).toContain('生成章节学习详情')
+    expect(wrapper.text()).toContain('Generate chapter study details')
   })
 
   it('runs RAG before showing embedded chunks', async () => {
@@ -132,14 +132,14 @@ describe('NewSpacePage', () => {
     await wrapper.find('form').trigger('submit')
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.text()).toContain('正在生成中，请稍等')
+    expect(wrapper.text()).toContain('Generating, please wait...')
 
     await new Promise(resolve => setTimeout(resolve, 20))
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-testid="chapter-modal"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('章节列表')
-    expect(wrapper.text()).toContain('章节详情')
+    expect(wrapper.text()).toContain('Chapters')
+    expect(wrapper.text()).toContain('Chapter detail')
     expect(wrapper.text()).toContain('RAG Fundamentals')
 
     await wrapper.find('[data-testid="confirm-chapter-details"]').trigger('click')

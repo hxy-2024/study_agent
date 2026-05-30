@@ -9,11 +9,9 @@ declare const process: { cwd: () => string }
 
 const fetchMock = vi.fn()
 const confirmMock = vi.fn()
-const promptMock = vi.fn()
 
 vi.stubGlobal('$fetch', fetchMock)
 vi.stubGlobal('confirm', confirmMock)
-vi.stubGlobal('prompt', promptMock)
 vi.stubGlobal('useRuntimeConfig', () => ({
   public: {
     apiBaseUrl: 'http://localhost:8000/api/v1'
@@ -140,9 +138,7 @@ describe('ChapterStudyPage', () => {
   beforeEach(() => {
     fetchMock.mockReset()
     confirmMock.mockReset()
-    promptMock.mockReset()
     confirmMock.mockReturnValue(true)
-    promptMock.mockReturnValue('Renamed mentor session')
     fetchMock.mockImplementation((url: string) => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
         return Promise.resolve([mentorSession()])
@@ -170,10 +166,15 @@ describe('ChapterStudyPage', () => {
     expect(wrapper.text()).toContain('I am your chapter AI Mentor')
     expect(wrapper.text()).toContain('Sessions')
     expect(wrapper.text()).toContain('Progress')
+    expect(wrapper.find('.chat-topbar .next-link').exists()).toBe(false)
+    expect(wrapper.find('.session-section [data-testid="generate-quiz"]').text()).toBe('Generate quiz')
     expect(wrapper.find('[data-testid="mentor-question"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ask-mentor"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="web-search-toggle"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="web-search-toggle"] svg').exists()).toBe(true)
+    const webSearchToggle = wrapper.find('[data-testid="web-search-toggle"]')
+    expect(webSearchToggle.exists()).toBe(true)
+    expect(webSearchToggle.attributes('aria-pressed')).toBe('false')
+    expect(webSearchToggle.attributes('aria-label')).toBe('Enable web search')
+    expect(webSearchToggle.find('svg').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('Chapter state')
     expect(wrapper.text()).not.toContain('Chapter runtime')
     expect(wrapper.text()).not.toContain('Source evidence')
@@ -182,7 +183,28 @@ describe('ChapterStudyPage', () => {
 
   it('keeps the chapter page scrollable on mobile layouts', () => {
     expect(chapterStudySource).toContain(':global(body.chapter-study-page) {\n    overflow: auto;')
-    expect(chapterStudySource).toContain('.chat-workspace {\n    height: auto;')
+    expect(chapterStudySource).toContain('height: auto;')
+    expect(chapterStudySource).toContain('overflow: visible;')
+  })
+
+  it('scrolls the chat thread to the latest conversation after session updates', () => {
+    expect(chapterStudySource).toContain('const chatThreadRef = ref<HTMLElement | null>(null)')
+    expect(chapterStudySource).toContain('function scrollChatToLatest()')
+    expect(chapterStudySource).toContain('thread.scrollTop = thread.scrollHeight')
+    expect(chapterStudySource).toContain('<section ref="chatThreadRef" class="chat-thread"')
+  })
+
+  it('uses smoother rounded chat evidence surfaces', () => {
+    expect(chapterStudySource).toContain('scroll-behavior: smooth;')
+    expect(chapterStudySource).toContain('.citation-card {\n  border-color: var(--color-border);\n  border-radius: 12px;')
+    expect(chapterStudySource).toContain('.citation-card:hover')
+    expect(chapterStudySource).toContain('border-radius: 16px;')
+  })
+
+  it('centers the progress status inside its strip', () => {
+    expect(chapterStudySource).toContain('.progress-strip {\n  height: 32px;')
+    expect(chapterStudySource).toContain('justify-content: center;')
+    expect(chapterStudySource).toContain('text-align: center;')
   })
 
   it('lists every chapter from the current route in the left rail', async () => {
@@ -255,6 +277,8 @@ describe('ChapterStudyPage', () => {
     expect(wrapper.text()).toContain('Study notes')
     expect(wrapper.text()).toContain('Remember the vector intuition.')
 
+    await wrapper.find('[data-testid="open-note-composer"]').trigger('click')
+    await wrapper.vm.$nextTick()
     await wrapper.find('[data-testid="chapter-note-input"]').setValue('New note')
     await wrapper.vm.$nextTick()
     await wrapper.find('form.note-form').trigger('submit')
@@ -267,6 +291,12 @@ describe('ChapterStudyPage', () => {
         body: { kind: 'note', content: 'New note' }
       })
     )
+
+    await wrapper.find('[aria-label="Open note Remember the vector intuition."]').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.note-detail-modal').exists()).toBe(true)
+    expect(wrapper.find('.note-detail-modal').text()).toContain('Remember the vector intuition.')
   })
 
   it('marks chapter complete and shows next chapter action', async () => {
@@ -285,15 +315,38 @@ describe('ChapterStudyPage', () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    await wrapper.find('[data-testid="complete-chapter"]').trigger('click')
+    const completeButton = wrapper.find('[data-testid="complete-chapter"]')
+    expect(completeButton.attributes('aria-label')).toBe('Mark chapter complete')
+    expect(completeButton.find('svg').exists()).toBe(true)
+    expect(completeButton.text()).toBe('')
+
+    await completeButton.trigger('click')
     await flushPromises()
 
+    expect(confirmMock).toHaveBeenCalledWith('Mark this chapter as complete?')
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:8000/api/v1/chapters/00000000-0000-0000-0000-000000000601/complete',
       expect.objectContaining({ method: 'POST' })
     )
     expect(wrapper.text()).toContain('completed')
     expect(wrapper.html()).toContain('/chapters/00000000-0000-0000-0000-000000000602')
+  })
+
+  it('does not mark chapter complete when confirmation is cancelled', async () => {
+    confirmMock.mockReturnValue(false)
+    fetchMock.mockImplementation((url: string) => Promise.resolve(chapterDetail()))
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="complete-chapter"]').trigger('click')
+    await flushPromises()
+
+    expect(confirmMock).toHaveBeenCalledWith('Mark this chapter as complete?')
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/chapters/00000000-0000-0000-0000-000000000601/complete',
+      expect.anything()
+    )
   })
 
   it('loads existing mentor session messages with markdown and citations', async () => {
@@ -368,7 +421,32 @@ describe('ChapterStudyPage', () => {
     expect(wrapper.find('[data-testid="ask-mentor"]').attributes('aria-label')).toBe('Send message')
   })
 
-  it('creates a mentor session before sending the first message', async () => {
+  it('creates a default mentor session when entering a chapter with no sessions', async () => {
+    fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions') && options?.method === 'POST') {
+        return Promise.resolve(mentorSession({ title: 'Auto mentor session' }))
+      }
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
+        return Promise.resolve([])
+      }
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/annotations')) {
+        return Promise.resolve({ annotations: [] })
+      }
+      return Promise.resolve(chapterDetail())
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(confirmMock).not.toHaveBeenCalledWith('Create a new mentor session?')
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/chapters/00000000-0000-0000-0000-000000000601/sessions',
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(wrapper.text()).toContain('Auto mentor session')
+  })
+
+  it('uses the default mentor session before sending the first message', async () => {
     fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions') && options?.method === 'POST') {
         return Promise.resolve(mentorSession())
@@ -407,7 +485,7 @@ describe('ChapterStudyPage', () => {
     expect(wrapper.text()).toContain('RAG retrieves relevant evidence before answering.')
   })
 
-  it('sends the explicit web search preference with mentor questions', async () => {
+  it('sends the web search toggle state for mentor questions', async () => {
     fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
         return Promise.resolve([mentorSession()])
@@ -424,7 +502,11 @@ describe('ChapterStudyPage', () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    await wrapper.find('[data-testid="web-search-toggle"]').trigger('click')
+    const webSearchToggle = wrapper.find('[data-testid="web-search-toggle"]')
+    await webSearchToggle.trigger('click')
+    expect(webSearchToggle.attributes('aria-pressed')).toBe('true')
+    expect(webSearchToggle.classes()).toContain('active')
+
     await wrapper.find('[data-testid="mentor-question"]').setValue('What changed recently?')
     await wrapper.find('form.mentor-form').trigger('submit')
     await flushPromises()
@@ -452,7 +534,7 @@ describe('ChapterStudyPage', () => {
     )
   })
 
-  it('renames a mentor session from the right-click menu', async () => {
+  it('renames a mentor session from an independent rename dialog', async () => {
     fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
         return Promise.resolve([mentorSession({ title: 'Old mentor session' })])
@@ -469,13 +551,15 @@ describe('ChapterStudyPage', () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    await wrapper.find('.session-list-row').trigger('contextmenu')
-    expect(wrapper.find('[data-testid="rename-mentor-session"]').exists()).toBe(true)
+    const renameButton = wrapper.find('[aria-label="Rename session Old mentor session"]')
+    expect(renameButton.exists()).toBe(true)
+    expect(renameButton.find('svg').exists()).toBe(true)
 
-    await wrapper.find('[data-testid="rename-mentor-session"]').trigger('click')
+    await renameButton.trigger('click')
+    await wrapper.find('[data-testid="rename-session-input"]').setValue('Renamed mentor session')
+    await wrapper.find('form.session-rename-form').trigger('submit')
     await flushPromises()
 
-    expect(promptMock).toHaveBeenCalledWith('Rename session', 'Old mentor session')
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701',
       expect.objectContaining({

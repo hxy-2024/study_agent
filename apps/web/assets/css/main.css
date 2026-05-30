@@ -1,24 +1,28 @@
 :root {
-  --color-page: #f6fbf9;
-  --color-page-strong: #e8f6f1;
+  --color-page: #f6f8fa;
+  --color-page-strong: #eaeef2;
   --color-surface: #ffffff;
-  --color-surface-muted: #ecfdf5;
-  --color-border: #d5e9e3;
-  --color-border-strong: #88d4c4;
-  --color-text: #172321;
-  --color-muted: #627571;
-  --color-primary: #0f766e;
-  --color-primary-bright: #14b8a6;
-  --color-primary-soft: #ccfbf1;
-  --color-success: #16a34a;
-  --color-warning: #d97706;
-  --color-error: #dc2626;
-  --color-info: #2563eb;
-  --shadow-card: 0 1px 0 rgba(15, 118, 110, 0.08);
-  --shadow-hover: 0 12px 30px rgba(15, 118, 110, 0.09);
+  --color-card: #ffffff;
+  --color-surface-muted: #f6f8fa;
+  --color-border: #d0d7de;
+  --color-border-strong: #8c959f;
+  --color-text: #24292f;
+  --color-muted: #57606a;
+  --color-primary: #0969da;
+  --color-primary-bright: #0969da;
+  --color-primary-soft: #ddf4ff;
+  --color-success: #1f883d;
+  --color-success-soft: #dafbe1;
+  --color-warning: #bf8700;
+  --color-error: #cf222e;
+  --color-error-soft: #ffebe9;
+  --color-info: #0969da;
+  --shadow-card: none;
+  --shadow-hover: none;
+  --shadow-floating: 0 18px 48px rgba(31, 35, 40, 0.18), 0 2px 8px rgba(31, 35, 40, 0.08);
   color: var(--color-text);
   background: var(--color-page);
-  font-family: "Aptos", "Geist", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Aptos", ui-sans-serif, system-ui, sans-serif;
 }
 
 * {
@@ -28,11 +32,7 @@
 body {
   margin: 0;
   min-width: 320px;
-  background:
-    radial-gradient(circle at 16px 16px, rgba(20, 184, 166, 0.08) 1px, transparent 1px),
-    linear-gradient(135deg, rgba(204, 251, 241, 0.5), rgba(255, 255, 255, 0) 34%),
-    var(--color-page);
-  background-size: 22px 22px, auto;
+  background: var(--color-page);
 }
 
 button,
@@ -87,20 +87,21 @@ p {
 .brand-mark {
   display: flex;
   align-items: center;
-  gap: 10px;
-  border-radius: 8px;
-  padding: 8px;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 4px 6px;
 }
 
 .brand-icon {
   display: inline-grid;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   place-items: center;
-  border-radius: 8px;
-  background: var(--color-primary);
+  border-radius: 999px;
+  background: var(--color-text);
   color: #fff;
   font-weight: 800;
+  font-size: 13px;
 }
 
 .brand-mark strong {
@@ -118,7 +119,7 @@ p {
   position: relative;
   width: 100%;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: var(--color-muted);
   cursor: pointer;
@@ -130,7 +131,7 @@ p {
 
 .nav-link:hover,
 .nav-link.router-link-active {
-  background: var(--color-primary-soft);
+  background: var(--color-page);
   color: var(--color-primary);
 }
 
@@ -156,9 +157,9 @@ p {
 }
 
 .main {
-  width: min(100%, 1600px);
+  width: min(100%, 1680px);
   margin: 0 auto;
-  padding: 12px 12px 20px;
+  padding: 0 16px 16px;
 }
 
 .topbar {
@@ -174,15 +175,15 @@ p {
   top: 0;
   z-index: 30;
   gap: 16px;
-  min-height: 58px;
+  min-height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(161, 211, 202, 0.58);
-  background: rgba(246, 251, 249, 0.9);
-  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
   margin-bottom: 0;
-  padding: 8px 18px;
+  padding: 8px 16px;
 }
 
 .topbar-left,
@@ -199,9 +200,9 @@ p {
 
 .icon-button,
 .avatar-button {
-  border: 1px solid rgba(161, 211, 202, 0.65);
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
   color: var(--color-text);
   cursor: pointer;
   display: inline-grid;
@@ -217,45 +218,57 @@ p {
 }
 
 .hamburger-button svg {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   fill: none;
-  stroke: var(--color-primary);
+  stroke: var(--color-muted);
   stroke-linecap: round;
   stroke-width: 2;
 }
 
+.icon-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
 .avatar-button {
-  width: 36px;
-  height: 36px;
-  border-color: var(--color-primary-bright);
-  background: linear-gradient(135deg, #ccfbf1, #ffffff);
-  color: var(--color-primary);
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border-color: var(--color-border);
+  background: linear-gradient(135deg, #d0d7de, #ffffff);
+  color: var(--color-muted);
   font-weight: 900;
 }
 
 .icon-button:hover,
 .avatar-button:hover {
-  border-color: var(--color-primary-bright);
-  box-shadow: 0 8px 18px rgba(15, 118, 110, 0.12);
+  border-color: var(--color-border-strong);
+  box-shadow: none;
 }
 
 .overlay {
   position: fixed;
   inset: 0;
   z-index: 50;
-  background: rgba(16, 32, 31, 0.18);
-  backdrop-filter: blur(5px);
+  background: rgba(31, 35, 40, 0.18);
+  backdrop-filter: blur(4px);
 }
 
 .nav-drawer {
-  width: min(330px, calc(100vw - 28px));
-  height: 100%;
+  width: min(320px, calc(100vw - 28px));
+  height: calc(100% - 24px);
+  margin: 12px;
   border-right: 1px solid var(--color-border);
-  background:
-    linear-gradient(145deg, rgba(236, 253, 245, 0.95), rgba(255, 255, 255, 0.95)),
-    var(--color-surface);
-  box-shadow: 22px 0 58px rgba(15, 118, 110, 0.16);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
   padding: 18px;
   animation: drawer-in 180ms ease both;
 }
@@ -277,9 +290,9 @@ p {
   overflow: auto;
   margin: 24px auto;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--color-surface);
-  box-shadow: 0 26px 80px rgba(15, 118, 110, 0.22);
+  box-shadow: var(--shadow-floating);
   padding: 20px;
   animation: modal-in 180ms ease both;
 }
@@ -311,8 +324,8 @@ p {
 .select {
   width: 100%;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-surface);
+  border-radius: 6px;
+  background: var(--color-page);
   color: var(--color-text);
   padding: 10px 12px;
   transition: border-color 160ms ease, box-shadow 160ms ease;
@@ -325,8 +338,8 @@ p {
 .input:focus,
 .textarea:focus,
 .select:focus {
-  border-color: var(--color-primary-bright);
-  box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.16);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.16);
 }
 
 .search-input {
@@ -336,30 +349,31 @@ p {
 .primary-button,
 .secondary-button,
 .ghost-button {
-  min-height: 40px;
-  border-radius: 8px;
+  min-height: 34px;
+  border-radius: 6px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  font-weight: 800;
-  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 12px;
   transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
   white-space: nowrap;
 }
 
 .primary-button {
-  border: 1px solid var(--color-primary);
-  background: var(--color-primary);
+  border: 1px solid rgba(31, 136, 61, 0.24);
+  background: var(--color-success);
   color: #fff;
 }
 
 .primary-button:hover {
-  background: #0d9488;
-  border-color: #0d9488;
-  box-shadow: 0 10px 24px rgba(20, 184, 166, 0.28);
-  transform: translateY(-1px);
+  background: #1a7f37;
+  border-color: rgba(31, 136, 61, 0.34);
+  box-shadow: none;
+  transform: none;
 }
 
 .secondary-button {
@@ -369,8 +383,8 @@ p {
 }
 
 .secondary-button:hover {
-  border-color: var(--color-primary-bright);
-  box-shadow: 0 8px 20px rgba(15, 118, 110, 0.12);
+  border-color: var(--color-border-strong);
+  box-shadow: none;
 }
 
 .ghost-button {
@@ -380,7 +394,7 @@ p {
 }
 
 .ghost-button:hover {
-  background: var(--color-primary-soft);
+  background: var(--color-page);
   color: var(--color-primary);
 }
 
@@ -395,9 +409,9 @@ p {
 .card,
 .panel,
 .metric-card {
-  border: 1px solid rgba(161, 211, 202, 0.55);
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
   box-shadow: var(--shadow-card);
 }
 
@@ -411,8 +425,8 @@ p {
 }
 
 .card:hover {
-  border-color: var(--color-border-strong);
-  background: rgba(255, 255, 255, 0.88);
+  border-color: var(--color-border);
+  background: var(--color-surface);
   box-shadow: var(--shadow-hover);
 }
 
@@ -426,8 +440,8 @@ p {
   align-items: center;
   border: 0;
   border-radius: 999px;
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
+  background: var(--color-page);
+  color: var(--color-muted);
   cursor: default;
   font-size: 12px;
   font-weight: 800;
@@ -441,7 +455,7 @@ p {
 
 .runtime-status-button:hover,
 .runtime-status-button:focus-visible {
-  background: rgba(20, 184, 166, 0.18);
+  background: var(--color-primary-soft);
   outline: none;
 }
 
@@ -456,8 +470,8 @@ p {
   gap: 10px;
   align-items: start;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.76);
+  border-radius: 6px;
+  background: var(--color-surface);
   padding: 12px;
 }
 

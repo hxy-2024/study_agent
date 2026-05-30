@@ -443,12 +443,12 @@ watch(
         <div class="section-heading dashboard-heading">
           <div>
             <p class="eyebrow">Home</p>
-            <h1>Learning dashboard</h1>
-            <p>Pick a space, continue the current route, or review today's local agent activity.</p>
+            <h1>Home</h1>
+            <p>Main Agent keeps the next useful learning move visible and reversible.</p>
           </div>
         </div>
 
-        <section v-if="currentSpace" class="card continue-panel">
+        <section v-if="currentSpace" class="continue-panel">
           <div class="continue-copy">
             <p class="eyebrow">{{ todayRecommendation ? 'Main Agent' : 'Continue' }}</p>
             <h2>{{ todayRecommendation?.title ?? currentSpace.name }}</h2>
@@ -471,12 +471,11 @@ watch(
             </div>
           </div>
           <div class="continue-actions">
-            <span class="status-badge">{{ currentSpace.status }}</span>
             <NuxtLink class="primary-button" :to="todayActionHref">{{ todayActionLabel }}</NuxtLink>
           </div>
         </section>
 
-        <section v-if="currentSpace" class="panel export-panel">
+        <section v-if="currentSpace" class="export-panel">
           <div>
             <p class="eyebrow">Data safety</p>
             <h2>Export current space</h2>
@@ -488,7 +487,7 @@ watch(
           </div>
         </section>
 
-        <section v-else class="card continue-panel dashboard-empty">
+        <section v-else class="continue-panel dashboard-empty">
           <div>
             <p class="eyebrow">No active space</p>
             <h2>Your dashboard is ready</h2>
@@ -498,7 +497,7 @@ watch(
         </section>
 
         <div class="dashboard-stats">
-          <section class="panel">
+          <section class="dashboard-row-panel">
             <p class="eyebrow">Today</p>
             <h2>Study queue</h2>
             <p v-if="dashboardLoading">Loading local dashboard...</p>
@@ -506,7 +505,7 @@ watch(
             <p>{{ supervisionRefreshLabel }}</p>
           </section>
 
-          <section class="panel mentor-panel">
+          <section class="dashboard-row-panel mentor-panel">
             <p class="eyebrow">AI Mentor</p>
             <h2>{{ recentAgentRuns.length ? 'Recent runtime' : 'Ready for sources' }}</h2>
             <p v-if="recentAgentRuns.length">{{ recentAgentRuns[0]?.summary }}</p>
@@ -514,7 +513,7 @@ watch(
           </section>
         </div>
 
-        <section v-if="archivedSpaces.length" class="panel archived-panel">
+        <section v-if="archivedSpaces.length" class="archived-panel">
           <div class="section-heading archived-heading">
             <div>
               <p class="eyebrow">Archived</p>
@@ -1308,6 +1307,278 @@ watch(
   .export-panel,
   .export-actions {
     flex-direction: column;
+  }
+}
+
+/* Primer redesign pass: dashboard uses columns, rows, and dividers instead of card stacks. */
+.dashboard-grid {
+  grid-template-columns: 304px minmax(0, 1fr) 320px;
+  gap: 0;
+  min-height: calc(100dvh - 56px);
+  border-top: 0;
+}
+
+.spaces-column,
+.calendar-column {
+  background: var(--color-surface);
+}
+
+.spaces-column {
+  border-right: 1px solid var(--color-border);
+  padding: 18px 16px 0 0;
+}
+
+.dashboard-main {
+  gap: 16px;
+  padding: 22px 26px;
+}
+
+.calendar-column {
+  border-left: 1px solid var(--color-border);
+  padding: 18px 0 0 16px;
+}
+
+.spaces-toolbar {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.space-search .input {
+  min-height: 32px;
+  padding-block: 6px;
+}
+
+.compact-button {
+  min-height: 32px;
+}
+
+.space-list {
+  max-height: calc(100dvh - 132px);
+  border-top: 1px solid var(--color-border);
+  gap: 0;
+}
+
+.space-row {
+  min-height: 58px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 40px 10px 10px;
+}
+
+.space-row:hover,
+.space-row.active {
+  border-left-color: var(--color-primary);
+  background: var(--color-page);
+}
+
+.space-row-continue {
+  color: var(--color-primary);
+  font-size: 12px;
+}
+
+.space-row-delete {
+  top: 12px;
+  right: 8px;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.dashboard-heading {
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 14px;
+}
+
+.dashboard-heading h1 {
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.continue-panel,
+.export-panel,
+.dashboard-row-panel,
+.archived-panel {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  box-shadow: none;
+}
+
+.continue-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  padding: 14px 16px;
+  gap: 16px;
+}
+
+.continue-panel h2,
+.export-panel h2,
+.dashboard-row-panel h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.progress-track {
+  height: 6px;
+  background: #eaeef2;
+  margin: 12px 0 7px;
+}
+
+.progress-track span {
+  background: var(--color-success);
+}
+
+.today-secondary-action {
+  border-top-color: var(--color-border);
+}
+
+.dashboard-stats {
+  grid-template-columns: 1fr;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.dashboard-row-panel {
+  border: 0;
+  border-radius: 0;
+  padding: 14px 16px;
+}
+
+.dashboard-row-panel + .dashboard-row-panel {
+  border-top: 1px solid var(--color-border);
+}
+
+.export-panel,
+.archived-panel {
+  padding: 14px 16px;
+}
+
+.archived-list {
+  border-top: 1px solid var(--color-border);
+  gap: 0;
+}
+
+.archived-row {
+  border-top: 0;
+  border-bottom: 1px solid var(--color-border);
+  padding: 10px 0;
+}
+
+.calendar-panel {
+  aspect-ratio: auto;
+  border-color: var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  box-shadow: none;
+  padding: 0;
+  overflow: hidden;
+}
+
+.calendar-heading {
+  border-bottom: 1px solid var(--color-border);
+  padding: 12px;
+}
+
+.calendar-heading strong {
+  color: var(--color-text);
+  font-size: 26px;
+}
+
+.calendar-grid {
+  gap: 0;
+}
+
+.calendar-grid span {
+  min-height: 34px;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  font-weight: 600;
+}
+
+.calendar-grid span:nth-child(7n) {
+  border-right: 0;
+}
+
+.calendar-grid .today {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.event-list {
+  padding: 10px;
+}
+
+.event-list button {
+  border-radius: 6px;
+  color: var(--color-primary);
+}
+
+.main-agent-fab {
+  width: auto;
+  height: 36px;
+  right: 24px;
+  bottom: 22px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+  color: var(--color-primary);
+  padding: 0 14px;
+}
+
+.main-agent-fab-orbit {
+  display: none;
+}
+
+.main-agent-fab-core {
+  font-size: 13px;
+}
+
+.main-agent-window {
+  border-color: var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+}
+
+.main-agent-header,
+.main-agent-form {
+  border-color: var(--color-border);
+}
+
+.main-agent-scope {
+  border-left-color: var(--color-primary);
+}
+
+.main-agent-message.assistant {
+  border-color: var(--color-border);
+  background: var(--color-page);
+}
+
+.main-agent-message.user {
+  background: var(--color-primary);
+}
+
+@media (max-width: 1100px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .spaces-column,
+  .calendar-column {
+    border: 0;
+    padding: 0;
+  }
+
+  .dashboard-main {
+    padding-inline: 0;
   }
 }
 </style>

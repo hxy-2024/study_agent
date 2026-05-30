@@ -86,20 +86,20 @@ const selectedChapter = ref(0)
 const chapterDetails = ref<RouteChapter[]>([
   {
     order: 1,
-    title: '目标拆解',
-    description: '明确学习空间的边界、先修知识、验收标准和每天的学习节奏。',
+    title: 'Goal breakdown',
+    description: 'Clarify scope, prerequisites, completion criteria, and the daily learning cadence.',
     estimated_days: 2
   },
   {
     order: 2,
-    title: '概念地图',
-    description: '把上传材料中的核心概念整理成章节结构，并标记概念之间的依赖关系。',
+    title: 'Concept map',
+    description: 'Turn uploaded material into a chapter structure and mark concept dependencies.',
     estimated_days: 4
   },
   {
     order: 3,
-    title: '练习巩固',
-    description: '围绕章节重点生成复习提示、测验题和错题回看任务。',
+    title: 'Practice reinforcement',
+    description: 'Generate review prompts, quizzes, and weak-point follow-up tasks around chapter goals.',
     estimated_days: 2
   }
 ])
@@ -107,8 +107,8 @@ const chapterDetails = ref<RouteChapter[]>([
 const selectedChapterDetail = computed(() => {
   return chapterDetails.value[selectedChapter.value] ?? chapterDetails.value[0] ?? {
     order: 1,
-    title: '章节详情',
-    description: '暂无章节详情。',
+    title: 'Chapter detail',
+    description: 'No chapter detail has been generated yet.',
     estimated_days: 1
   }
 })
@@ -197,7 +197,7 @@ async function createRouteDraft(studySpaceId: string) {
 
 async function runRag() {
   if (!canRunRag.value) {
-    errorMessage.value = '请先填写学习空间名字、学习主题，并上传或粘贴材料。'
+    errorMessage.value = 'Fill in the space name, learning goal, and material before running ingestion.'
     return
   }
   const config = useRuntimeConfig()
@@ -226,7 +226,7 @@ async function runRag() {
     materialChunks.value = chunks.chunks
     await createRouteDraft(studySpaceId)
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'RAG 处理失败'
+    errorMessage.value = error instanceof Error ? error.message : 'RAG processing failed'
   } finally {
     runningRag.value = false
   }
@@ -266,11 +266,11 @@ async function confirmChapterDetails() {
     }
     const firstChapterId = chapterDetails.value[0]?.id ?? routeOutline.value[0]?.id
     if (!firstChapterId) {
-      throw new Error('章节还没有生成完成，请先运行 RAG 或生成路线。')
+      throw new Error('Chapters are not ready yet. Run RAG or generate a route first.')
     }
     await router.push(`/chapters/${firstChapterId}`)
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '无法进入逐章学习'
+    errorMessage.value = error instanceof Error ? error.message : 'Unable to enter chapter study'
   } finally {
     submitting.value = false
   }
@@ -286,8 +286,8 @@ async function confirmChapterDetails() {
         </NuxtLink>
         <div>
           <p class="eyebrow">New learning space</p>
-          <h1>创建学习空间</h1>
-          <p>按顺序配置目标、上传材料、运行 RAG、生成章节详情，然后直接进入逐章学习。</p>
+          <h1>Create learning space</h1>
+          <p>Set the goal, upload material, run ingestion, review the AI route, and enter chapter study.</p>
         </div>
       </header>
 
@@ -296,22 +296,22 @@ async function confirmChapterDetails() {
           <section class="card form-panel">
             <div class="section-heading">
               <p class="eyebrow">Step 1</p>
-              <h2>学习空间名字与主题</h2>
+              <h2>Space and learning goal</h2>
             </div>
 
             <label class="form-field">
-              学习空间名字
+              Space name
               <input v-model="form.name" name="space-name" class="input" required maxlength="160">
             </label>
 
             <label class="form-field">
-              学习主题 / Goal
+              Learning goal
               <textarea v-model="form.goal" name="learning-goal" class="textarea" required rows="4" />
             </label>
 
             <div class="field-grid">
               <label class="form-field">
-                默认模型
+                Default model
                 <select v-model="modelSettings.defaultModel" class="select">
                   <option value="gpt-4.1-mini">gpt-4.1-mini</option>
                   <option value="gpt-4.1">gpt-4.1</option>
@@ -335,7 +335,7 @@ async function confirmChapterDetails() {
             <div class="section-heading split">
               <div>
                 <p class="eyebrow">Step 2</p>
-                <h2>上传材料并运行 RAG</h2>
+                <h2>Material and RAG ingestion</h2>
               </div>
               <button
                 data-testid="open-chunk-modal"
@@ -344,25 +344,25 @@ async function confirmChapterDetails() {
                 :disabled="!materialChunks.length"
                 @click="showChunkModal = true"
               >
-                查看 embedding 内容
+                View chunks
               </button>
             </div>
 
             <label class="upload-zone">
-              <span>上传 Markdown / 文本材料</span>
+              <span>Upload Markdown or text</span>
               <small>{{ material.filename }}</small>
               <input type="file" accept=".md,.txt,text/markdown,text/plain" @change="handleMaterialFile">
             </label>
 
             <label class="form-field">
-              或直接粘贴材料
-              <textarea v-model="material.content" class="textarea" rows="7" placeholder="粘贴课程笔记、Markdown、文章正文..." />
+              Or paste material
+              <textarea v-model="material.content" class="textarea" rows="7" placeholder="Paste course notes, Markdown, or article text..." />
             </label>
 
             <div class="field-grid two">
               <label class="form-field">
                 Embedding model
-                <input v-model="modelSettings.embeddingModel" class="input" placeholder="可选，不填则使用默认分块 embedding">
+                <input v-model="modelSettings.embeddingModel" class="input" placeholder="Optional; empty uses default chunk embeddings">
               </label>
               <button
                 data-testid="run-rag"
@@ -371,7 +371,7 @@ async function confirmChapterDetails() {
                 :disabled="runningRag || !canRunRag"
                 @click="runRag"
               >
-                {{ runningRag ? 'RAG 处理中...' : 'Run ingestion / RAG' }}
+                {{ runningRag ? 'Running ingestion...' : 'Run ingestion' }}
               </button>
             </div>
           </section>
@@ -381,7 +381,7 @@ async function confirmChapterDetails() {
           <div class="route-heading">
             <div>
               <p class="eyebrow">Step 3</p>
-              <h2>学习路线大纲</h2>
+              <h2>Learning route outline</h2>
             </div>
             <button class="secondary-button ai-render" type="button" @click="renderDraftRoute">AI Render</button>
           </div>
@@ -393,7 +393,7 @@ async function confirmChapterDetails() {
             aria-label="Editable route outline"
           />
           <div v-else class="empty-route">
-            <p>RAG 完成后会自动刷新 AI 生成的学习路线；也可以先点击 AI Render 生成草稿。</p>
+            <p>After ingestion, the AI-generated route appears here. You can also render a draft first.</p>
           </div>
 
           <ol v-if="routeOutline.length" class="route-list">
@@ -409,10 +409,10 @@ async function confirmChapterDetails() {
             type="submit"
             :disabled="generatingDetails || runningRag"
           >
-            {{ generatingDetails ? '正在生成中，请稍等' : '生成章节学习详情' }}
+            {{ generatingDetails ? 'Generating, please wait...' : 'Generate chapter study details' }}
           </button>
 
-          <p v-if="generatingDetails" class="loading-copy">正在生成中，请稍等</p>
+          <p v-if="generatingDetails" class="loading-copy">Generating, please wait...</p>
           <p v-if="errorMessage" class="error-alert">{{ errorMessage }}</p>
         </aside>
       </form>
@@ -430,7 +430,7 @@ async function confirmChapterDetails() {
           ×
         </button>
         <p class="eyebrow">RAG preview</p>
-        <h2 id="chunk-title">Embedding 后的 chunks</h2>
+        <h2 id="chunk-title">Embedded chunks</h2>
         <div class="chunk-list">
           <article v-for="chunk in materialChunks" :key="chunk.id">
             <strong>Chunk {{ chunk.chunk_index + 1 }}</strong>
@@ -444,12 +444,12 @@ async function confirmChapterDetails() {
       <section class="modal-card chapter-card" role="dialog" aria-modal="true" aria-labelledby="chapter-title">
         <button class="chapter-back" type="button" @click="showChapterModal = false">
           <span aria-hidden="true">←</span>
-          返回
+          Back
         </button>
 
         <div class="chapter-layout">
           <aside class="chapter-list">
-            <p class="eyebrow">章节列表</p>
+            <p class="eyebrow">Chapters</p>
             <button
               v-for="(chapter, index) in chapterDetails"
               :key="`${chapter.order}-${chapter.title}`"
@@ -462,7 +462,7 @@ async function confirmChapterDetails() {
           </aside>
 
           <article class="chapter-detail">
-            <p class="eyebrow">章节详情</p>
+            <p class="eyebrow">Chapter detail</p>
             <h2 id="chapter-title">{{ selectedChapterDetail.title }}</h2>
             <p>{{ selectedChapterDetail.description }}</p>
           </article>
@@ -475,7 +475,7 @@ async function confirmChapterDetails() {
           :disabled="submitting"
           @click="confirmChapterDetails"
         >
-          {{ submitting ? '进入中...' : '确定并进入逐章学习' }}
+          {{ submitting ? 'Entering...' : 'Confirm and enter chapter study' }}
         </button>
       </section>
     </div>
@@ -930,6 +930,190 @@ async function confirmChapterDetails() {
   }
 
   .route-panel {
+    padding-left: 0;
+  }
+}
+
+/* Primer redesign pass: create-space is a focused setup workspace, not stacked cards. */
+.create-shell {
+  min-height: calc(100dvh - 56px);
+  gap: 0;
+}
+
+.create-header {
+  border-bottom: 1px solid var(--color-border);
+  padding: 18px 0 16px;
+}
+
+.create-header h1 {
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.create-header p {
+  max-width: 760px;
+}
+
+.back-link {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  font-size: 18px;
+}
+
+.create-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 390px);
+  gap: 0;
+}
+
+.form-stack {
+  border-right: 1px solid var(--color-border);
+  gap: 0;
+  padding: 18px 22px 18px 0;
+}
+
+.form-panel {
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0 0 18px;
+}
+
+.form-panel + .form-panel {
+  padding-top: 18px;
+}
+
+.section-heading {
+  min-height: auto;
+}
+
+.section-heading h2,
+.route-heading h2 {
+  font-size: 15px;
+}
+
+.field-grid {
+  gap: 10px;
+}
+
+.upload-zone,
+.empty-route {
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  background: var(--color-page);
+}
+
+.upload-zone:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.route-panel {
+  position: sticky;
+  top: 72px;
+  align-self: start;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 18px 0 18px 22px;
+}
+
+.route-heading {
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 12px;
+}
+
+.ai-render {
+  color: var(--color-primary);
+}
+
+.route-textarea {
+  min-height: 300px;
+  margin-top: 12px;
+}
+
+.route-list {
+  border-top: 1px solid var(--color-border);
+  gap: 0;
+  padding-top: 0;
+}
+
+.route-list li {
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  padding: 10px 0;
+}
+
+.detail-button {
+  margin-top: 14px;
+  width: 100%;
+}
+
+.modal-backdrop {
+  background: rgba(31, 35, 40, 0.36);
+  backdrop-filter: blur(6px);
+}
+
+.modal-card {
+  border-color: var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+}
+
+.modal-close,
+.chapter-back {
+  border-radius: 6px;
+}
+
+.chapter-card {
+  width: min(1180px, calc(100vw - 36px));
+  min-height: min(800px, calc(100dvh - 48px));
+}
+
+.chapter-layout {
+  grid-template-columns: minmax(220px, 290px) minmax(0, 1fr);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.chapter-list,
+.chapter-detail {
+  border: 0;
+  border-radius: 0;
+  background: var(--color-surface);
+}
+
+.chapter-list {
+  border-right: 1px solid var(--color-border);
+}
+
+.chapter-list button {
+  border-bottom: 1px solid var(--color-border);
+  border-left: 3px solid transparent;
+}
+
+.chapter-list button.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+@media (max-width: 1000px) {
+  .create-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .form-stack {
+    border-right: 0;
+    padding-right: 0;
+  }
+
+  .route-panel {
+    position: static;
     padding-left: 0;
   }
 }
