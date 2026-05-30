@@ -1,48 +1,117 @@
-﻿# study_agent
+# LeafMind
 
-AI learning agent platform.
+LeafMind is a local-first AI study workspace that helps your own materials grow
+into guided learning routes, grounded mentor answers, quizzes, and review plans.
 
-## Current Implementation Scope
+It is built for personal study: upload Markdown or text notes, generate a route,
+study chapter by chapter, ask questions with source citations, and let the Main
+Agent suggest what to learn next.
 
-The current foundation includes:
+## What It Does
 
-- Local Postgres, Redis, and MinIO infrastructure.
-- FastAPI API service.
-- Tenant-aware study space and source metadata models.
-- Study space creation API.
-- Upload presign API.
-- Runtime Markdown/text source ingestion and RAG retrieval.
-- Learning route generation and chapter study workflow.
-- Session Tutor messages with citations.
-- Session Tutor uses a LangGraph-backed L3 workflow while preserving the existing message API.
-- Chapter Mentor State Agent for chapter summaries, weak points, and next actions.
-- Deterministic user-scoped chapter quizzes and mastery records.
-- Space Planner Agent for study-space-level next actions and route proposals.
-- Planner action queue for confirmed reviews and route proposals.
-- Main Agent dashboard recommendation pipeline with review queue, quiz retake, and planner signals.
-- Local AI settings for provider, model, API key, answer style, and explicit web-search defaults.
-- Study-space export, import dry-run validation, and local backup/restore commands.
-- Nuxt app shell.
-- Dashboard, create-space, source library, study space, and chapter study UI.
+- Creates study spaces around a goal and a set of source materials.
+- Ingests Markdown/text sources into searchable chunks with citation metadata.
+- Generates learning routes and chapter study pages from your uploaded material.
+- Provides a RAG-grounded AI Mentor with expandable citations and source jumps.
+- Tracks chapter mentor state, weak points, quiz mastery, and planner actions.
+- Recommends what to study next through a Main Agent dashboard signal pipeline.
+- Supports quiz retakes, review queues, local AI settings, and optional web search.
+- Exports study spaces and supports local backup/restore for personal data safety.
 
-Automatic route mutation, quiz generation with LLMs, and full write-mode study-space import remain later phases.
+## Agent Model
 
-### RAG foundation
+LeafMind uses a layered agent design:
 
-The API includes the first RAG foundation:
+- **L1 Main Agent** decides the next learning move from time, intent, route state,
+  review signals, quiz mastery, and planner actions.
+- **L2 Planning Agents** summarize progress, weak points, route risks, review
+  candidates, and planner actions.
+- **L3 Session Tutor** handles chapter-level RAG chat. LangGraph is used here for
+  multi-step tutoring: load context, save messages, retrieve evidence, optionally
+  use web search, generate an answer, save citations, and record learning signals.
 
-- uploaded source metadata can be ingested into chunks;
-- chunks store citation metadata and embeddings;
-- retrieval is scoped by tenant and study space;
-- deterministic embeddings are used for local development and tests.
+The Main Agent is currently deterministic by design. LangGraph should move upward
+only when L1 needs multi-step planning, tool use, confirmations, and resumable
+state.
 
-Runtime ingestion supports text and Markdown objects in S3-compatible storage after a source is marked uploaded. PDF, OCR, and webpage ingestion remain later phases. Runtime retrieval is enabled only when the request includes valid development auth headers and the user is a member of the tenant. Domain tests cover ingestion and retrieval with local providers.
+## Tech Stack
 
-### AI Mentor answer provider
+- **Frontend:** Nuxt, Vue, Pinia, Vitest
+- **Backend:** FastAPI, SQLAlchemy, Alembic, Pydantic
+- **AI/RAG:** local deterministic providers, OpenAI-compatible LLM option,
+  LangGraph for Session Tutor runtime
+- **Storage:** SQLite for fast local mode, Postgres + pgvector + MinIO for
+  Docker-backed mode
+- **Runtime:** Python launcher, Docker Compose, local file storage
 
-Chapter AI Mentor uses RAG retrieval for grounding. By default it uses a deterministic
-local answer provider, so the app works without an external LLM key. To use an
-OpenAI-compatible chat completion API, set:
+## Quick Start
+
+Prerequisites:
+
+- Python 3.12
+- `uv`
+- Node.js 20+
+- Docker Desktop, only for Docker-backed mode
+
+Start the local personal runtime:
+
+```powershell
+cd F:\AIproject\study_agent
+python main.py local
+```
+
+`python main.py dev` is an alias for local mode.
+
+Open:
+
+```text
+http://127.0.0.1:3000
+```
+
+The local profile uses SQLite and local file storage under `.local/`, so it is
+the fastest way to try the product.
+
+## Docker-Backed Runtime
+
+Use this when you want Postgres, pgvector, Redis, and MinIO locally:
+
+```powershell
+python main.py docker-dev
+```
+
+Deployment-style Compose startup:
+
+```powershell
+docker compose -f infra/docker-compose.yml up --build
+```
+
+Default local ports:
+
+| Service | URL |
+| --- | --- |
+| Web | `http://127.0.0.1:3000` |
+| API | `http://127.0.0.1:8000` |
+| Postgres | `localhost:15432` |
+| Redis | `localhost:6379` |
+| MinIO API | `http://localhost:9000` |
+| MinIO Console | `http://localhost:9001` |
+
+## Typical Workflow
+
+1. Create a study space.
+2. Upload or paste a Markdown/text source.
+3. Run ingestion.
+4. Generate a learning route.
+5. Open a chapter and study the evidence.
+6. Ask the AI Mentor questions and inspect citations.
+7. Generate and submit quizzes.
+8. Review weak points and retake quizzes when needed.
+9. Use the Home dashboard to follow the Main Agent recommendation.
+
+## AI Settings
+
+LeafMind works without an external LLM key by using deterministic local answer
+providers. To use an OpenAI-compatible chat completion API, configure:
 
 ```env
 LLM_PROVIDER=openai-compatible
@@ -52,170 +121,74 @@ LLM_MODEL=gpt-4.1-mini
 LLM_TIMEOUT_SECONDS=30
 ```
 
-The same interface can point at other OpenAI-compatible providers by changing
-`LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`.
+You can also configure provider, model, API key, answer style, and default web
+search behavior from the local settings panel. API keys are stored under
+`.local/` and ignored by git.
 
-You can also configure these from the local app settings panel. API keys are stored
-under `.local/` and are ignored by git. Web search is explicit: when enabled it is
-treated as a network supplement, not as uploaded source material.
+Web search is explicit. When enabled, it is treated as supplemental network
+context, not as uploaded source material.
 
-### Development auth headers
+## Data Safety
 
-Local protected API calls use development headers until the full login flow is implemented:
-
-- `X-User-Id`: existing user UUID
-- `X-Tenant-Id`: existing tenant UUID
-
-The API verifies membership before returning tenant-scoped data.
-
-## Local Development
-
-### Runtime profiles
-
-The launcher supports two local runtime families. The lightweight local profile
-is for personal fast startup without Docker; Docker profiles keep the deployment
-database and object-storage shape.
-
-| Mode | Command | DB | Source storage | Use |
-| --- | --- | --- | --- | --- |
-| local/dev | `python main.py local` | SQLite | `.local/storage` | Personal fast startup |
-| docker-dev | `python main.py docker-dev` | Postgres | MinIO | Host debugging with real infrastructure |
-| docker | `python main.py docker` | Postgres | MinIO | Migration and deployment checks |
-
-`python main.py dev` is an alias for `python main.py local`. Local SQLite data
-is stored under `.local/` and is intended only for the personal/local runtime.
-The Docker and deployed modes still use Postgres, pgvector, Redis, and MinIO.
-Do not treat the SQLite database as the production database or as a migration
-target for deployed data.
-
-Prerequisites:
-
-- Docker Desktop running.
-- Python 3.12 with `uv`.
-- Node.js 20+.
-
-The local stack uses these ports:
-
-- Web: `http://127.0.0.1:3000`
-- API: `http://127.0.0.1:8000`
-- Postgres: `localhost:15432`
-- Redis: `localhost:6379`
-- MinIO API: `http://localhost:9000`
-- MinIO console: `http://localhost:9001`
-
-Start infrastructure:
-
-```powershell
-cd F:\AIproject\study_agent
-docker compose -f infra/docker-compose.yml up -d postgres redis minio
-```
-
-Local one-command startup:
-
-```powershell
-cd F:\AIproject\study_agent
-.\scripts\dev-up.ps1
-```
-
-Python one-command startup:
-
-```powershell
-cd F:\AIproject\study_agent
-python main.py
-```
-
-For the Docker-backed workflow, these commands start local infrastructure,
-prepare the API database, and run the API and web dev servers. Use `Ctrl+C` to
-stop API/Web processes. The Docker services remain running so local data is
-preserved.
-
-Docker deployment-style startup:
-
-```powershell
-cd F:\AIproject\study_agent
-docker compose -f infra/docker-compose.yml up --build
-```
-
-The Compose stack starts Postgres, Redis, MinIO, the API, and the web service.
-The web service is exposed on `http://localhost:3000`, and the API is exposed on
-`http://localhost:8000`.
-
-Run local checks:
-
-```powershell
-.\scripts\dev-check.ps1
-python main.py check
-python main.py docker-check
-```
-
-Data safety commands:
+Create a local backup:
 
 ```powershell
 python main.py backup --dry-run
 python main.py backup
+```
+
+Restore a backup:
+
+```powershell
 python main.py restore .local\backups\local-YYYYMMDD-HHMMSS
 python main.py restore .local\backups\local-YYYYMMDD-HHMMSS --yes
+```
+
+Reset local Docker data:
+
+```powershell
 python main.py reset-db
 python main.py reset-db --yes
 ```
 
-`backup` writes to `.local/backups/` by default. `.env` is copied only with
-`--include-env`. `restore --yes` is destructive for the local Docker database and
-MinIO data, then reruns migrations.
+Study spaces can also be exported as JSON or Markdown from the app.
 
-Prepare the API database:
+## Development
 
-```powershell
-cd F:\AIproject\study_agent\apps\api
-uv sync
-uv run alembic upgrade head
-```
-
-Seed the temporary development auth identity:
+Run API checks:
 
 ```powershell
-cd F:\AIproject\study_agent
-make api-seed-dev
+cd apps\api
+uv run pytest -q
+uv run ruff check app tests
 ```
 
-Start the API:
+Run web checks:
 
 ```powershell
-cd F:\AIproject\study_agent\apps\api
-uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+cd apps\web
+npm run test
+npm run typecheck
+npm run build
 ```
 
-Start the web app in another terminal:
+Run local environment checks:
 
 ```powershell
-cd apps/web
-npm install
-npm run dev -- --host 127.0.0.1 --port 3000
+python main.py check
+python main.py docker-check
 ```
 
-Open `http://127.0.0.1:3000`.
+## Current Limits
 
-Run the API smoke flow after the API is running:
+- Runtime ingestion currently targets Markdown and text sources.
+- PDF, OCR, webpage ingestion, and full write-mode study-space import are later
+  phases.
+- The product is currently optimized for local personal use, not hosted
+  multi-user deployment.
+- The local SQLite profile is for personal runtime only; Docker-backed Postgres
+  remains the closer deployment shape.
 
-```powershell
-cd F:\AIproject\study_agent
-make api-smoke-local
-```
+## License
 
-Manual browser smoke test:
-
-1. Create a study space.
-2. Upload a `.md` source.
-3. Run ingestion.
-4. Generate a route.
-5. Open a chapter with `Study`.
-6. Ask AI Mentor a question.
-7. Click `Update assessment` in the Chapter state panel.
-8. Generate and submit a chapter quiz.
-9. Confirm mastery is shown on the chapter page.
-10. Return to the study space and run the Space planner.
-11. Confirm the planner panel shows next action, risks, reviews, and route proposals.
-12. Create planner actions and accept one queued review.
-13. Open that chapter again and confirm the Planner review callout shows the accepted review.
-14. Mark the chapter complete.
-15. Return to Home and confirm Main Agent / Review Planner surfaces the next learning signal.
+No license has been selected yet.
