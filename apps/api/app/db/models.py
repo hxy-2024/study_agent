@@ -68,8 +68,11 @@ class MessageRole(str, enum.Enum):
 
 
 class AgentType(str, enum.Enum):
+    main_agent = "main_agent"
     space_planner = "space_planner"
     chapter_mentor = "chapter_mentor"
+    review_planner = "review_planner"
+    quiz_mastery = "quiz_mastery"
     session_tutor = "session_tutor"
 
 

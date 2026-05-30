@@ -11,10 +11,13 @@ from app.db.models import (
     PlannerAction,
     PlannerActionStatus,
     PlannerActionType,
+    Quiz,
+    QuizStatus,
     SpacePlannerState,
     StudySpace,
 )
-from app.domain.dashboard.service import get_dashboard_summary
+from app.domain.dashboard.schemas import DashboardRecommendationRequest
+from app.domain.dashboard.service import get_dashboard_summary, get_main_agent_recommendation
 
 
 class FakeScalarRows:
@@ -23,6 +26,26 @@ class FakeScalarRows:
 
     def __iter__(self):
         return iter(self._rows)
+
+
+class FakeCommitSession:
+    def __init__(self, rows) -> None:
+        self.calls = 0
+        self.rows = rows
+        self.added = []
+        self.committed = False
+
+    async def scalars(self, _statement):
+        result = self.rows[self.calls] if self.calls < len(self.rows) else []
+        self.calls += 1
+        return FakeScalarRows(result)
+
+    def add(self, row) -> None:
+        row.id = row.id or uuid.uuid4()
+        self.added.append(row)
+
+    async def commit(self) -> None:
+        self.committed = True
 
 
 @pytest.mark.anyio
@@ -179,3 +202,113 @@ async def test_dashboard_summary_includes_empty_state_recommendation() -> None:
     assert response.today_recommendation is not None
     assert response.today_recommendation.recommendation_type == "create_space"
     assert response.today_recommendation.action_url == "/spaces/new"
+
+
+@pytest.mark.anyio
+async def test_get_main_agent_recommendation_persists_completed_run() -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    fake_session = FakeCommitSession(
+        [
+            [
+                StudySpace(
+                    id=study_space_id,
+                    tenant_id=tenant_id,
+                    owner_user_id=user_id,
+                    name="RAG Basics",
+                    goal="Learn retrieval",
+                    target_days=14,
+                )
+            ],
+            [
+                Chapter(
+                    id=chapter_id,
+                    tenant_id=tenant_id,
+                    study_space_id=study_space_id,
+                    title="Retrieval",
+                    status=ChapterStatus.active,
+                    order_index=1,
+                )
+            ],
+            [],
+            [],
+            [],
+        ]
+    )
+
+    recommendation = await get_main_agent_recommendation(
+        session=fake_session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        request=DashboardRecommendationRequest(available_minutes=30, intent="balanced"),
+    )
+
+    assert fake_session.committed is True
+    assert len(fake_session.added) == 1
+    run = fake_session.added[0]
+    assert run.agent_type == AgentType.main_agent
+    assert run.status == AgentRunStatus.completed
+    assert run.model == "deterministic"
+    assert run.input_payload["request"]["available_minutes"] == 30
+    assert run.input_payload["signal_counts"]["chapters"] == 1
+    assert run.output_payload["strategy_version"] == "main_agent_agenda_v2"
+    assert recommendation.agent_run_id == run.id
+
+
+@pytest.mark.anyio
+async def test_get_main_agent_recommendation_uses_quiz_intent() -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    quiz_id = uuid.uuid4()
+    fake_session = FakeCommitSession(
+        [
+            [
+                StudySpace(
+                    id=study_space_id,
+                    tenant_id=tenant_id,
+                    owner_user_id=user_id,
+                    name="RAG Basics",
+                    goal="Learn retrieval",
+                    target_days=14,
+                )
+            ],
+            [
+                Chapter(
+                    id=chapter_id,
+                    tenant_id=tenant_id,
+                    study_space_id=study_space_id,
+                    title="Retrieval",
+                    status=ChapterStatus.completed,
+                    order_index=1,
+                )
+            ],
+            [],
+            [],
+            [
+                Quiz(
+                    id=quiz_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    study_space_id=study_space_id,
+                    chapter_id=chapter_id,
+                    title="Retrieval quiz",
+                    status=QuizStatus.active,
+                )
+            ],
+        ]
+    )
+
+    recommendation = await get_main_agent_recommendation(
+        session=fake_session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        request=DashboardRecommendationRequest(available_minutes=15, intent="quiz"),
+    )
+
+    assert recommendation.recommendation_type == "quiz_chapter"
+    assert recommendation.action_url == f"/quizzes/{quiz_id}"
+    assert recommendation.chapter_id == chapter_id

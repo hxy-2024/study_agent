@@ -1,6 +1,10 @@
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+
+DashboardRecommendationIntent = Literal["balanced", "new_material", "review", "quiz"]
 
 
 class DashboardSpace(BaseModel):
@@ -40,7 +44,15 @@ class DashboardRecommendationAction(BaseModel):
 class DashboardRecommendation(DashboardRecommendationAction):
     agent_type: str = "main_agent"
     freshness: str = "deterministic_fallback"
+    strategy_version: str = "main_agent_agenda_v2"
+    source_signals: dict[str, int] = Field(default_factory=dict)
+    agent_run_id: uuid.UUID | None = None
     secondary_actions: list[DashboardRecommendationAction] = Field(default_factory=list)
+
+
+class DashboardRecommendationRequest(BaseModel):
+    available_minutes: int = Field(default=30, ge=5, le=180)
+    intent: DashboardRecommendationIntent = "balanced"
 
 
 class DashboardResponse(BaseModel):

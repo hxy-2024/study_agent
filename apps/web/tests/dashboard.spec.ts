@@ -284,6 +284,126 @@ describe('DashboardPage', () => {
     expect(wrapper.text()).toContain('Review citations')
   })
 
+  it('opens a main agent conversation and updates the today card from a user message', async () => {
+    const recommendationCalls: Array<{ available_minutes: number; intent: string }> = []
+    let resolveRecommendation!: (value: unknown) => void
+    const recommendationPromise = new Promise((resolve) => {
+      resolveRecommendation = resolve
+    })
+    const recommendation = {
+      agent_type: 'main_agent',
+      title: 'Review citation recall',
+      action_label: 'Start review',
+      action_url: '/chapters/chapter-3',
+      recommendation_type: 'review_chapter',
+      reason: 'Focus on retrieval quality before the next route step.',
+      estimated_minutes: 15,
+      study_space_id: 'space-1',
+      chapter_id: 'chapter-3',
+      freshness: 'fresh',
+      secondary_actions: []
+    }
+
+    fetchMock.mockImplementation((url: string, options?: { method?: string; body?: { available_minutes: number; intent: string } }) => {
+      if (url.endsWith('/dashboard')) {
+        return Promise.resolve({
+          spaces: [
+            {
+              id: 'space-1',
+              name: 'RAG Basics',
+              goal: 'Learn retrieval',
+              status: 'active',
+              target_days: 14
+            }
+          ],
+          pending_actions: [],
+          supervision_refresh_count: 0,
+          recent_agent_runs: [],
+          today_recommendation: {
+            agent_type: 'main_agent',
+            title: 'Continue Retrieval',
+            action_label: 'Study now',
+            action_url: '/chapters/chapter-1',
+            recommendation_type: 'continue_chapter',
+            reason: 'RAG Basics has an unfinished chapter ready.',
+            estimated_minutes: 25,
+            study_space_id: 'space-1',
+            chapter_id: 'chapter-1',
+            freshness: 'deterministic_fallback',
+            secondary_actions: []
+          }
+        })
+      }
+      if (url.endsWith('/dashboard/recommendation') && options?.method === 'POST') {
+        recommendationCalls.push(options.body ?? { available_minutes: -1, intent: 'missing' })
+        return recommendationPromise
+      }
+      return Promise.reject(new Error(`Unexpected request ${url}`))
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="available-minutes-30"]').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="main-agent-fab"]').trigger('click')
+    expect(wrapper.text()).toContain('Tell me what kind of session you want.')
+
+    await wrapper.find('[data-testid="main-agent-input"]').setValue('I only have 15 minutes and want to review')
+    await wrapper.find('[data-testid="main-agent-form"]').trigger('submit')
+
+    expect(recommendationCalls[0]).toEqual({
+      available_minutes: 15,
+      intent: 'review'
+    })
+    expect(wrapper.text()).toContain('Thinking through today')
+
+    resolveRecommendation(recommendation)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Review citation recall')
+    expect(wrapper.find('a[href="/chapters/chapter-3"]').text()).toContain('Start review')
+    expect(wrapper.text()).toContain('I only have 15 minutes and want to review')
+    expect(wrapper.text()).toContain('Focus on retrieval quality before the next route step.')
+  })
+
+  it('shows a conversational error when the main agent recommendation request fails', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/dashboard')) {
+        return Promise.resolve({
+          spaces: [
+            {
+              id: 'space-1',
+              name: 'RAG Basics',
+              goal: 'Learn retrieval',
+              status: 'active',
+              target_days: 14
+            }
+          ],
+          pending_actions: [],
+          supervision_refresh_count: 0,
+          recent_agent_runs: [],
+          today_recommendation: null
+        })
+      }
+      if (url.endsWith('/dashboard/recommendation')) {
+        return Promise.reject(new Error('Request failed'))
+      }
+      return Promise.reject(new Error(`Unexpected request ${url}`))
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="main-agent-fab"]').trigger('click')
+    await wrapper.find('[data-testid="main-agent-input"]').setValue('I have 15 minutes')
+    await wrapper.find('[data-testid="main-agent-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Unable to load recommendation')
+    expect(wrapper.text()).toContain('Request failed')
+  })
+
   it('shows archived spaces and restores one from the dashboard', async () => {
     fetchMock.mockImplementation((url: string, options?: { method?: string }) => {
       if (url.endsWith('/dashboard')) {

@@ -6,17 +6,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
     AgentRun,
+    AgentRunStatus,
+    AgentType,
     Chapter,
+    MasteryRecord,
     PlannerAction,
     PlannerActionStatus,
+    Quiz,
     SpacePlannerState,
     StudySpace,
     StudySpaceStatus,
 )
+from app.domain.dashboard.recommendations import STRATEGY_VERSION
 from app.domain.dashboard.recommendations import build_main_agent_recommendation
 from app.domain.dashboard.schemas import (
     DashboardAction,
     DashboardAgentRun,
+    DashboardRecommendation,
+    DashboardRecommendationRequest,
     DashboardResponse,
     DashboardSpace,
 )
@@ -108,6 +115,36 @@ async def get_dashboard_summary(
     )
     chapters = list(chapter_rows)
 
+    mastery_rows = await session.scalars(
+        select(MasteryRecord).where(
+            MasteryRecord.tenant_id == tenant_id,
+            MasteryRecord.user_id == user_id,
+            MasteryRecord.study_space_id.in_(active_space_ids),
+        )
+    )
+    mastery_records = list(mastery_rows)
+
+    quiz_rows = await session.scalars(
+        select(Quiz).where(
+            Quiz.tenant_id == tenant_id,
+            Quiz.user_id == user_id,
+            Quiz.study_space_id.in_(active_space_ids),
+        )
+    )
+    quizzes = list(quiz_rows)
+
+    today_recommendation = await get_main_agent_recommendation(
+        session=session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        request=DashboardRecommendationRequest(),
+        spaces=spaces,
+        chapters=chapters,
+        planner_actions=actions,
+        mastery_records=mastery_records,
+        quizzes=quizzes,
+    )
+
     return DashboardResponse(
         spaces=[
             DashboardSpace(
@@ -139,10 +176,130 @@ async def get_dashboard_summary(
             )
             for run in agent_runs
         ],
-        today_recommendation=build_main_agent_recommendation(
-            spaces=spaces,
-            chapters=chapters,
-            planner_actions=actions,
-            mastery_records=[],
-        ),
+        today_recommendation=today_recommendation,
     )
+
+
+async def _load_recommendation_signals(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> tuple[list[StudySpace], list[Chapter], list[PlannerAction], list[MasteryRecord], list[Quiz]]:
+    active_space_ids = select(StudySpace.id).where(
+        StudySpace.tenant_id == tenant_id,
+        StudySpace.owner_user_id == user_id,
+        StudySpace.status != StudySpaceStatus.archived,
+    )
+    space_rows = await session.scalars(
+        select(StudySpace)
+        .where(
+            StudySpace.tenant_id == tenant_id,
+            StudySpace.owner_user_id == user_id,
+            StudySpace.status != StudySpaceStatus.archived,
+        )
+        .order_by(StudySpace.created_at.desc(), StudySpace.id)
+    )
+    spaces = list(space_rows)
+    chapter_rows = await session.scalars(
+        select(Chapter)
+        .where(
+            Chapter.tenant_id == tenant_id,
+            Chapter.study_space_id.in_(active_space_ids),
+        )
+        .order_by(Chapter.study_space_id, Chapter.order_index, Chapter.id)
+    )
+    chapters = list(chapter_rows)
+    action_rows = await session.scalars(
+        select(PlannerAction)
+        .where(
+            PlannerAction.tenant_id == tenant_id,
+            PlannerAction.user_id == user_id,
+            PlannerAction.study_space_id.in_(active_space_ids),
+            PlannerAction.status.in_([PlannerActionStatus.proposed, PlannerActionStatus.accepted]),
+        )
+        .order_by(PlannerAction.created_at.desc(), PlannerAction.id)
+        .limit(8)
+    )
+    planner_actions = list(action_rows)
+    mastery_rows = await session.scalars(
+        select(MasteryRecord).where(
+            MasteryRecord.tenant_id == tenant_id,
+            MasteryRecord.user_id == user_id,
+            MasteryRecord.study_space_id.in_(active_space_ids),
+        )
+    )
+    mastery_records = list(mastery_rows)
+    quiz_rows = await session.scalars(
+        select(Quiz).where(
+            Quiz.tenant_id == tenant_id,
+            Quiz.user_id == user_id,
+            Quiz.study_space_id.in_(active_space_ids),
+        )
+    )
+    quizzes = list(quiz_rows)
+    return spaces, chapters, planner_actions, mastery_records, quizzes
+
+
+async def get_main_agent_recommendation(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    request: DashboardRecommendationRequest,
+    spaces: list[StudySpace] | None = None,
+    chapters: list[Chapter] | None = None,
+    planner_actions: list[PlannerAction] | None = None,
+    mastery_records: list[MasteryRecord] | None = None,
+    quizzes: list[Quiz] | None = None,
+) -> DashboardRecommendation:
+    if spaces is None or chapters is None or planner_actions is None or mastery_records is None or quizzes is None:
+        spaces, chapters, planner_actions, mastery_records, quizzes = await _load_recommendation_signals(
+            session=session,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+
+    recommendation = build_main_agent_recommendation(
+        spaces=spaces,
+        chapters=chapters,
+        planner_actions=planner_actions,
+        mastery_records=mastery_records,
+        quizzes=quizzes,
+        request=request,
+    )
+    if recommendation is None:
+        recommendation = DashboardRecommendation(
+            title="Create your first study space",
+            action_label="Create space",
+            action_url="/spaces/new",
+            recommendation_type="create_space",
+            reason="No active learning space exists yet.",
+            estimated_minutes=10,
+        )
+
+    if recommendation.study_space_id is None:
+        return recommendation
+
+    run = AgentRun(
+        tenant_id=tenant_id,
+        study_space_id=recommendation.study_space_id,
+        agent_type=AgentType.main_agent,
+        status=AgentRunStatus.completed,
+        model="deterministic",
+        input_payload={
+            "request": request.model_dump(),
+            "signal_counts": recommendation.source_signals,
+            "strategy_version": STRATEGY_VERSION,
+        },
+        output_payload=recommendation.model_dump(mode="json"),
+    )
+    try:
+        session.add(run)
+        await session.commit()
+    except Exception:
+        rollback = getattr(session, "rollback", None)
+        if rollback is not None:
+            await rollback()
+        return recommendation
+
+    recommendation.agent_run_id = run.id
+    return recommendation
