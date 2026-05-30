@@ -424,13 +424,71 @@ p {
 .runtime-pill {
   display: inline-flex;
   align-items: center;
+  border: 0;
   border-radius: 999px;
   background: var(--color-primary-soft);
   color: var(--color-primary);
+  cursor: default;
   font-size: 12px;
   font-weight: 800;
   min-height: 28px;
   padding: 5px 9px;
+}
+
+.runtime-status-button {
+  cursor: pointer;
+}
+
+.runtime-status-button:hover,
+.runtime-status-button:focus-visible {
+  background: rgba(20, 184, 166, 0.18);
+  outline: none;
+}
+
+.runtime-status-list {
+  display: grid;
+  gap: 10px;
+}
+
+.runtime-status-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+  padding: 12px;
+}
+
+.runtime-status-row strong {
+  display: block;
+  color: var(--color-text);
+  font-size: 13px;
+  text-transform: capitalize;
+}
+
+.runtime-status-row p {
+  margin: 2px 0 0;
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.runtime-status-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--color-success);
+}
+
+.runtime-status-warning .runtime-status-dot {
+  background: #f59e0b;
+}
+
+.runtime-status-error .runtime-status-dot {
+  background: var(--color-error);
 }
 
 .empty-state {

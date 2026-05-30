@@ -47,6 +47,11 @@ async def get_dashboard_summary(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> DashboardResponse:
+    active_space_ids = select(StudySpace.id).where(
+        StudySpace.tenant_id == tenant_id,
+        StudySpace.owner_user_id == user_id,
+        StudySpace.status != StudySpaceStatus.archived,
+    )
     space_rows = await session.scalars(
         select(StudySpace)
         .where(
@@ -63,6 +68,7 @@ async def get_dashboard_summary(
         .where(
             PlannerAction.tenant_id == tenant_id,
             PlannerAction.user_id == user_id,
+            PlannerAction.study_space_id.in_(active_space_ids),
             PlannerAction.status.in_([PlannerActionStatus.proposed, PlannerActionStatus.accepted]),
         )
         .order_by(PlannerAction.created_at.desc(), PlannerAction.id)
@@ -74,13 +80,17 @@ async def get_dashboard_summary(
         select(SpacePlannerState).where(
             SpacePlannerState.tenant_id == tenant_id,
             SpacePlannerState.user_id == user_id,
+            SpacePlannerState.study_space_id.in_(active_space_ids),
         )
     )
     planner_states = list(planner_state_rows)
 
     run_rows = await session.scalars(
         select(AgentRun)
-        .where(AgentRun.tenant_id == tenant_id)
+        .where(
+            AgentRun.tenant_id == tenant_id,
+            AgentRun.study_space_id.in_(active_space_ids),
+        )
         .order_by(AgentRun.created_at.desc(), AgentRun.id)
         .limit(5)
     )

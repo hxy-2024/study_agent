@@ -71,8 +71,7 @@ async def test_dashboard_summary_collects_local_learning_work() -> None:
             self.calls = 0
 
         async def scalars(self, _statement):
-            if self.calls == 0:
-                captured["space_query"] = str(_statement.compile(compile_kwargs={"literal_binds": True}))
+            captured[f"query_{self.calls}"] = str(_statement.compile(compile_kwargs={"literal_binds": True}))
             result = rows[self.calls]
             self.calls += 1
             return FakeScalarRows(result)
@@ -84,7 +83,13 @@ async def test_dashboard_summary_collects_local_learning_work() -> None:
     )
 
     assert response.spaces[0].name == "Linear Algebra"
-    assert "archived" in captured["space_query"]
+    assert "archived" in captured["query_0"]
+    assert "study_spaces" in captured["query_1"]
+    assert "archived" in captured["query_1"]
+    assert "study_spaces" in captured["query_2"]
+    assert "archived" in captured["query_2"]
+    assert "study_spaces" in captured["query_3"]
+    assert "archived" in captured["query_3"]
     assert response.pending_actions[0].title == "Review retrieval"
     assert response.supervision_refresh_count == 1
     assert response.recent_agent_runs[0].summary == "Tutor answered with citations."

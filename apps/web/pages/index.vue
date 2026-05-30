@@ -59,6 +59,8 @@ const spaceSearch = ref('')
 const selectedSpaceId = ref('')
 const continueChapterBySpace = ref<Record<string, string>>({})
 const deletingSpaceId = ref('')
+const archivedSpaces = ref<DashboardSpace[]>([])
+const restoringSpaceId = ref('')
 
 const fallbackSpaces = computed(() => store.spaces.filter(space => space.status !== 'archived'))
 const activeSpaces = computed(() => dashboard.value?.spaces ?? fallbackSpaces.value)
@@ -89,6 +91,8 @@ function getContinueChapterId(spaceId: string) {
 const continueChapterId = computed(() => currentSpace.value ? getContinueChapterId(currentSpace.value.id) : null)
 const continueHref = computed(() => continueChapterId.value ? `/chapters/${continueChapterId.value}` : '/spaces/new')
 const continueLabel = computed(() => continueChapterId.value ? 'Continue study' : 'Prepare route')
+const currentExportUrl = computed(() => currentSpace.value ? `${config.public.apiBaseUrl}/study-spaces/${currentSpace.value.id}/export` : '')
+const currentMarkdownExportUrl = computed(() => currentSpace.value ? `${config.public.apiBaseUrl}/study-spaces/${currentSpace.value.id}/export?format=markdown` : '')
 const today = new Date()
 const currentDay = today.getDate()
 const calendarDays = Array.from({ length: 35 }, (_, index) => index + 1)
@@ -96,6 +100,13 @@ const progressPercent = computed(() => {
   if (!currentSpace.value) return 0
   return Math.max(12, Math.min(78, Math.round(100 / Math.max(1, currentSpace.value.target_days) * 7)))
 })
+
+function devAuthHeaders() {
+  return {
+    'X-User-Id': '00000000-0000-0000-0000-000000000002',
+    'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
+  }
+}
 
 function selectSpace(spaceId: string) {
   selectedSpaceId.value = spaceId
@@ -109,14 +120,36 @@ async function archiveSpace(spaceId: string, spaceName: string) {
   try {
     await $fetch(`${config.public.apiBaseUrl}/study-spaces/${spaceId}`, {
       method: 'DELETE',
-      headers: {
-        'X-User-Id': '00000000-0000-0000-0000-000000000002',
-        'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
-      }
+      headers: devAuthHeaders()
     })
     await Promise.all([store.loadSpaces(), loadDashboard()])
+    await loadArchivedSpaces()
   } finally {
     deletingSpaceId.value = ''
+  }
+}
+
+async function loadArchivedSpaces() {
+  try {
+    archivedSpaces.value = await $fetch<DashboardSpace[]>(`${config.public.apiBaseUrl}/study-spaces/archived`, {
+      headers: devAuthHeaders()
+    })
+  } catch {
+    archivedSpaces.value = []
+  }
+}
+
+async function restoreSpace(spaceId: string) {
+  if (restoringSpaceId.value) return
+  restoringSpaceId.value = spaceId
+  try {
+    await $fetch(`${config.public.apiBaseUrl}/study-spaces/${spaceId}/restore`, {
+      method: 'POST',
+      headers: devAuthHeaders()
+    })
+    await Promise.all([store.loadSpaces(), loadDashboard(), loadArchivedSpaces()])
+  } finally {
+    restoringSpaceId.value = ''
   }
 }
 
@@ -138,10 +171,7 @@ async function loadContinueChapter(spaceId: string) {
   let nextChapterId: string | null = null
   try {
     const response = await $fetch<ChapterListResponse>(`${config.public.apiBaseUrl}/study-spaces/${spaceId}/chapters`, {
-      headers: {
-        'X-User-Id': '00000000-0000-0000-0000-000000000002',
-        'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
-      }
+      headers: devAuthHeaders()
     })
     const chapters = response.chapters ?? []
     const nextChapter = chapters.find(chapter => chapter.status !== 'completed') ?? chapters[0]
@@ -153,10 +183,7 @@ async function loadContinueChapter(spaceId: string) {
   if (!nextChapterId) {
     try {
       const routesResponse = await $fetch<RoutesListResponse>(`${config.public.apiBaseUrl}/study-spaces/${spaceId}/routes`, {
-        headers: {
-          'X-User-Id': '00000000-0000-0000-0000-000000000002',
-          'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
-        }
+        headers: devAuthHeaders()
       })
       for (const route of routesResponse.routes ?? []) {
         const chapters = route.chapters ?? []
@@ -180,6 +207,7 @@ async function loadContinueChapter(spaceId: string) {
 onMounted(() => {
   store.loadSpaces()
   loadDashboard()
+  loadArchivedSpaces()
 })
 
 watch(
@@ -278,6 +306,18 @@ watch(
           </div>
         </section>
 
+        <section v-if="currentSpace" class="panel export-panel">
+          <div>
+            <p class="eyebrow">Data safety</p>
+            <h2>Export current space</h2>
+            <p>Download a local snapshot before large edits or cleanup.</p>
+          </div>
+          <div class="export-actions">
+            <a class="secondary-button" :href="currentExportUrl" target="_blank" rel="noreferrer">JSON</a>
+            <a class="secondary-button" :href="currentMarkdownExportUrl" target="_blank" rel="noreferrer">Markdown</a>
+          </div>
+        </section>
+
         <section v-else class="card continue-panel dashboard-empty">
           <div>
             <p class="eyebrow">No active space</p>
@@ -303,6 +343,32 @@ watch(
             <p v-else>Upload text or Markdown in a study space to prepare retrieval and route generation.</p>
           </section>
         </div>
+
+        <section v-if="archivedSpaces.length" class="panel archived-panel">
+          <div class="section-heading archived-heading">
+            <div>
+              <p class="eyebrow">Archived</p>
+              <h2>Archived spaces</h2>
+            </div>
+          </div>
+          <div class="archived-list">
+            <article v-for="space in archivedSpaces" :key="space.id" class="archived-row">
+              <div>
+                <strong>{{ space.name }}</strong>
+                <small>{{ space.goal }}</small>
+              </div>
+              <button
+                class="secondary-button"
+                type="button"
+                :disabled="restoringSpaceId === space.id"
+                :data-testid="`restore-space-${space.id}`"
+                @click="restoreSpace(space.id)"
+              >
+                Restore
+              </button>
+            </article>
+          </div>
+        </section>
       </section>
 
       <aside class="calendar-column" aria-label="Calendar and events">
@@ -679,6 +745,53 @@ watch(
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
+.export-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.export-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.archived-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.archived-heading {
+  min-height: auto;
+}
+
+.archived-list {
+  display: grid;
+  gap: 8px;
+}
+
+.archived-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid rgba(161, 211, 202, 0.42);
+  padding-top: 10px;
+}
+
+.archived-row strong,
+.archived-row small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.archived-row small {
+  color: var(--color-muted);
+  margin-top: 3px;
+}
+
 .dashboard-stats .panel {
   border: 0;
   border-top: 1px solid rgba(161, 211, 202, 0.55);
@@ -744,6 +857,17 @@ watch(
 
   .dashboard-stats {
     grid-template-columns: 1fr;
+  }
+
+  .export-panel,
+  .archived-row {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .export-panel,
+  .export-actions {
+    flex-direction: column;
   }
 }
 </style>

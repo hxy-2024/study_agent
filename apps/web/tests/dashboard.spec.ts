@@ -236,4 +236,65 @@ describe('DashboardPage', () => {
     expect(wrapper.text()).toContain('Continue study')
     expect(wrapper.find('a[href="/chapters/chapter-1"]').exists()).toBe(true)
   })
+
+  it('shows archived spaces and restores one from the dashboard', async () => {
+    fetchMock.mockImplementation((url: string, options?: { method?: string }) => {
+      if (url.endsWith('/dashboard')) {
+        return Promise.resolve({
+          spaces: [],
+          pending_actions: [],
+          supervision_refresh_count: 0,
+          recent_agent_runs: []
+        })
+      }
+      if (url.endsWith('/study-spaces/archived')) {
+        return Promise.resolve([
+          {
+            id: 'space-archived',
+            name: 'Archived RAG',
+            goal: 'Old retrieval notes',
+            status: 'archived',
+            target_days: 14
+          }
+        ])
+      }
+      if (url.endsWith('/study-spaces/space-archived/restore') && options?.method === 'POST') {
+        return Promise.resolve({})
+      }
+      return Promise.reject(new Error(`Unexpected request ${url}`))
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Archived')
+    expect(wrapper.text()).toContain('Archived RAG')
+
+    await wrapper.find('[data-testid="restore-space-space-archived"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/study-spaces/space-archived/restore',
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(storeState.loadSpaces).toHaveBeenCalledTimes(2)
+  })
+
+  it('links the current space export endpoints', () => {
+    storeState.spaces = [
+      {
+        id: 'space-1',
+        name: 'Linear Algebra',
+        goal: 'Master eigenvectors and matrices',
+        status: 'active',
+        target_days: 21
+      }
+    ]
+
+    const wrapper = mountPage()
+
+    expect(wrapper.find('a[href="http://localhost:8000/api/v1/study-spaces/space-1/export"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="http://localhost:8000/api/v1/study-spaces/space-1/export?format=markdown"]').exists()).toBe(true)
+  })
 })

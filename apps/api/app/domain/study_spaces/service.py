@@ -64,6 +64,16 @@ async def list_study_spaces(session: AsyncSession, tenant_id) -> list[StudySpace
     return list(result.scalars().all())
 
 
+async def list_archived_study_spaces(session: AsyncSession, tenant_id) -> list[StudySpace]:
+    result = await session.execute(
+        select(StudySpace)
+        .where(StudySpace.tenant_id == tenant_id)
+        .where(StudySpace.status == StudySpaceStatus.archived)
+        .order_by(StudySpace.updated_at.desc(), StudySpace.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
 async def archive_study_space(session: AsyncSession, tenant_id, study_space_id) -> StudySpace:
     result = await session.execute(
         select(StudySpace)
@@ -74,6 +84,21 @@ async def archive_study_space(session: AsyncSession, tenant_id, study_space_id) 
     if study_space is None:
         raise ValueError("Study space not found for tenant")
     study_space.status = StudySpaceStatus.archived
+    await session.commit()
+    await session.refresh(study_space)
+    return study_space
+
+
+async def restore_study_space(session: AsyncSession, tenant_id, study_space_id) -> StudySpace:
+    result = await session.execute(
+        select(StudySpace)
+        .where(StudySpace.tenant_id == tenant_id)
+        .where(StudySpace.id == study_space_id)
+    )
+    study_space = result.scalar_one_or_none()
+    if study_space is None:
+        raise ValueError("Study space not found for tenant")
+    study_space.status = StudySpaceStatus.active
     await session.commit()
     await session.refresh(study_space)
     return study_space
