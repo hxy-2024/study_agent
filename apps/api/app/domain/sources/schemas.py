@@ -62,3 +62,7 @@ class SourceChunkResponse(BaseModel):
 
 class SourceChunkListResponse(BaseModel):
     chunks: list[SourceChunkResponse]
+
+
+class SourceChunkDetailResponse(BaseModel):
+    chunk: SourceChunkResponse

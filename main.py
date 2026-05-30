@@ -156,7 +156,7 @@ def check(_: argparse.Namespace) -> int:
 
 def reset_db(args: argparse.Namespace) -> int:
     commands = [
-        ["docker", "compose", "-f", str(COMPOSE_FILE), "down"],
+        ["docker", "compose", "-f", str(COMPOSE_FILE), "down", "-v"],
         ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d", "postgres", "redis", "minio"],
     ]
     if not args.yes:
@@ -169,6 +169,7 @@ def reset_db(args: argparse.Namespace) -> int:
     require_command("docker")
     for command in commands:
         run(command)
+    prepare_api(skip_install=True)
     return 0
 
 
@@ -185,12 +186,8 @@ def seed_demo(_: argparse.Namespace) -> int:
 
 
 def backup(args: argparse.Namespace) -> int:
-    require_command("docker")
-    output_dir = Path(args.output) if args.output else ROOT / "backups" / datetime.now().strftime("local-%Y%m%d-%H%M%S")
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    postgres_dump = output_dir / "postgres.sql"
-    run_stdout_to_file(
+    output_dir = Path(args.output) if args.output else ROOT / ".local" / "backups" / datetime.now().strftime("local-%Y%m%d-%H%M%S")
+    commands = [
         [
             "docker",
             "compose",
@@ -204,13 +201,34 @@ def backup(args: argparse.Namespace) -> int:
             "study_agent",
             "study_agent",
         ],
-        postgres_dump,
-    )
-    run(["docker", "compose", "-f", str(COMPOSE_FILE), "cp", "minio:/data", str(output_dir / "minio-data")])
+        ["docker", "compose", "-f", str(COMPOSE_FILE), "cp", "minio:/data", str(output_dir / "minio-data")],
+    ]
+    if args.dry_run:
+        print("backup dry run. This would create:")
+        print(f"- {output_dir}")
+        for command in commands:
+            print(f"- {' '.join(command)}")
+        if args.include_env:
+            print("- copy .env into the backup directory")
+        print("Re-run without --dry-run to execute. No data was changed.")
+        return 0
+
+    require_command("docker")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    postgres_dump = output_dir / "postgres.sql"
+    run_stdout_to_file(commands[0], postgres_dump)
+    run(commands[1])
+    env_included = False
+    env_path = ROOT / ".env"
+    if args.include_env and env_path.exists():
+        shutil.copy2(env_path, output_dir / ".env")
+        env_included = True
     manifest = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "postgres_dump": "postgres.sql",
         "minio_data": "minio-data",
+        "env_included": env_included,
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"Backup written to {output_dir}")
@@ -229,6 +247,23 @@ def restore(args: argparse.Namespace) -> int:
         return 1
     commands = [
         ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d", "postgres", "minio"],
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(COMPOSE_FILE),
+            "exec",
+            "-T",
+            "postgres",
+            "psql",
+            "-U",
+            "study_agent",
+            "-d",
+            "study_agent",
+            "-c",
+            "DROP SCHEMA public CASCADE; CREATE SCHEMA public;",
+        ],
+        ["docker", "compose", "-f", str(COMPOSE_FILE), "exec", "-T", "minio", "sh", "-c", "rm -rf /data/*"],
         ["docker", "compose", "-f", str(COMPOSE_FILE), "cp", str(minio_data), "minio:/data"],
         [
             "docker",
@@ -256,9 +291,12 @@ def restore(args: argparse.Namespace) -> int:
     require_command("docker")
     run(commands[0])
     run(commands[1])
-    print(f"> {' '.join(commands[2])} < {postgres_dump}")
+    run(commands[2])
+    run(commands[3])
+    print(f"> {' '.join(commands[4])} < {postgres_dump}")
     with postgres_dump.open("rb") as input_file:
-        subprocess.run(resolve_command(commands[2]), cwd=ROOT, check=True, stdin=input_file)
+        subprocess.run(resolve_command(commands[4]), cwd=ROOT, check=True, stdin=input_file)
+    prepare_api(skip_install=True)
     return 0
 
 
@@ -287,7 +325,9 @@ def build_parser() -> argparse.ArgumentParser:
     seed_parser.set_defaults(func=seed_demo)
 
     backup_parser = subcommands.add_parser("backup", help="Back up local Postgres and MinIO data.")
-    backup_parser.add_argument("--output", help="Backup output directory. Defaults to backups/local-<timestamp>.")
+    backup_parser.add_argument("--output", help="Backup output directory. Defaults to .local/backups/local-<timestamp>.")
+    backup_parser.add_argument("--dry-run", action="store_true", help="Show backup actions without writing files.")
+    backup_parser.add_argument("--include-env", action="store_true", help="Include .env in the backup directory.")
     backup_parser.set_defaults(func=backup)
 
     restore_parser = subcommands.add_parser("restore", help="Show or run local restore from a backup directory.")

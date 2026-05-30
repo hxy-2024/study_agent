@@ -172,6 +172,39 @@ async def test_get_quiz_uses_authorized_tenant(monkeypatch) -> None:
 
 
 @pytest.mark.anyio
+async def test_retake_quiz_uses_authorized_tenant_and_user(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    quiz_id = uuid.uuid4()
+    new_quiz_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    captured = {}
+
+    async def fake_context() -> CurrentUserContext:
+        return CurrentUserContext(user_id=user_id, tenant_id=tenant_id)
+
+    async def fake_retake_quiz(**kwargs):
+        captured.update(kwargs)
+        return quiz_fixture(chapter_id=chapter_id, quiz_id=new_quiz_id)
+
+    monkeypatch.setattr(routes_quizzes, "retake_quiz", fake_retake_quiz)
+    app.dependency_overrides[get_db_session] = fake_get_db_session
+    app.dependency_overrides[get_authorized_user_context] = fake_context
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(f"/api/v1/quizzes/{quiz_id}/retake")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert captured["tenant_id"] == tenant_id
+    assert captured["user_id"] == user_id
+    assert captured["quiz_id"] == quiz_id
+    assert response.json()["id"] == str(new_quiz_id)
+    assert response.json()["chapter_id"] == str(chapter_id)
+
+
+@pytest.mark.anyio
 async def test_submit_quiz_uses_authorized_tenant_and_user(monkeypatch) -> None:
     tenant_id = uuid.uuid4()
     user_id = uuid.uuid4()

@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -8,10 +9,13 @@ from app.db.models import (
     AgentType,
     Chapter,
     ChapterStatus,
+    MasteryLevel,
+    MasteryRecord,
     PlannerAction,
     PlannerActionStatus,
     PlannerActionType,
     Quiz,
+    QuizSubmission,
     QuizStatus,
     SpacePlannerState,
     StudySpace,
@@ -182,6 +186,71 @@ async def test_dashboard_summary_includes_main_agent_recommendation() -> None:
     assert response.today_recommendation is not None
     assert response.today_recommendation.agent_type == "main_agent"
     assert response.today_recommendation.action_url == f"/chapters/{chapter_id}"
+    assert response.review_queue[0].kind == "continue_chapter"
+    assert response.review_queue[0].chapter_id == chapter_id
+
+
+@pytest.mark.anyio
+async def test_dashboard_summary_does_not_persist_main_agent_run() -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.added = []
+            self.committed = False
+
+        async def scalars(self, _statement):
+            self.calls += 1
+            if self.calls == 1:
+                return FakeScalarRows(
+                    [
+                        StudySpace(
+                            id=study_space_id,
+                            tenant_id=tenant_id,
+                            owner_user_id=user_id,
+                            name="RAG Basics",
+                            goal="Learn retrieval",
+                            target_days=14,
+                        )
+                    ]
+                )
+            if self.calls == 5:
+                return FakeScalarRows(
+                    [
+                        Chapter(
+                            id=chapter_id,
+                            tenant_id=tenant_id,
+                            study_space_id=study_space_id,
+                            title="Retrieval",
+                            status=ChapterStatus.active,
+                            order_index=1,
+                        )
+                    ]
+                )
+            return FakeScalarRows([])
+
+        def add(self, row) -> None:
+            self.added.append(row)
+
+        async def commit(self) -> None:
+            self.committed = True
+
+    fake_session = FakeSession()
+
+    response = await get_dashboard_summary(
+        session=fake_session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+
+    assert response.today_recommendation is not None
+    assert response.today_recommendation.action_url == f"/chapters/{chapter_id}"
+    assert fake_session.added == []
+    assert fake_session.committed is False
 
 
 @pytest.mark.anyio
@@ -312,3 +381,138 @@ async def test_get_main_agent_recommendation_uses_quiz_intent() -> None:
     assert recommendation.recommendation_type == "quiz_chapter"
     assert recommendation.action_url == f"/quizzes/{quiz_id}"
     assert recommendation.chapter_id == chapter_id
+
+
+@pytest.mark.anyio
+async def test_get_main_agent_recommendation_includes_review_planner_signal() -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    fake_session = FakeCommitSession(
+        [
+            [
+                StudySpace(
+                    id=study_space_id,
+                    tenant_id=tenant_id,
+                    owner_user_id=user_id,
+                    name="RAG Basics",
+                    goal="Learn retrieval",
+                    target_days=14,
+                )
+            ],
+            [
+                Chapter(
+                    id=chapter_id,
+                    tenant_id=tenant_id,
+                    study_space_id=study_space_id,
+                    title="Grounding",
+                    status=ChapterStatus.completed,
+                    order_index=1,
+                )
+            ],
+            [],
+            [
+                MasteryRecord(
+                    id=uuid.uuid4(),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    study_space_id=study_space_id,
+                    chapter_id=chapter_id,
+                    score_percent=62,
+                    level=MasteryLevel.developing,
+                    weak_points=["source grounding"],
+                    last_quiz_submission_id=uuid.uuid4(),
+                    updated_at=datetime.now(UTC) - timedelta(days=2),
+                )
+            ],
+            [],
+        ]
+    )
+
+    recommendation = await get_main_agent_recommendation(
+        session=fake_session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        request=DashboardRecommendationRequest(available_minutes=30, intent="balanced"),
+    )
+
+    assert recommendation.recommendation_type == "review_chapter"
+    assert recommendation.chapter_id == chapter_id
+    assert recommendation.reason == "Review weak point: source grounding."
+    assert recommendation.source_signals["review_candidates"] == 1
+    assert fake_session.added[0].input_payload["signal_counts"]["review_candidates"] == 1
+
+
+@pytest.mark.anyio
+async def test_get_main_agent_recommendation_includes_quiz_mastery_signal() -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    quiz_id = uuid.uuid4()
+    submission_id = uuid.uuid4()
+    fake_session = FakeCommitSession(
+        [
+            [
+                StudySpace(
+                    id=study_space_id,
+                    tenant_id=tenant_id,
+                    owner_user_id=user_id,
+                    name="RAG Basics",
+                    goal="Learn retrieval",
+                    target_days=14,
+                )
+            ],
+            [
+                Chapter(
+                    id=chapter_id,
+                    tenant_id=tenant_id,
+                    study_space_id=study_space_id,
+                    title="Grounding",
+                    status=ChapterStatus.completed,
+                    order_index=1,
+                )
+            ],
+            [],
+            [],
+            [
+                Quiz(
+                    id=quiz_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    study_space_id=study_space_id,
+                    chapter_id=chapter_id,
+                    title="Grounding quiz",
+                    status=QuizStatus.submitted,
+                )
+            ],
+            [
+                QuizSubmission(
+                    id=submission_id,
+                    tenant_id=tenant_id,
+                    quiz_id=quiz_id,
+                    chapter_id=chapter_id,
+                    user_id=user_id,
+                    answers=[0, 1],
+                    score_percent=62,
+                    correct_count=1,
+                    question_count=2,
+                    results=[],
+                    weak_points=["citation grounding"],
+                )
+            ],
+        ]
+    )
+
+    recommendation = await get_main_agent_recommendation(
+        session=fake_session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        request=DashboardRecommendationRequest(available_minutes=30, intent="quiz"),
+    )
+
+    assert recommendation.recommendation_type == "retake_quiz"
+    assert recommendation.action_url == f"/quizzes/{quiz_id}"
+    assert recommendation.source_signals["quiz_mastery"] == 1
+    assert fake_session.added[0].input_payload["signal_counts"]["quiz_mastery"] == 1

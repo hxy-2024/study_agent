@@ -48,6 +48,13 @@ interface ChapterStudyDetail {
 interface MentorCitation {
   chunk_id: string
   source_id: string
+  source_jump?: {
+    space_id: string
+    source_id: string
+    chunk_id: string
+    source_url: string
+    chunk_url: string
+  }
   source_filename: string
   chunk_index: number
   text: string
@@ -261,6 +268,13 @@ function displayTitle(value?: string | null) {
     .replace(/^\s{0,3}#{1,6}\s+/, '')
     .replace(/\*\*/g, '')
     .trim()
+}
+
+function citationJumpUrl(citation: MentorCitation) {
+  if (citation.source_jump?.chunk_url) return citation.source_jump.chunk_url
+  const spaceId = detail.value?.study_space.id
+  if (!spaceId) return `/spaces?source_id=${citation.source_id}&chunk_id=${citation.chunk_id}`
+  return `/spaces/${spaceId}?source_id=${citation.source_id}&chunk_id=${citation.chunk_id}`
 }
 
 async function loadChapter() {
@@ -685,11 +699,14 @@ onBeforeUnmount(() => {
             <div class="message-bubble">
               <div class="markdown-body" v-html="renderMarkdown(message.content)" />
               <div v-if="message.citations?.length" class="citation-list">
-                <article v-for="citation in message.citations" :key="citation.chunk_id" class="citation-card">
-                  <strong>{{ citation.source_filename }}</strong>
-                  <span>Chunk #{{ citation.chunk_index }}</span>
+                <details v-for="citation in message.citations" :key="citation.chunk_id" class="citation-card">
+                  <summary>
+                    <strong>{{ citation.source_filename }}</strong>
+                    <span>Chunk #{{ citation.chunk_index }}</span>
+                  </summary>
                   <p>{{ citation.text }}</p>
-                </article>
+                  <NuxtLink class="source-jump-link" :to="citationJumpUrl(citation)">Open source chunk</NuxtLink>
+                </details>
               </div>
               <div v-if="message.role !== 'user'" class="message-actions">
                 <button class="fork-action" type="button" aria-label="Fork checkpoint" title="Fork checkpoint">

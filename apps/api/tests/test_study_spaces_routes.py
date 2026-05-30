@@ -146,3 +146,71 @@ async def test_export_space_supports_json_and_markdown(monkeypatch) -> None:
     assert "# RAG Basics" in markdown_response.text
     assert "Chunking" in markdown_response.text
     assert captured["tenant_id"] == tenant_id
+
+
+async def test_import_space_defaults_to_dry_run_and_uses_authorized_scope(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    captured = {}
+
+    async def fake_context() -> CurrentUserContext:
+        return CurrentUserContext(user_id=user_id, tenant_id=tenant_id)
+
+    async def fake_import_study_space(**kwargs):
+        captured.update(kwargs)
+        return {
+            "dry_run": True,
+            "can_restore": False,
+            "schema_version": 1,
+            "original_study_space_id": "source-space",
+            "summary": {"study_spaces": 1},
+            "tenant_rewrite": {"to_tenant_id": str(tenant_id)},
+            "user_rewrite": {"to_user_id": str(user_id)},
+            "id_remap": {"study_spaces": {"source-space": "target-space"}},
+            "warnings": [],
+            "unsupported_write_models": ["sources"],
+        }
+
+    monkeypatch.setattr(routes_study_spaces, "import_study_space", fake_import_study_space)
+    app.dependency_overrides[get_db_session] = fake_get_db_session
+    app.dependency_overrides[get_authorized_user_context] = fake_context
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/api/v1/study-spaces/import", json={"payload": {"schema_version": 1}})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["dry_run"] is True
+    assert captured["tenant_id"] == tenant_id
+    assert captured["user_id"] == user_id
+    assert captured["dry_run"] is True
+    assert captured["payload"] == {"schema_version": 1}
+
+
+async def test_import_space_non_dry_run_returns_501_until_restore_is_implemented(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    async def fake_context() -> CurrentUserContext:
+        return CurrentUserContext(user_id=user_id, tenant_id=tenant_id)
+
+    async def fake_import_study_space(**kwargs):
+        from app.domain.study_spaces.import_restore import StudySpaceImportNotImplementedError
+
+        raise StudySpaceImportNotImplementedError("Study space import restore is not implemented")
+
+    monkeypatch.setattr(routes_study_spaces, "import_study_space", fake_import_study_space)
+    app.dependency_overrides[get_db_session] = fake_get_db_session
+    app.dependency_overrides[get_authorized_user_context] = fake_context
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/study-spaces/import",
+                json={"dry_run": False, "payload": {"schema_version": 1}},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 501
+    assert "not implemented" in response.json()["detail"]

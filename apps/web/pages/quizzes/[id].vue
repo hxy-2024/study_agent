@@ -77,6 +77,7 @@ const result = ref<QuizSubmissionResult | null>(null)
 const answers = ref<Record<string, number>>({})
 const loading = ref(false)
 const submitting = ref(false)
+const retaking = ref(false)
 const errorMessage = ref('')
 
 const questions = computed(() => {
@@ -183,6 +184,26 @@ async function submitQuiz() {
   }
 }
 
+async function retakeQuiz() {
+  if (!quiz.value || retaking.value) return
+  retaking.value = true
+  errorMessage.value = ''
+  try {
+    const nextQuiz = await $fetch<QuizDetail>(
+      `${config.public.apiBaseUrl}/quizzes/${quizId.value}/retake`,
+      {
+        method: 'POST',
+        headers: protectedHeaders()
+      }
+    )
+    await navigateTo(`/quizzes/${nextQuiz.id}`)
+  } catch (error) {
+    errorMessage.value = appendBackendMessage('Failed to start retake.', error)
+  } finally {
+    retaking.value = false
+  }
+}
+
 onMounted(() => {
   loadQuiz()
 })
@@ -212,7 +233,18 @@ onMounted(() => {
             <h2>{{ result.score_percent }}%</h2>
             <p>{{ result.correct_count }} / {{ result.question_count }} correct</p>
           </div>
-          <span class="status-badge">Mastery: {{ result.mastery.level }}</span>
+          <div class="result-actions">
+            <span class="status-badge">Mastery: {{ result.mastery.level }}</span>
+            <button
+              data-testid="retake-quiz"
+              class="secondary-button"
+              type="button"
+              :disabled="retaking"
+              @click="retakeQuiz"
+            >
+              {{ retaking ? 'Starting...' : 'Retake quiz' }}
+            </button>
+          </div>
         </div>
 
         <div class="result-grid">

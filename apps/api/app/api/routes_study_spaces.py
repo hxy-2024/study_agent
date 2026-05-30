@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import CurrentUserContext, get_authorized_user_context
 from app.db.session import get_db_session
 from app.domain.study_spaces.export import export_study_space, format_study_space_markdown
-from app.domain.study_spaces.schemas import StudySpaceCreate, StudySpaceRead
+from app.domain.study_spaces.import_restore import (
+    StudySpaceImportNotImplementedError,
+    StudySpaceImportValidationError,
+    import_study_space,
+)
+from app.domain.study_spaces.schemas import StudySpaceCreate, StudySpaceImportRequest, StudySpaceImportResult, StudySpaceRead
 from app.domain.study_spaces.service import (
     archive_study_space,
     create_study_space,
@@ -47,6 +52,26 @@ async def create_space(
         tenant_id=context.tenant_id,
         owner_user_id=context.user_id,
     )
+
+
+@router.post("/import", response_model=StudySpaceImportResult)
+async def import_space(
+    payload: StudySpaceImportRequest,
+    context: CurrentUserContext = Depends(get_authorized_user_context),
+    session: AsyncSession = Depends(get_db_session),
+):
+    try:
+        return await import_study_space(
+            session=session,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            payload=payload.payload,
+            dry_run=payload.dry_run,
+        )
+    except StudySpaceImportValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except StudySpaceImportNotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
 
 
 @router.delete("/{study_space_id}", status_code=status.HTTP_204_NO_CONTENT)

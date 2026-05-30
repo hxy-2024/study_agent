@@ -95,6 +95,13 @@ class PlannerActionStatus(str, enum.Enum):
     dismissed = "dismissed"
 
 
+class LearningSignalStatus(str, enum.Enum):
+    active = "active"
+    completed = "completed"
+    dismissed = "dismissed"
+    snoozed = "snoozed"
+
+
 class ChapterAnnotationKind(str, enum.Enum):
     note = "note"
     highlight = "highlight"
@@ -484,6 +491,37 @@ class ChapterAnnotation(Base):
     study_space: Mapped["StudySpace"] = relationship(back_populates="chapter_annotations")
     chapter: Mapped["Chapter"] = relationship(back_populates="annotations")
     source_chunk: Mapped["SourceChunk"] = relationship(back_populates="chapter_annotations")
+
+
+class LearningSignal(Base):
+    __tablename__ = "learning_signals"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_id", "dedupe_key", name="uq_learning_signals_tenant_user_dedupe"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
+    chapter_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chapters.id"), nullable=True, index=True)
+    quiz_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("quizzes.id"), nullable=True, index=True)
+    agent_type: Mapped[AgentType] = mapped_column(
+        Enum(AgentType, name="agent_type"),
+        nullable=False,
+    )
+    signal_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[LearningSignalStatus] = mapped_column(
+        Enum(LearningSignalStatus, name="learning_signal_status"),
+        nullable=False,
+        default=LearningSignalStatus.active,
+    )
+    dedupe_key: Mapped[str] = mapped_column(String(240), nullable=False)
+    available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Session(Base):

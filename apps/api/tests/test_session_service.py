@@ -164,10 +164,14 @@ async def test_record_agent_run_defaults_to_session_tutor_completed_run() -> Non
 
 def test_build_message_response_includes_citations() -> None:
     message_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+    chunk_id = uuid.uuid4()
     response = build_message_response(
         message=SimpleNamespace(
             id=message_id,
             session_id=uuid.uuid4(),
+            study_space_id=study_space_id,
             role=MessageRole.assistant,
             content="Answer",
             created_at=None,
@@ -176,8 +180,8 @@ def test_build_message_response_includes_citations() -> None:
             SimpleNamespace(
                 id=uuid.uuid4(),
                 message_id=message_id,
-                source_id=uuid.uuid4(),
-                source_chunk_id=uuid.uuid4(),
+                source_id=source_id,
+                source_chunk_id=chunk_id,
                 quote="Quoted evidence",
                 citation={"page": 2},
             )
@@ -186,6 +190,13 @@ def test_build_message_response_includes_citations() -> None:
 
     assert response.role == "assistant"
     assert response.citations[0].quote == "Quoted evidence"
+    assert response.citations[0].source_jump.model_dump(mode="json") == {
+        "space_id": str(study_space_id),
+        "source_id": str(source_id),
+        "chunk_id": str(chunk_id),
+        "source_url": f"/spaces/{study_space_id}?source_id={source_id}",
+        "chunk_url": f"/spaces/{study_space_id}?source_id={source_id}&chunk_id={chunk_id}",
+    }
 
 
 @pytest.mark.anyio

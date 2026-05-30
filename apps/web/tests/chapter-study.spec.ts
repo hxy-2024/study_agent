@@ -28,6 +28,7 @@ const chapterStudySource = readFileSync(
   join(process.cwd(), 'pages/chapters/[id]/index.vue'),
   'utf8'
 )
+const normalizedChapterStudySource = chapterStudySource.replace(/\r\n/g, '\n')
 
 function mountPage() {
   return mount(ChapterStudyPage, {
@@ -105,7 +106,14 @@ function mentorMessage(overrides = {}) {
         source_id: '00000000-0000-0000-0000-000000000201',
         source_filename: 'rag.md',
         chunk_index: 2,
-        text: 'RAG retrieves relevant evidence.'
+        text: 'RAG retrieves relevant evidence.',
+        source_jump: {
+          space_id: '00000000-0000-0000-0000-000000000101',
+          source_id: '00000000-0000-0000-0000-000000000201',
+          chunk_id: '00000000-0000-0000-0000-000000000301',
+          source_url: '/spaces/00000000-0000-0000-0000-000000000101?source_id=00000000-0000-0000-0000-000000000201',
+          chunk_url: '/spaces/00000000-0000-0000-0000-000000000101?source_id=00000000-0000-0000-0000-000000000201&chunk_id=00000000-0000-0000-0000-000000000301'
+        }
       }
     ],
     ...overrides
@@ -182,9 +190,9 @@ describe('ChapterStudyPage', () => {
   })
 
   it('keeps the chapter page scrollable on mobile layouts', () => {
-    expect(chapterStudySource).toContain(':global(body.chapter-study-page) {\n    overflow: auto;')
-    expect(chapterStudySource).toContain('height: auto;')
-    expect(chapterStudySource).toContain('overflow: visible;')
+    expect(normalizedChapterStudySource).toContain(':global(body.chapter-study-page) {\n    overflow: auto;')
+    expect(normalizedChapterStudySource).toContain('height: auto;')
+    expect(normalizedChapterStudySource).toContain('overflow: visible;')
   })
 
   it('scrolls the chat thread to the latest conversation after session updates', () => {
@@ -195,16 +203,16 @@ describe('ChapterStudyPage', () => {
   })
 
   it('uses smoother rounded chat evidence surfaces', () => {
-    expect(chapterStudySource).toContain('scroll-behavior: smooth;')
-    expect(chapterStudySource).toContain('.citation-card {\n  border-color: var(--color-border);\n  border-radius: 12px;')
-    expect(chapterStudySource).toContain('.citation-card:hover')
-    expect(chapterStudySource).toContain('border-radius: 16px;')
+    expect(normalizedChapterStudySource).toContain('scroll-behavior: smooth;')
+    expect(normalizedChapterStudySource).toContain('.citation-card {\n  border-color: var(--color-border);\n  border-radius: 12px;')
+    expect(normalizedChapterStudySource).toContain('.citation-card:hover')
+    expect(normalizedChapterStudySource).toContain('border-radius: 16px;')
   })
 
   it('centers the progress status inside its strip', () => {
-    expect(chapterStudySource).toContain('.progress-strip {\n  height: 32px;')
-    expect(chapterStudySource).toContain('justify-content: center;')
-    expect(chapterStudySource).toContain('text-align: center;')
+    expect(normalizedChapterStudySource).toContain('.progress-strip {\n  height: 32px;')
+    expect(normalizedChapterStudySource).toContain('justify-content: center;')
+    expect(normalizedChapterStudySource).toContain('text-align: center;')
   })
 
   it('lists every chapter from the current route in the left rail', async () => {
@@ -376,6 +384,12 @@ describe('ChapterStudyPage', () => {
     expect(wrapper.html()).toContain('<h2>Retrieval answer</h2>')
     expect(wrapper.text()).toContain('rag.md')
     expect(wrapper.text()).toContain('Chunk #2')
+    const citation = wrapper.find('details.citation-card')
+    expect(citation.exists()).toBe(true)
+    expect(citation.attributes('open')).toBeUndefined()
+    expect(citation.find('a').attributes('href')).toBe(
+      '/spaces/00000000-0000-0000-0000-000000000101?source_id=00000000-0000-0000-0000-000000000201&chunk_id=00000000-0000-0000-0000-000000000301'
+    )
     expect(wrapper.find('[aria-label="Fork checkpoint"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="Interrupt generation"]').exists()).toBe(false)
   })

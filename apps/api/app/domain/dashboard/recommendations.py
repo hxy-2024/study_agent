@@ -2,6 +2,9 @@ from typing import Any
 
 from app.db.models import ChapterStatus, PlannerActionStatus, QuizStatus
 from app.domain.dashboard.schemas import DashboardRecommendation, DashboardRecommendationAction, DashboardRecommendationRequest
+from app.domain.quiz_mastery.schemas import QuizMasterySignal
+from app.domain.review_planner.schemas import ReviewCandidate
+from app.domain.review_queue.schemas import ReviewQueueItem
 
 
 STRATEGY_VERSION = "main_agent_agenda_v2"
@@ -48,6 +51,19 @@ def _review_action(chapter: Any, spaces: list[Any], mastery: Any, available_minu
     )
 
 
+def _review_candidate_action(candidate: ReviewCandidate, available_minutes: int) -> DashboardRecommendationAction:
+    return DashboardRecommendationAction(
+        title=candidate.title,
+        action_label="Review now",
+        action_url=f"/chapters/{candidate.chapter_id}",
+        recommendation_type="review_chapter",
+        reason=candidate.reason,
+        estimated_minutes=min(20, available_minutes),
+        study_space_id=candidate.study_space_id,
+        chapter_id=candidate.chapter_id,
+    )
+
+
 def _quiz_action(chapter: Any, quiz: Any, available_minutes: int) -> DashboardRecommendationAction:
     return DashboardRecommendationAction(
         title=f"Quiz yourself on {chapter.title}",
@@ -61,6 +77,21 @@ def _quiz_action(chapter: Any, quiz: Any, available_minutes: int) -> DashboardRe
     )
 
 
+def _quiz_mastery_action(signal: QuizMasterySignal, quizzes: list[Any], available_minutes: int) -> DashboardRecommendationAction:
+    quiz = next((item for item in quizzes if item.chapter_id == signal.chapter_id), None)
+    action_url = f"/quizzes/{quiz.id}" if quiz is not None else f"/chapters/{signal.chapter_id}"
+    return DashboardRecommendationAction(
+        title="Retake quiz",
+        action_label="Retake quiz",
+        action_url=action_url,
+        recommendation_type="retake_quiz",
+        reason=signal.reason,
+        estimated_minutes=min(15, available_minutes),
+        study_space_id=signal.study_space_id,
+        chapter_id=signal.chapter_id,
+    )
+
+
 def _planner_action(action: Any) -> DashboardRecommendationAction:
     return DashboardRecommendationAction(
         title=action.title,
@@ -71,6 +102,25 @@ def _planner_action(action: Any) -> DashboardRecommendationAction:
         estimated_minutes=15,
         study_space_id=action.study_space_id,
         chapter_id=action.chapter_id,
+    )
+
+
+def _queue_action(item: ReviewQueueItem) -> DashboardRecommendationAction:
+    return DashboardRecommendationAction(
+        title=item.title,
+        action_label=(
+            "Retake quiz"
+            if item.kind == "retake_quiz"
+            else "Review now"
+            if item.kind == "review_chapter"
+            else "Study now"
+        ),
+        action_url=item.action_url,
+        recommendation_type=item.kind,
+        reason=item.reason,
+        estimated_minutes=item.estimated_minutes,
+        study_space_id=item.study_space_id,
+        chapter_id=item.chapter_id,
     )
 
 
@@ -123,13 +173,26 @@ def build_main_agent_recommendation(
     planner_actions: list[Any],
     mastery_records: list[Any],
     quizzes: list[Any] | None = None,
+    review_candidates: list[ReviewCandidate] | None = None,
+    quiz_mastery_signals: list[QuizMasterySignal] | None = None,
+    review_queue: list[ReviewQueueItem] | None = None,
     request: DashboardRecommendationRequest | None = None,
 ) -> DashboardRecommendation | None:
     request = request or DashboardRecommendationRequest()
     quizzes = quizzes or []
+    review_candidates = review_candidates or []
+    quiz_mastery_signals = quiz_mastery_signals or []
+    review_queue = review_queue or []
     candidates: list[DashboardRecommendationAction] = []
-    review_candidates: list[DashboardRecommendationAction] = []
+    review_actions: list[DashboardRecommendationAction] = [
+        _review_candidate_action(candidate, request.available_minutes) for candidate in review_candidates
+    ]
     quiz_candidates: list[DashboardRecommendationAction] = []
+    quiz_mastery_candidates: list[DashboardRecommendationAction] = [
+        _quiz_mastery_action(signal, quizzes, request.available_minutes)
+        for signal in quiz_mastery_signals
+        if signal.retake_recommended
+    ]
     chapter_candidates: list[DashboardRecommendationAction] = []
     source_signals = _source_signals(
         spaces=spaces,
@@ -138,6 +201,9 @@ def build_main_agent_recommendation(
         mastery_records=mastery_records,
         quizzes=quizzes,
     )
+    source_signals["review_candidates"] = len(review_candidates)
+    source_signals["quiz_mastery"] = len(quiz_mastery_signals)
+    source_signals["review_queue"] = len(review_queue)
 
     for mastery in sorted(
         [record for record in mastery_records if _is_weak_mastery(record)],
@@ -145,7 +211,7 @@ def build_main_agent_recommendation(
     ):
         chapter = _find_chapter(chapters, mastery.chapter_id)
         if chapter is not None:
-            review_candidates.append(_review_action(chapter, spaces, mastery, request.available_minutes))
+            review_actions.append(_review_action(chapter, spaces, mastery, request.available_minutes))
 
     active_quizzes = [
         quiz for quiz in quizzes if _enum_value(getattr(quiz, "status", "")) in {QuizStatus.active.value, QuizStatus.submitted.value}
@@ -176,15 +242,45 @@ def build_main_agent_recommendation(
         in {PlannerActionStatus.proposed.value, PlannerActionStatus.accepted.value}
     ]
     planner_candidates = [_planner_action(action) for action in open_actions]
+    queue_candidates = [_queue_action(item) for item in review_queue]
+    if request.intent == "review":
+        queue_candidates = [
+            action
+            for action in queue_candidates
+            if action.recommendation_type in {"review_chapter", "retake_quiz", "planner_action"}
+        ] + [
+            action
+            for action in queue_candidates
+            if action.recommendation_type == "continue_chapter"
+        ]
+    elif request.intent == "quiz":
+        quiz_queue_candidates = [
+            action
+            for action in queue_candidates
+            if action.recommendation_type == "retake_quiz"
+        ]
+        other_queue_candidates = [
+            action
+            for action in queue_candidates
+            if action.recommendation_type != "retake_quiz"
+        ]
 
     if request.intent == "review":
-        candidates = review_candidates + chapter_candidates + quiz_candidates + planner_candidates
+        candidates = queue_candidates + review_actions + quiz_mastery_candidates + chapter_candidates + quiz_candidates + planner_candidates
     elif request.intent == "quiz":
-        candidates = quiz_candidates + review_candidates + chapter_candidates + planner_candidates
+        candidates = (
+            quiz_queue_candidates
+            + quiz_mastery_candidates
+            + quiz_candidates
+            + other_queue_candidates
+            + review_actions
+            + chapter_candidates
+            + planner_candidates
+        )
     elif request.intent == "new_material":
-        candidates = chapter_candidates + review_candidates + quiz_candidates + planner_candidates
+        candidates = queue_candidates + chapter_candidates + review_actions + quiz_mastery_candidates + quiz_candidates + planner_candidates
     else:
-        candidates = review_candidates + chapter_candidates + quiz_candidates + planner_candidates
+        candidates = queue_candidates + review_actions + quiz_mastery_candidates + chapter_candidates + quiz_candidates + planner_candidates
 
     if not candidates and spaces:
         candidates.append(_prepare_space_action(spaces[0]))

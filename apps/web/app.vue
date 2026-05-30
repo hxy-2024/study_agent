@@ -15,16 +15,22 @@ interface RuntimeStatus {
 const config = useRuntimeConfig()
 const drawerOpen = ref(false)
 const settingsOpen = ref(false)
+const settingsLoading = ref(false)
+const settingsSaving = ref(false)
+const settingsError = ref('')
+const settingsMessage = ref('')
 const runtimeStatusOpen = ref(false)
 const runtimeStatusLoading = ref(false)
 const runtimeStatusError = ref('')
 const runtimeStatus = ref<RuntimeStatus | null>(null)
 
 const settings = reactive({
-  baseUrl: 'http://127.0.0.1:8000/api/v1',
+  provider: 'deterministic',
+  baseUrl: 'https://api.openai.com/v1',
   apiKey: '',
   defaultModel: 'gpt-4.1-mini',
-  embeddingModel: ''
+  webSearchDefault: false,
+  answerStyle: 'concise'
 })
 
 const navigationItems = [
@@ -40,10 +46,62 @@ async function openNavigationItem(item: { action?: string; enabled?: boolean; to
 
   if (item.action === 'settings') {
     settingsOpen.value = true
+    await loadLocalSettings()
   } else if (item.to) {
     await navigateTo(item.to)
   }
   drawerOpen.value = false
+}
+
+async function loadLocalSettings() {
+  settingsLoading.value = true
+  settingsError.value = ''
+  settingsMessage.value = ''
+  try {
+    const response = await $fetch<{
+      llm_provider: string
+      llm_base_url: string
+      llm_model: string
+      llm_api_key_masked: string
+      web_search_default_enabled: boolean
+      answer_style: string
+    }>(`${config.public.apiBaseUrl}/local-settings/ai`)
+    settings.provider = response.llm_provider
+    settings.baseUrl = response.llm_base_url
+    settings.defaultModel = response.llm_model
+    settings.apiKey = ''
+    settings.webSearchDefault = response.web_search_default_enabled
+    settings.answerStyle = response.answer_style
+  } catch (error) {
+    settingsError.value = error instanceof Error ? error.message : 'Unable to load local settings.'
+  } finally {
+    settingsLoading.value = false
+  }
+}
+
+async function saveLocalSettings() {
+  settingsSaving.value = true
+  settingsError.value = ''
+  settingsMessage.value = ''
+  try {
+    await $fetch(`${config.public.apiBaseUrl}/local-settings/ai`, {
+      method: 'PUT',
+      body: {
+        llm_provider: settings.provider,
+        llm_base_url: settings.baseUrl,
+        llm_model: settings.defaultModel,
+        llm_api_key: settings.apiKey,
+        web_search_default_enabled: settings.webSearchDefault,
+        answer_style: settings.answerStyle
+      }
+    })
+    settings.apiKey = ''
+    settingsMessage.value = 'Saved local AI settings.'
+  } catch (error) {
+    settingsError.value = error instanceof Error ? error.message : 'Unable to save local settings.'
+  } finally {
+    settingsSaving.value = false
+  }
 }
 
 async function openRuntimeStatus() {
@@ -153,6 +211,10 @@ async function openRuntimeStatus() {
 
         <div class="settings-grid">
           <label class="form-field">
+            Provider
+            <input v-model="settings.provider" class="input" placeholder="deterministic or openai-compatible">
+          </label>
+          <label class="form-field">
             Base URL
             <input v-model="settings.baseUrl" class="input" type="url">
           </label>
@@ -165,13 +227,33 @@ async function openRuntimeStatus() {
             <input v-model="settings.defaultModel" class="input">
           </label>
           <label class="form-field">
-            Embedding model
-            <input v-model="settings.embeddingModel" class="input" placeholder="Optional">
+            Answer style
+            <select v-model="settings.answerStyle" class="input">
+              <option value="concise">Concise</option>
+              <option value="socratic">Socratic</option>
+              <option value="exam_review">Exam review</option>
+              <option value="code_tutor">Code tutor</option>
+            </select>
+          </label>
+          <label class="form-field settings-checkbox">
+            <input v-model="settings.webSearchDefault" type="checkbox">
+            Web search default
           </label>
         </div>
 
-        <p class="settings-note">These defaults stay local in this browser for now. Account editing remains reserved.</p>
-        <button class="primary-button" type="button" @click="settingsOpen = false">Done</button>
+        <p v-if="settingsLoading" class="settings-note">Loading local AI settings...</p>
+        <p v-else-if="settingsError" class="settings-note">{{ settingsError }}</p>
+        <p v-else-if="settingsMessage" class="settings-note">{{ settingsMessage }}</p>
+        <p v-else class="settings-note">These defaults are stored locally for this personal runtime.</p>
+        <button
+          class="primary-button"
+          type="button"
+          data-testid="save-local-settings"
+          :disabled="settingsSaving"
+          @click="saveLocalSettings"
+        >
+          {{ settingsSaving ? 'Saving...' : 'Save' }}
+        </button>
       </section>
     </div>
 
