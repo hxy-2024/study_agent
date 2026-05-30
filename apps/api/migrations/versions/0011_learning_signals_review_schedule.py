@@ -1,6 +1,6 @@
 """learning signals review schedule
 
-Revision ID: 0011_learning_signals_review_schedule
+Revision ID: 0011_learning_signals
 Revises: 0010_main_agent_types
 Create Date: 2026-05-30 18:10:00.000000
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision: str = "0011_learning_signals_review_schedule"
+revision: str = "0011_learning_signals"
 down_revision: str | None = "0010_main_agent_types"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
