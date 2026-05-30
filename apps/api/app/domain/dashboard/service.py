@@ -6,12 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
     AgentRun,
+    Chapter,
     PlannerAction,
     PlannerActionStatus,
     SpacePlannerState,
     StudySpace,
     StudySpaceStatus,
 )
+from app.domain.dashboard.recommendations import build_main_agent_recommendation
 from app.domain.dashboard.schemas import (
     DashboardAction,
     DashboardAgentRun,
@@ -96,6 +98,16 @@ async def get_dashboard_summary(
     )
     agent_runs = list(run_rows)
 
+    chapter_rows = await session.scalars(
+        select(Chapter)
+        .where(
+            Chapter.tenant_id == tenant_id,
+            Chapter.study_space_id.in_(active_space_ids),
+        )
+        .order_by(Chapter.study_space_id, Chapter.order_index, Chapter.id)
+    )
+    chapters = list(chapter_rows)
+
     return DashboardResponse(
         spaces=[
             DashboardSpace(
@@ -127,4 +139,10 @@ async def get_dashboard_summary(
             )
             for run in agent_runs
         ],
+        today_recommendation=build_main_agent_recommendation(
+            spaces=spaces,
+            chapters=chapters,
+            planner_actions=actions,
+            mastery_records=[],
+        ),
     )

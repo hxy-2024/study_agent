@@ -2,7 +2,18 @@ import uuid
 
 import pytest
 
-from app.db.models import AgentRun, AgentRunStatus, AgentType, PlannerAction, PlannerActionStatus, PlannerActionType, SpacePlannerState, StudySpace
+from app.db.models import (
+    AgentRun,
+    AgentRunStatus,
+    AgentType,
+    Chapter,
+    ChapterStatus,
+    PlannerAction,
+    PlannerActionStatus,
+    PlannerActionType,
+    SpacePlannerState,
+    StudySpace,
+)
 from app.domain.dashboard.service import get_dashboard_summary
 
 
@@ -64,6 +75,7 @@ async def test_dashboard_summary_collects_local_learning_work() -> None:
                 output_payload={"summary": "Tutor answered with citations."},
             )
         ],
+        [],
     ]
 
     class FakeSession:
@@ -72,7 +84,7 @@ async def test_dashboard_summary_collects_local_learning_work() -> None:
 
         async def scalars(self, _statement):
             captured[f"query_{self.calls}"] = str(_statement.compile(compile_kwargs={"literal_binds": True}))
-            result = rows[self.calls]
+            result = rows[self.calls] if self.calls < len(rows) else []
             self.calls += 1
             return FakeScalarRows(result)
 
@@ -90,6 +102,80 @@ async def test_dashboard_summary_collects_local_learning_work() -> None:
     assert "archived" in captured["query_2"]
     assert "study_spaces" in captured["query_3"]
     assert "archived" in captured["query_3"]
+    assert "study_spaces" in captured["query_4"]
+    assert "archived" in captured["query_4"]
     assert response.pending_actions[0].title == "Review retrieval"
     assert response.supervision_refresh_count == 1
     assert response.recent_agent_runs[0].summary == "Tutor answered with citations."
+
+
+@pytest.mark.anyio
+async def test_dashboard_summary_includes_main_agent_recommendation() -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def scalars(self, _statement):
+            self.calls += 1
+            if self.calls == 1:
+                return FakeScalarRows(
+                    [
+                        StudySpace(
+                            id=study_space_id,
+                            tenant_id=tenant_id,
+                            owner_user_id=user_id,
+                            name="RAG Basics",
+                            goal="Learn retrieval",
+                            target_days=14,
+                        )
+                    ]
+                )
+            if self.calls == 5:
+                return FakeScalarRows(
+                    [
+                        Chapter(
+                            id=chapter_id,
+                            tenant_id=tenant_id,
+                            study_space_id=study_space_id,
+                            title="Retrieval",
+                            status=ChapterStatus.active,
+                            order_index=1,
+                        )
+                    ]
+                )
+            return FakeScalarRows([])
+
+    response = await get_dashboard_summary(
+        session=FakeSession(),
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+
+    assert response.today_recommendation is not None
+    assert response.today_recommendation.agent_type == "main_agent"
+    assert response.today_recommendation.action_url == f"/chapters/{chapter_id}"
+
+
+@pytest.mark.anyio
+async def test_dashboard_summary_includes_empty_state_recommendation() -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    class FakeSession:
+        async def scalars(self, _statement):
+            return FakeScalarRows([])
+
+    response = await get_dashboard_summary(
+        session=FakeSession(),
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+
+    assert response.today_recommendation is not None
+    assert response.today_recommendation.recommendation_type == "create_space"
+    assert response.today_recommendation.action_url == "/spaces/new"

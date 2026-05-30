@@ -28,11 +28,29 @@ interface DashboardAgentRun {
   summary: string
 }
 
+interface DashboardRecommendationAction {
+  title: string
+  action_label: string
+  action_url: string
+  recommendation_type: string
+  reason?: string | null
+  estimated_minutes?: number | null
+  study_space_id?: string | null
+  chapter_id?: string | null
+}
+
+interface DashboardRecommendation extends DashboardRecommendationAction {
+  agent_type: string
+  freshness: string
+  secondary_actions: DashboardRecommendationAction[]
+}
+
 interface DashboardSummary {
   spaces: DashboardSpace[]
   pending_actions: DashboardAction[]
   supervision_refresh_count: number
   recent_agent_runs: DashboardAgentRun[]
+  today_recommendation?: DashboardRecommendation | null
 }
 
 interface ChapterListResponse {
@@ -91,6 +109,10 @@ function getContinueChapterId(spaceId: string) {
 const continueChapterId = computed(() => currentSpace.value ? getContinueChapterId(currentSpace.value.id) : null)
 const continueHref = computed(() => continueChapterId.value ? `/chapters/${continueChapterId.value}` : '/spaces/new')
 const continueLabel = computed(() => continueChapterId.value ? 'Continue study' : 'Prepare route')
+const todayRecommendation = computed(() => dashboard.value?.today_recommendation ?? null)
+const todayActionHref = computed(() => todayRecommendation.value?.action_url ?? continueHref.value)
+const todayActionLabel = computed(() => todayRecommendation.value?.action_label ?? continueLabel.value)
+const todayEstimatedMinutes = computed(() => todayRecommendation.value?.estimated_minutes ?? null)
 const currentExportUrl = computed(() => currentSpace.value ? `${config.public.apiBaseUrl}/study-spaces/${currentSpace.value.id}/export` : '')
 const currentMarkdownExportUrl = computed(() => currentSpace.value ? `${config.public.apiBaseUrl}/study-spaces/${currentSpace.value.id}/export?format=markdown` : '')
 const today = new Date()
@@ -292,17 +314,29 @@ watch(
 
         <section v-if="currentSpace" class="card continue-panel">
           <div class="continue-copy">
-            <p class="eyebrow">Continue</p>
-            <h2>{{ currentSpace.name }}</h2>
-            <p>{{ currentSpace.goal }}</p>
+            <p class="eyebrow">{{ todayRecommendation ? 'Main Agent' : 'Continue' }}</p>
+            <h2>{{ todayRecommendation?.title ?? currentSpace.name }}</h2>
+            <p>{{ todayRecommendation?.reason ?? currentSpace.goal }}</p>
             <div class="progress-track" aria-label="Current space progress">
               <span :style="{ width: `${progressPercent}%` }" />
             </div>
-            <small>{{ progressPercent }}% route foundation prepared · {{ currentSpace.target_days }} target days</small>
+            <small v-if="todayEstimatedMinutes">{{ todayEstimatedMinutes }} min suggested · {{ todayRecommendation?.freshness }}</small>
+            <small v-else>{{ progressPercent }}% route foundation prepared · {{ currentSpace.target_days }} target days</small>
+            <div v-if="todayRecommendation?.secondary_actions?.length" class="today-secondary-list">
+              <NuxtLink
+                v-for="action in todayRecommendation.secondary_actions"
+                :key="`${action.recommendation_type}-${action.action_url}-${action.title}`"
+                class="today-secondary-action"
+                :to="action.action_url"
+              >
+                <strong>{{ action.title }}</strong>
+                <span>{{ action.action_label }}</span>
+              </NuxtLink>
+            </div>
           </div>
           <div class="continue-actions">
             <span class="status-badge">{{ currentSpace.status }}</span>
-            <NuxtLink class="primary-button" :to="continueHref">{{ continueLabel }}</NuxtLink>
+            <NuxtLink class="primary-button" :to="todayActionHref">{{ todayActionLabel }}</NuxtLink>
           </div>
         </section>
 
@@ -462,6 +496,33 @@ watch(
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
+}
+
+.today-secondary-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.today-secondary-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid rgba(161, 211, 202, 0.48);
+  color: var(--color-text);
+  padding-top: 8px;
+  text-decoration: none;
+}
+
+.today-secondary-action strong,
+.today-secondary-action span {
+  font-size: 13px;
+}
+
+.today-secondary-action span {
+  color: var(--color-primary);
+  font-weight: 800;
 }
 
 .spaces-toolbar {

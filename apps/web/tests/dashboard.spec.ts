@@ -237,6 +237,53 @@ describe('DashboardPage', () => {
     expect(wrapper.find('a[href="/chapters/chapter-1"]').exists()).toBe(true)
   })
 
+  it('renders the main agent today recommendation as the primary action', async () => {
+    fetchMock.mockResolvedValue({
+      spaces: [
+        {
+          id: 'space-1',
+          name: 'RAG Basics',
+          goal: 'Learn retrieval',
+          status: 'active',
+          target_days: 14
+        }
+      ],
+      pending_actions: [],
+      supervision_refresh_count: 0,
+      recent_agent_runs: [],
+      today_recommendation: {
+        agent_type: 'main_agent',
+        title: 'Continue Retrieval',
+        action_label: 'Study now',
+        action_url: '/chapters/chapter-1',
+        recommendation_type: 'continue_chapter',
+        reason: 'RAG Basics has an unfinished chapter ready.',
+        estimated_minutes: 25,
+        study_space_id: 'space-1',
+        chapter_id: 'chapter-1',
+        freshness: 'deterministic_fallback',
+        secondary_actions: [
+          {
+            title: 'Review citations',
+            action_label: 'Review',
+            action_url: '/chapters/chapter-2',
+            recommendation_type: 'review_chapter',
+            reason: 'Your last quiz showed citation uncertainty.'
+          }
+        ]
+      }
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Main Agent')
+    expect(wrapper.text()).toContain('Continue Retrieval')
+    expect(wrapper.text()).toContain('RAG Basics has an unfinished chapter ready.')
+    expect(wrapper.find('a[href="/chapters/chapter-1"]').text()).toContain('Study now')
+    expect(wrapper.text()).toContain('Review citations')
+  })
+
   it('shows archived spaces and restores one from the dashboard', async () => {
     fetchMock.mockImplementation((url: string, options?: { method?: string }) => {
       if (url.endsWith('/dashboard')) {
