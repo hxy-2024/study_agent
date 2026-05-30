@@ -56,7 +56,8 @@ Prerequisites:
 Start the local personal runtime:
 
 ```powershell
-cd F:\AIproject\study_agent
+git clone https://github.com/hxy-2024/study_agent.git
+cd study_agent
 python main.py local
 ```
 
@@ -85,6 +86,8 @@ Deployment-style Compose startup:
 docker compose -f infra/docker-compose.yml up --build
 ```
 
+The API container runs database migrations on startup before serving traffic.
+
 Default local ports:
 
 | Service | URL |
@@ -110,8 +113,10 @@ Default local ports:
 
 ## AI Settings
 
-LeafMind works without an external LLM key by using deterministic local answer
-providers. To use an OpenAI-compatible chat completion API, configure:
+LeafMind works without an external LLM key by using deterministic local fallback
+providers. This is useful for setup, ingestion, routing, and local workflow
+testing. For real AI-quality mentor answers, configure an OpenAI-compatible chat
+completion API:
 
 ```env
 LLM_PROVIDER=openai-compatible
@@ -130,7 +135,7 @@ context, not as uploaded source material.
 
 ## Data Safety
 
-Create a local backup:
+Back up Docker-backed data:
 
 ```powershell
 python main.py backup --dry-run
@@ -143,6 +148,10 @@ Restore a backup:
 python main.py restore .local\backups\local-YYYYMMDD-HHMMSS
 python main.py restore .local\backups\local-YYYYMMDD-HHMMSS --yes
 ```
+
+The backup command targets the Docker-backed Postgres and MinIO profile. The
+fast local profile stores SQLite data and uploaded files under `.local/`; copy
+that directory if you want a simple personal-mode snapshot.
 
 Reset local Docker data:
 
