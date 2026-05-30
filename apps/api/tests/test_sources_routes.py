@@ -99,3 +99,52 @@ async def test_mark_source_uploaded_maps_missing_source_to_404(monkeypatch) -> N
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Source not found for tenant"}
+
+
+async def test_get_source_chunk_detail_uses_authorized_tenant(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+    chunk_id = uuid.uuid4()
+    captured = {}
+
+    async def fake_get_db_session() -> AsyncGenerator[object, None]:
+        yield object()
+
+    async def fake_get_authorized_user_context() -> CurrentUserContext:
+        return CurrentUserContext(user_id=uuid.uuid4(), tenant_id=tenant_id)
+
+    async def fake_get_source_chunk_detail(session, requested_source_id, requested_chunk_id, requested_tenant_id):
+        captured["session"] = session
+        captured["source_id"] = requested_source_id
+        captured["chunk_id"] = requested_chunk_id
+        captured["tenant_id"] = requested_tenant_id
+        return SimpleNamespace(
+            id=chunk_id,
+            source_id=source_id,
+            chunk_index=3,
+            text="A focused source chunk",
+            citation={"page_number": 7},
+        )
+
+    monkeypatch.setattr(routes_sources, "get_source_chunk_detail", fake_get_source_chunk_detail)
+    app.dependency_overrides[get_db_session] = fake_get_db_session
+    app.dependency_overrides[get_authorized_user_context] = fake_get_authorized_user_context
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get(f"/api/v1/sources/{source_id}/chunks/{chunk_id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert captured["tenant_id"] == tenant_id
+    assert captured["source_id"] == source_id
+    assert captured["chunk_id"] == chunk_id
+    assert response.json() == {
+        "chunk": {
+            "id": str(chunk_id),
+            "source_id": str(source_id),
+            "chunk_index": 3,
+            "text": "A focused source chunk",
+            "citation": {"page_number": 7},
+        }
+    }

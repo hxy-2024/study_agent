@@ -18,6 +18,7 @@ from app.domain.quizzes.service import (
     get_latest_quiz_result,
     get_quiz,
     mastery_record_response,
+    retake_quiz,
     submit_quiz_answers,
 )
 
@@ -62,6 +63,23 @@ async def read_quiz(
 ) -> QuizResponse:
     try:
         return await get_quiz(
+            session=session,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            quiz_id=quiz_id,
+        )
+    except ValueError as exc:
+        raise map_quiz_error(exc) from exc
+
+
+@router.post("/quizzes/{quiz_id}/retake", response_model=QuizResponse, status_code=201)
+async def retake_existing_quiz(
+    quiz_id: uuid.UUID,
+    context: CurrentUserContext = Depends(get_authorized_user_context),
+    session: AsyncSession = Depends(get_db_session),
+) -> QuizResponse:
+    try:
+        return await retake_quiz(
             session=session,
             tenant_id=context.tenant_id,
             user_id=context.user_id,

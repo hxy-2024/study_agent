@@ -2,10 +2,12 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const fetchMock = vi.fn()
+const navigateToMock = vi.fn()
 const quizId = '00000000-0000-0000-0000-000000000A01'
 const chapterId = '00000000-0000-0000-0000-000000000601'
 
 vi.stubGlobal('$fetch', fetchMock)
+vi.stubGlobal('navigateTo', navigateToMock)
 vi.stubGlobal('useRuntimeConfig', () => ({
   public: {
     apiBaseUrl: 'http://localhost:8000/api/v1'
@@ -149,6 +151,7 @@ async function flushPromises() {
 describe('QuizPage', () => {
   beforeEach(() => {
     fetchMock.mockReset()
+    navigateToMock.mockReset()
     fetchMock.mockImplementation((url: string, options?: { method?: string }) => {
       if (url.endsWith(`/quizzes/${quizId}/submit`) && options?.method === 'POST') {
         return Promise.resolve(submissionResult())
@@ -229,6 +232,37 @@ describe('QuizPage', () => {
     expect(wrapper.text()).toContain('Explanations should cite the linked source text.')
     expect(wrapper.html()).toContain(`/chapters/${chapterId}`)
     expect((submit.element as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('starts a retake quiz from the submitted result', async () => {
+    fetchMock.mockImplementation((url: string, options?: { method?: string }) => {
+      if (url.endsWith(`/quizzes/${quizId}/submit`) && options?.method === 'POST') {
+        return Promise.resolve(submissionResult())
+      }
+      if (url.endsWith(`/quizzes/${quizId}/retake`) && options?.method === 'POST') {
+        return Promise.resolve({ ...quizDetail(), id: '00000000-0000-0000-0000-000000000A99' })
+      }
+      if (url.endsWith(`/quizzes/${quizId}`)) {
+        return Promise.resolve(quizDetail())
+      }
+      return Promise.resolve({})
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="answer-1-1"]').setValue()
+    await wrapper.find('[data-testid="answer-0-0"]').setValue()
+    await wrapper.find('[data-testid="answer-2-0"]').setValue()
+    await wrapper.find('[data-testid="submit-quiz"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="retake-quiz"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://localhost:8000/api/v1/quizzes/${quizId}/retake`,
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(navigateToMock).toHaveBeenCalledWith('/quizzes/00000000-0000-0000-0000-000000000A99')
   })
 
   it('renders backend evidence DTO fields for questions and result feedback', async () => {

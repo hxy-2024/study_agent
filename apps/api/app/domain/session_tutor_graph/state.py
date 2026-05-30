@@ -38,6 +38,7 @@ class MessageCitationPayload(TypedDict):
     source_id: str
     source_chunk_id: str
     chunk_id: str
+    source_jump: dict
     source_filename: str
     chunk_index: int
     text: str

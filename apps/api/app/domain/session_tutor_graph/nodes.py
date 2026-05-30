@@ -244,6 +244,7 @@ def _message_response_payload(response) -> MessageResponsePayload:
                 source_id=str(citation.source_id),
                 source_chunk_id=str(citation.source_chunk_id),
                 chunk_id=str(citation.chunk_id),
+                source_jump=citation.source_jump.model_dump(mode="json"),
                 source_filename=citation.source_filename,
                 chunk_index=citation.chunk_index,
                 text=citation.text,

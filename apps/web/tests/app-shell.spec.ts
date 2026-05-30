@@ -74,16 +74,71 @@ describe('App shell', () => {
   })
 
   it('opens local settings from drawer navigation', async () => {
+    fetchMock.mockResolvedValueOnce({
+      llm_provider: 'openai-compatible',
+      llm_base_url: 'https://llm.example.test/v1',
+      llm_model: 'study-model',
+      llm_api_key_masked: '********',
+      web_search_default_enabled: true,
+      answer_style: 'socratic'
+    })
     const wrapper = mountShell()
 
     await wrapper.find('.hamburger-button').trigger('click')
     await wrapper.findAll('.drawer-nav button').find(button => button.text() === 'Settings')?.trigger('click')
+    await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(wrapper.find('.settings-modal').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Base URL')
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8000/api/v1/local-settings/ai')
+    expect((wrapper.find('input[type="url"]').element as HTMLInputElement).value).toBe('https://llm.example.test/v1')
+    expect(wrapper.text()).toContain('Provider')
     expect(wrapper.text()).toContain('API key')
     expect(wrapper.text()).toContain('Default model')
-    expect(wrapper.text()).toContain('Embedding model')
+    expect(wrapper.text()).toContain('Answer style')
+  })
+
+  it('saves local AI settings from the settings modal', async () => {
+    fetchMock.mockResolvedValueOnce({
+      llm_provider: 'deterministic',
+      llm_base_url: 'https://api.openai.com/v1',
+      llm_model: 'gpt-4.1-mini',
+      llm_api_key_masked: '',
+      web_search_default_enabled: false,
+      answer_style: 'concise'
+    })
+    fetchMock.mockResolvedValueOnce({
+      llm_provider: 'openai-compatible',
+      llm_base_url: 'https://llm.example.test/v1',
+      llm_model: 'study-model',
+      llm_api_key_masked: '********',
+      web_search_default_enabled: true,
+      answer_style: 'exam_review'
+    })
+    const wrapper = mountShell()
+
+    await wrapper.find('.hamburger-button').trigger('click')
+    await wrapper.findAll('.drawer-nav button').find(button => button.text() === 'Settings')?.trigger('click')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const inputs = wrapper.findAll('input')
+    expect(inputs.length).toBeGreaterThanOrEqual(4)
+    await inputs[1]!.setValue('https://llm.example.test/v1')
+    await inputs[2]!.setValue('secret-key')
+    await inputs[3]!.setValue('study-model')
+    await wrapper.find('select').setValue('exam_review')
+    await wrapper.find('[data-testid="save-local-settings"]').trigger('click')
+
+    expect(fetchMock).toHaveBeenLastCalledWith('http://127.0.0.1:8000/api/v1/local-settings/ai', {
+      method: 'PUT',
+      body: {
+        llm_provider: 'deterministic',
+        llm_base_url: 'https://llm.example.test/v1',
+        llm_model: 'study-model',
+        llm_api_key: 'secret-key',
+        web_search_default_enabled: false,
+        answer_style: 'exam_review'
+      }
+    })
   })
 
   it('opens runtime status from the topbar pill', async () => {

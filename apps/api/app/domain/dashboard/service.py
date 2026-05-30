@@ -13,6 +13,7 @@ from app.db.models import (
     PlannerAction,
     PlannerActionStatus,
     Quiz,
+    QuizSubmission,
     SpacePlannerState,
     StudySpace,
     StudySpaceStatus,
@@ -27,6 +28,17 @@ from app.domain.dashboard.schemas import (
     DashboardResponse,
     DashboardSpace,
 )
+from app.domain.review_planner.schemas import ReviewCandidate
+from app.domain.review_planner.service import build_review_candidates
+from app.domain.quiz_mastery.schemas import QuizMasterySignal
+from app.domain.quiz_mastery.service import build_quiz_mastery_signals
+from app.domain.learning_signals.service import (
+    learning_signal_from_quiz_mastery,
+    learning_signal_from_review_candidate,
+    upsert_learning_signal_drafts,
+)
+from app.domain.review_queue.service import build_review_queue, get_review_queue
+from app.domain.review_queue.schemas import ReviewQueueItem
 
 
 def _enum_value(value: Any) -> str:
@@ -132,6 +144,28 @@ async def get_dashboard_summary(
         )
     )
     quizzes = list(quiz_rows)
+    submission_rows = await session.scalars(
+        select(QuizSubmission).where(
+            QuizSubmission.tenant_id == tenant_id,
+            QuizSubmission.user_id == user_id,
+            QuizSubmission.chapter_id.in_(select(Chapter.id).where(Chapter.study_space_id.in_(active_space_ids))),
+        )
+    )
+    quiz_submissions = list(submission_rows)
+
+    review_candidates = build_review_candidates(chapters=chapters, mastery_records=mastery_records)
+    quiz_mastery_signals = build_quiz_mastery_signals(
+        chapters=chapters,
+        mastery_records=mastery_records,
+        submissions=quiz_submissions,
+    )
+    review_queue = build_review_queue(
+        chapters=chapters,
+        review_candidates=review_candidates,
+        quiz_mastery_signals=quiz_mastery_signals,
+        quizzes=quizzes,
+        planner_actions=actions,
+    )
 
     today_recommendation = await get_main_agent_recommendation(
         session=session,
@@ -143,6 +177,10 @@ async def get_dashboard_summary(
         planner_actions=actions,
         mastery_records=mastery_records,
         quizzes=quizzes,
+        review_candidates=review_candidates,
+        quiz_mastery_signals=quiz_mastery_signals,
+        review_queue=review_queue,
+        persist_run=False,
     )
 
     return DashboardResponse(
@@ -177,6 +215,7 @@ async def get_dashboard_summary(
             for run in agent_runs
         ],
         today_recommendation=today_recommendation,
+        review_queue=review_queue,
     )
 
 
@@ -184,7 +223,7 @@ async def _load_recommendation_signals(
     session: AsyncSession,
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
-) -> tuple[list[StudySpace], list[Chapter], list[PlannerAction], list[MasteryRecord], list[Quiz]]:
+) -> tuple[list[StudySpace], list[Chapter], list[PlannerAction], list[MasteryRecord], list[Quiz], list[QuizSubmission]]:
     active_space_ids = select(StudySpace.id).where(
         StudySpace.tenant_id == tenant_id,
         StudySpace.owner_user_id == user_id,
@@ -237,7 +276,15 @@ async def _load_recommendation_signals(
         )
     )
     quizzes = list(quiz_rows)
-    return spaces, chapters, planner_actions, mastery_records, quizzes
+    submission_rows = await session.scalars(
+        select(QuizSubmission).where(
+            QuizSubmission.tenant_id == tenant_id,
+            QuizSubmission.user_id == user_id,
+            QuizSubmission.chapter_id.in_(select(Chapter.id).where(Chapter.study_space_id.in_(active_space_ids))),
+        )
+    )
+    quiz_submissions = list(submission_rows)
+    return spaces, chapters, planner_actions, mastery_records, quizzes, quiz_submissions
 
 
 async def get_main_agent_recommendation(
@@ -250,12 +297,57 @@ async def get_main_agent_recommendation(
     planner_actions: list[PlannerAction] | None = None,
     mastery_records: list[MasteryRecord] | None = None,
     quizzes: list[Quiz] | None = None,
+    review_candidates: list[ReviewCandidate] | None = None,
+    quiz_mastery_signals: list[QuizMasterySignal] | None = None,
+    review_queue: list[ReviewQueueItem] | None = None,
+    persist_run: bool = True,
 ) -> DashboardRecommendation:
+    quiz_submissions: list[QuizSubmission] = []
     if spaces is None or chapters is None or planner_actions is None or mastery_records is None or quizzes is None:
-        spaces, chapters, planner_actions, mastery_records, quizzes = await _load_recommendation_signals(
+        spaces, chapters, planner_actions, mastery_records, quizzes, quiz_submissions = await _load_recommendation_signals(
             session=session,
             tenant_id=tenant_id,
             user_id=user_id,
+        )
+    if review_candidates is None:
+        review_candidates = build_review_candidates(chapters=chapters, mastery_records=mastery_records)
+    if quiz_mastery_signals is None:
+        quiz_mastery_signals = build_quiz_mastery_signals(
+            chapters=chapters,
+            mastery_records=mastery_records,
+            submissions=quiz_submissions,
+        )
+    if persist_run and hasattr(session, "scalar"):
+        drafts = [
+            learning_signal_from_review_candidate(
+                candidate=candidate,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            for candidate in review_candidates
+        ] + [
+            learning_signal_from_quiz_mastery(
+                signal=signal,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            for signal in quiz_mastery_signals
+            if signal.retake_recommended
+        ]
+        if drafts:
+            await upsert_learning_signal_drafts(session=session, drafts=drafts)
+            review_queue = await get_review_queue(
+                session=session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+    if review_queue is None:
+        review_queue = build_review_queue(
+            chapters=chapters,
+            review_candidates=review_candidates,
+            quiz_mastery_signals=quiz_mastery_signals,
+            quizzes=quizzes,
+            planner_actions=planner_actions,
         )
 
     recommendation = build_main_agent_recommendation(
@@ -264,6 +356,9 @@ async def get_main_agent_recommendation(
         planner_actions=planner_actions,
         mastery_records=mastery_records,
         quizzes=quizzes,
+        review_candidates=review_candidates,
+        quiz_mastery_signals=quiz_mastery_signals,
+        review_queue=review_queue,
         request=request,
     )
     if recommendation is None:
@@ -276,7 +371,7 @@ async def get_main_agent_recommendation(
             estimated_minutes=10,
         )
 
-    if recommendation.study_space_id is None:
+    if recommendation.study_space_id is None or not persist_run:
         return recommendation
 
     run = AgentRun(
@@ -289,6 +384,7 @@ async def get_main_agent_recommendation(
             "request": request.model_dump(),
             "signal_counts": recommendation.source_signals,
             "strategy_version": STRATEGY_VERSION,
+            "selected_queue_item": review_queue[0].model_dump(mode="json") if review_queue else None,
         },
         output_payload=recommendation.model_dump(mode="json"),
     )

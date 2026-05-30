@@ -19,10 +19,13 @@ The current foundation includes:
 - Deterministic user-scoped chapter quizzes and mastery records.
 - Space Planner Agent for study-space-level next actions and route proposals.
 - Planner action queue for confirmed reviews and route proposals.
+- Main Agent dashboard recommendation pipeline with review queue, quiz retake, and planner signals.
+- Local AI settings for provider, model, API key, answer style, and explicit web-search defaults.
+- Study-space export, import dry-run validation, and local backup/restore commands.
 - Nuxt app shell.
 - Dashboard, create-space, source library, study space, and chapter study UI.
 
-LangGraph durable workflows, automatic route mutation, spaced review queues, quiz generation with LLMs, and import/export are planned as separate implementation phases.
+Automatic route mutation, quiz generation with LLMs, and full write-mode study-space import remain later phases.
 
 ### RAG foundation
 
@@ -51,6 +54,10 @@ LLM_TIMEOUT_SECONDS=30
 
 The same interface can point at other OpenAI-compatible providers by changing
 `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`.
+
+You can also configure these from the local app settings panel. API keys are stored
+under `.local/` and are ignored by git. Web search is explicit: when enabled it is
+treated as a network supplement, not as uploaded source material.
 
 ### Development auth headers
 
@@ -110,6 +117,21 @@ Run local checks:
 python main.py check
 ```
 
+Data safety commands:
+
+```powershell
+python main.py backup --dry-run
+python main.py backup
+python main.py restore .local\backups\local-YYYYMMDD-HHMMSS
+python main.py restore .local\backups\local-YYYYMMDD-HHMMSS --yes
+python main.py reset-db
+python main.py reset-db --yes
+```
+
+`backup` writes to `.local/backups/` by default. `.env` is copied only with
+`--include-env`. `restore --yes` is destructive for the local Docker database and
+MinIO data, then reruns migrations.
+
 Prepare the API database:
 
 ```powershell
@@ -165,3 +187,4 @@ Manual browser smoke test:
 12. Create planner actions and accept one queued review.
 13. Open that chapter again and confirm the Planner review callout shows the accepted review.
 14. Mark the chapter complete.
+15. Return to Home and confirm Main Agent / Review Planner surfaces the next learning signal.

@@ -1,0 +1,1 @@
+"""Quiz mastery signal generation."""

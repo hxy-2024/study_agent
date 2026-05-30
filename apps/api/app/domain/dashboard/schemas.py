@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.domain.review_queue.schemas import ReviewQueueItem
+
 
 DashboardRecommendationIntent = Literal["balanced", "new_material", "review", "quiz"]
 
@@ -61,3 +63,4 @@ class DashboardResponse(BaseModel):
     supervision_refresh_count: int = 0
     recent_agent_runs: list[DashboardAgentRun] = Field(default_factory=list)
     today_recommendation: DashboardRecommendation | None = None
+    review_queue: list[ReviewQueueItem] = Field(default_factory=list)

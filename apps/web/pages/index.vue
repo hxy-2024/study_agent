@@ -45,6 +45,20 @@ interface DashboardRecommendation extends DashboardRecommendationAction {
   secondary_actions: DashboardRecommendationAction[]
 }
 
+interface ReviewQueueItem {
+  id: string
+  kind: 'continue_chapter' | 'review_chapter' | 'retake_quiz' | 'planner_action'
+  learning_signal_id?: string | null
+  study_space_id: string
+  chapter_id?: string | null
+  quiz_id?: string | null
+  title: string
+  reason: string
+  priority: number
+  estimated_minutes: number
+  action_url: string
+}
+
 type TodayRecommendationIntent = 'balanced' | 'new_material' | 'review' | 'quiz'
 
 interface MainAgentMessage {
@@ -60,6 +74,7 @@ interface DashboardSummary {
   supervision_refresh_count: number
   recent_agent_runs: DashboardAgentRun[]
   today_recommendation?: DashboardRecommendation | null
+  review_queue?: ReviewQueueItem[]
 }
 
 interface ChapterListResponse {
@@ -108,6 +123,8 @@ const supervisionRefreshLabel = computed(() => {
   return `${supervisionRefreshCount.value} ${supervisionRefreshCount.value === 1 ? 'supervision refresh' : 'supervision refreshes'}`
 })
 const recentAgentRuns = computed(() => dashboard.value?.recent_agent_runs ?? [])
+const reviewQueue = computed(() => dashboard.value?.review_queue ?? [])
+const visibleReviewQueue = computed(() => reviewQueue.value.slice(0, 4))
 function getContinueChapterId(spaceId: string) {
   const pendingChapterId = dashboard.value?.pending_actions.find(action => {
     return action.study_space_id === spaceId && Boolean(action.chapter_id)
@@ -164,7 +181,8 @@ function ensureDashboardSummary() {
     pending_actions: [],
     supervision_refresh_count: 0,
     recent_agent_runs: [],
-    today_recommendation: null
+    today_recommendation: null,
+    review_queue: []
   }
 }
 
@@ -512,6 +530,27 @@ watch(
             <p v-else>Upload text or Markdown in a study space to prepare retrieval and route generation.</p>
           </section>
         </div>
+
+        <section v-if="visibleReviewQueue.length" class="review-queue-panel">
+          <div class="section-heading review-queue-heading">
+            <div>
+              <p class="eyebrow">Review Planner</p>
+              <h2>Next learning signals</h2>
+            </div>
+          </div>
+          <div class="review-queue-list">
+            <NuxtLink
+              v-for="item in visibleReviewQueue"
+              :key="item.id"
+              class="review-queue-row"
+              :to="item.action_url"
+            >
+              <span>{{ item.kind.replace('_', ' ') }}</span>
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.reason }} 路 {{ item.estimated_minutes }} min</small>
+            </NuxtLink>
+          </div>
+        </section>
 
         <section v-if="archivedSpaces.length" class="archived-panel">
           <div class="section-heading archived-heading">
@@ -1400,6 +1439,7 @@ watch(
 .continue-panel,
 .export-panel,
 .dashboard-row-panel,
+.review-queue-panel,
 .archived-panel {
   border: 1px solid var(--color-border);
   border-radius: 6px;
@@ -1417,6 +1457,7 @@ watch(
 
 .continue-panel h2,
 .export-panel h2,
+.review-queue-panel h2,
 .dashboard-row-panel h2 {
   margin: 0 0 4px;
   font-size: 15px;
@@ -1455,8 +1496,47 @@ watch(
 }
 
 .export-panel,
+.review-queue-panel,
 .archived-panel {
   padding: 14px 16px;
+}
+
+.review-queue-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.review-queue-list {
+  display: grid;
+  gap: 8px;
+}
+
+.review-queue-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(20, 184, 166, 0.2);
+  border-radius: 6px;
+  background: rgba(20, 184, 166, 0.05);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+
+.review-queue-row:hover {
+  border-color: rgba(20, 184, 166, 0.55);
+  transform: translateY(-1px);
+}
+
+.review-queue-row span {
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.review-queue-row small {
+  color: var(--color-muted);
 }
 
 .archived-list {

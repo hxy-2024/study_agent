@@ -1,10 +1,12 @@
 from typing import Protocol
+from pathlib import Path
 
 import httpx
 
 from app.core.config import Settings
 from app.domain.chapter_mentor.schemas import ChapterMentorResponse
 from app.domain.chapter_mentor.service import compose_grounded_answer
+from app.domain.local_settings.service import load_local_ai_settings
 from app.domain.rag.retrieval import RetrievedChunk
 
 WebSearchResult = dict[str, str]
@@ -153,12 +155,20 @@ class OpenAICompatibleAnswerProvider:
 
 
 def create_answer_provider(settings: Settings) -> AnswerProvider:
-    provider_name = settings.llm_provider.strip().lower()
-    if provider_name in {"openai", "openai-compatible"} and settings.llm_api_key:
+    local_settings = (
+        load_local_ai_settings(path=settings.local_settings_path)
+        if Path(settings.local_settings_path).exists()
+        else None
+    )
+    provider_name = (
+        local_settings.llm_provider if local_settings is not None else settings.llm_provider
+    ).strip().lower()
+    api_key = (local_settings.llm_api_key if local_settings is not None else "") or settings.llm_api_key
+    if provider_name in {"openai", "openai-compatible"} and api_key:
         return OpenAICompatibleAnswerProvider(
-            base_url=settings.llm_base_url,
-            api_key=settings.llm_api_key,
-            model=settings.llm_model,
+            base_url=(local_settings.llm_base_url if local_settings is not None else "") or settings.llm_base_url,
+            api_key=api_key,
+            model=(local_settings.llm_model if local_settings is not None else "") or settings.llm_model,
             timeout_seconds=settings.llm_timeout_seconds,
         )
     return DeterministicAnswerProvider()

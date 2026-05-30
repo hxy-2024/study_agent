@@ -163,3 +163,22 @@ async def list_source_chunks(
         .order_by(SourceChunk.chunk_index)
     )
     return list(result.all())
+
+
+async def get_source_chunk_detail(
+    session: AsyncSession,
+    source_id: uuid.UUID,
+    chunk_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> SourceChunk:
+    await get_source_for_tenant(session, source_id, tenant_id)
+    chunk = await session.scalar(
+        select(SourceChunk).where(
+            SourceChunk.id == chunk_id,
+            SourceChunk.source_id == source_id,
+            SourceChunk.tenant_id == tenant_id,
+        )
+    )
+    if chunk is None:
+        raise ValueError("Source chunk not found for tenant")
+    return chunk

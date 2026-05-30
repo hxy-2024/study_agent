@@ -262,6 +262,10 @@ describe('DashboardPage', () => {
         study_space_id: 'space-1',
         chapter_id: 'chapter-1',
         freshness: 'deterministic_fallback',
+        source_signals: {
+          review_candidates: 1,
+          quiz_mastery: 1
+        },
         secondary_actions: [
           {
             title: 'Review citations',

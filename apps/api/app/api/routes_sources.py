@@ -6,12 +6,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import CurrentUserContext, get_authorized_user_context
 from app.db.session import get_db_session
 from app.domain.sources.schemas import (
+    SourceChunkDetailResponse,
     SourceChunkListResponse,
     SourceListResponse,
     SourceUploadedResponse,
     TextSourceCreateRequest,
 )
-from app.domain.sources.service import create_text_source, list_source_chunks, list_sources_for_space, mark_source_uploaded
+from app.domain.sources.service import (
+    create_text_source,
+    get_source_chunk_detail,
+    list_source_chunks,
+    list_sources_for_space,
+    mark_source_uploaded,
+)
 from app.infrastructure.storage import create_runtime_text_source_writer
 
 router = APIRouter(tags=["sources"])
@@ -73,3 +80,17 @@ async def get_source_chunks(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return SourceChunkListResponse(chunks=chunks)
+
+
+@router.get("/sources/{source_id}/chunks/{chunk_id}", response_model=SourceChunkDetailResponse)
+async def get_source_chunk(
+    source_id: uuid.UUID,
+    chunk_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+    context: CurrentUserContext = Depends(get_authorized_user_context),
+) -> SourceChunkDetailResponse:
+    try:
+        chunk = await get_source_chunk_detail(session, source_id, chunk_id, context.tenant_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return SourceChunkDetailResponse(chunk=chunk)

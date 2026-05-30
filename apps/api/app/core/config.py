@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     session_tutor_web_search_enabled: bool = False
     session_tutor_web_search_timeout_seconds: int = 5
     session_tutor_web_search_max_results: int = 3
+    local_settings_path: str = ".local/settings.json"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

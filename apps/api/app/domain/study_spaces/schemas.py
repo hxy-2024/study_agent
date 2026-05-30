@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RouteChapter(BaseModel):
@@ -33,3 +33,23 @@ class StudySpaceRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class StudySpaceImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    payload: dict
+    dry_run: bool = True
+
+
+class StudySpaceImportResult(BaseModel):
+    dry_run: bool
+    can_restore: bool
+    schema_version: int
+    original_study_space_id: str
+    summary: dict[str, int]
+    tenant_rewrite: dict[str, str | None]
+    user_rewrite: dict[str, str | None]
+    id_remap: dict[str, dict[str, str]]
+    warnings: list[str] = Field(default_factory=list)
+    unsupported_write_models: list[str] = Field(default_factory=list)

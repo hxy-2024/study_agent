@@ -12,13 +12,19 @@ from app.db.models import (
     Chapter,
     Message,
     MessageCitation,
+    MessageRole,
     Session,
     SessionStatus,
 )
+from app.core.config import get_settings
+from app.domain.agent_runtime.config import graph_runtime_config_from_settings
 from app.domain.chapter_mentor.providers import AnswerProvider
+from app.domain.chapter_mentor.service import load_source_filenames
 from app.domain.rag.embeddings import EmbeddingProvider
+from app.domain.rag.retrieval import retrieve_chunks
 from app.domain.sessions.schemas import (
     MessageCreate,
+    MessageCitationCreate,
     MessageCitationResponse,
     MessageResponse,
     SessionCreate,
@@ -53,6 +59,17 @@ def build_message_response(message, citations: list[MessageCitation]) -> Message
         raw_index = metadata.get("chunk_index", 0)
         return raw_index if isinstance(raw_index, int) else 0
 
+    def citation_source_jump(citation: MessageCitation) -> dict[str, str]:
+        metadata = citation.citation or {}
+        space_id = getattr(message, "study_space_id", None) or metadata.get("space_id") or metadata.get("study_space_id")
+        return {
+            "space_id": str(space_id),
+            "source_id": str(citation.source_id),
+            "chunk_id": str(citation.source_chunk_id),
+            "source_url": f"/spaces/{space_id}?source_id={citation.source_id}",
+            "chunk_url": f"/spaces/{space_id}?source_id={citation.source_id}&chunk_id={citation.source_chunk_id}",
+        }
+
     return MessageResponse(
         id=message.id,
         session_id=message.session_id,
@@ -66,6 +83,7 @@ def build_message_response(message, citations: list[MessageCitation]) -> Message
                 source_id=citation.source_id,
                 source_chunk_id=citation.source_chunk_id,
                 chunk_id=citation.source_chunk_id,
+                source_jump=citation_source_jump(citation),
                 source_filename=citation_filename(citation),
                 chunk_index=citation_chunk_index(citation),
                 text=citation.quote,
@@ -377,6 +395,18 @@ async def answer_session_message(
     answer_provider: AnswerProvider,
     web_search_enabled: bool | None = None,
 ) -> MessageResponse:
+    runtime_config = graph_runtime_config_from_settings(get_settings())
+    if not runtime_config.session_tutor_graph_enabled:
+        return await _answer_session_message_without_graph(
+            session=session,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            content=content,
+            embedding_provider=embedding_provider,
+            answer_provider=answer_provider,
+            web_search_enabled=web_search_enabled,
+        )
+
     from app.domain.session_tutor_graph.service import run_session_tutor_graph
 
     return await run_session_tutor_graph(
@@ -389,3 +419,100 @@ async def answer_session_message(
         answer_provider=answer_provider,
         web_search_enabled=web_search_enabled,
     )
+
+
+async def _answer_session_message_without_graph(
+    *,
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    session_id: uuid.UUID,
+    content: str,
+    embedding_provider: EmbeddingProvider,
+    answer_provider: AnswerProvider,
+    web_search_enabled: bool | None = None,
+) -> MessageResponse:
+    tutor_session = await ensure_session_in_tenant(
+        session=session,
+        tenant_id=tenant_id,
+        session_id=session_id,
+    )
+    chapter = await ensure_chapter_in_tenant(
+        session=session,
+        tenant_id=tenant_id,
+        chapter_id=tutor_session.chapter_id,
+    )
+    user_message = await create_message(
+        session=session,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        payload=MessageCreate(role=MessageRole.user, content=content),
+    )
+    query = f"{chapter.title}\n{getattr(chapter, 'goal', '')}\n{content}"
+    chunks = await retrieve_chunks(
+        session=session,
+        tenant_id=tenant_id,
+        study_space_id=tutor_session.study_space_id,
+        query=query,
+        limit=5,
+        embedding_provider=embedding_provider,
+    )
+    source_filenames = await load_source_filenames(
+        session=session,
+        tenant_id=tenant_id,
+        study_space_id=tutor_session.study_space_id,
+        source_ids=[chunk.source_id for chunk in chunks],
+    )
+    mentor_response = await answer_provider.answer(
+        question=content,
+        chunks=chunks,
+        source_filenames=source_filenames,
+        web_search_results=[],
+    )
+    assistant_response = await create_message_with_response(
+        session=session,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        payload=MessageCreate(
+            role=MessageRole.assistant,
+            content=mentor_response.answer,
+            metadata={
+                "runtime": "deterministic",
+                "graph_enabled": False,
+                "web_search_enabled": bool(web_search_enabled),
+            },
+            citations=[
+                MessageCitationCreate(
+                    source_id=citation.source_id,
+                    source_chunk_id=citation.chunk_id,
+                    quote=citation.text,
+                    citation={
+                        "source_filename": citation.source_filename,
+                        "chunk_index": citation.chunk_index,
+                        "graph_enabled": False,
+                    },
+                )
+                for citation in mentor_response.citations
+            ],
+        ),
+    )
+    await record_agent_run(
+        session=session,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        message_id=assistant_response.id,
+        input_payload={
+            "content": content,
+            "user_message_id": str(user_message.id),
+            "graph_enabled": False,
+            "web_search_enabled": bool(web_search_enabled),
+        },
+        output_payload={
+            "assistant_message_id": str(assistant_response.id),
+            "citation_count": len(assistant_response.citations),
+            "graph_enabled": False,
+            "web_search_enabled": bool(web_search_enabled),
+        },
+        model="deterministic",
+        status=AgentRunStatus.completed,
+    )
+    return assistant_response

@@ -323,6 +323,27 @@ async def get_quiz(
     return build_quiz_response(quiz=quiz, questions=questions)
 
 
+async def retake_quiz(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    quiz_id: uuid.UUID,
+) -> QuizResponse:
+    quiz, _questions = await load_quiz_with_questions(
+        session=session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        quiz_id=quiz_id,
+    )
+    return await generate_chapter_quiz(
+        session=session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        chapter_id=quiz.chapter_id,
+        question_count=quiz.question_count,
+    )
+
+
 def validate_answers(questions: list[QuizQuestion], answers: list[int]) -> None:
     if len(answers) != len(questions):
         raise ValueError("Quiz answer count does not match question count")

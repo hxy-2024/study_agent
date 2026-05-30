@@ -47,12 +47,21 @@ class MessageCreate(BaseModel):
     citations: list[MessageCitationCreate] = Field(default_factory=list)
 
 
+class SourceJumpResponse(BaseModel):
+    space_id: uuid.UUID
+    source_id: uuid.UUID
+    chunk_id: uuid.UUID
+    source_url: str
+    chunk_url: str
+
+
 class MessageCitationResponse(BaseModel):
     id: uuid.UUID
     message_id: uuid.UUID
     source_id: uuid.UUID
     source_chunk_id: uuid.UUID
     chunk_id: uuid.UUID
+    source_jump: SourceJumpResponse
     source_filename: str
     chunk_index: int
     text: str

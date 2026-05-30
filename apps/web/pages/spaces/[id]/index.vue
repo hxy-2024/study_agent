@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 
 type SourceStatus = 'pending_upload' | 'uploaded' | 'processing' | 'ready' | 'failed' | string
 type SourceFilter = 'all' | 'uploaded' | 'processing' | 'ready' | 'failed'
@@ -180,6 +180,7 @@ const pastedSourceContent = ref('')
 const selectedSourceId = ref<string | null>(null)
 const selectedSourceName = ref('')
 const chunks = ref<SourceChunk[]>([])
+const highlightedChunkId = ref<string | null>(null)
 const routes = ref<RouteWithChapters[]>([])
 const plannerState = ref<SpacePlannerState | null>(null)
 const plannerActions = ref<PlannerAction[]>([])
@@ -320,6 +321,20 @@ function citationSummary(citation: Record<string, unknown>) {
 function appendBackendMessage(base: string, error: unknown) {
   if (error instanceof Error && error.message) return `${base} ${error.message}`
   return base
+}
+
+function queryStringValue(value: unknown) {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : null
+  return null
+}
+
+function sourceJumpSourceId() {
+  return queryStringValue(route.query?.source_id)
+}
+
+function sourceJumpChunkId() {
+  return queryStringValue(route.query?.chunk_id)
 }
 
 function normalizePlannerState(response: SpacePlannerState): SpacePlannerState | null {
@@ -760,9 +775,10 @@ async function runSelectedSourceIngestion() {
   await runIngestion(selectedSource.value)
 }
 
-async function loadChunks(source: SourceItem) {
+async function loadChunks(source: SourceItem, highlightChunkId: string | null = null) {
   selectedSourceId.value = source.id
   selectedSourceName.value = source.filename
+  highlightedChunkId.value = highlightChunkId
   loadingChunks.value = true
   errorMessage.value = ''
   try {
@@ -778,6 +794,16 @@ async function loadChunks(source: SourceItem) {
       nextChunklessIds.delete(source.id)
       chunklessSourceIds.value = nextChunklessIds
     }
+    if (highlightChunkId && response.chunks.some(chunk => chunk.id === highlightChunkId)) {
+      void nextTick(() => {
+        const element = document.getElementById(`source-chunk-${highlightChunkId}`)
+        if (typeof element?.scrollIntoView !== 'function') return
+        element.scrollIntoView({
+          block: 'center',
+          behavior: 'smooth'
+        })
+      })
+    }
   } catch (error) {
     chunks.value = []
     errorMessage.value = appendBackendMessage('Failed to load chunks.', error)
@@ -786,10 +812,23 @@ async function loadChunks(source: SourceItem) {
   }
 }
 
-onMounted(() => {
-  loadSources()
+async function applySourceJump() {
+  const sourceId = sourceJumpSourceId()
+  if (!sourceId) return
+  const linkedSource = sources.value.find(source => source.id === sourceId)
+  if (!linkedSource) return
+  await loadChunks(linkedSource, sourceJumpChunkId())
+}
+
+async function initializePage() {
+  await loadSources()
+  await applySourceJump()
   loadRoutes()
   loadAgentRuns()
+}
+
+onMounted(() => {
+  void initializePage()
 })
 </script>
 
@@ -1312,7 +1351,14 @@ onMounted(() => {
           </div>
           <div v-else class="chunk-list">
             <p class="selected-source-name">{{ selectedSourceName || selectedSource?.filename }}</p>
-            <article v-for="chunk in chunks" :key="chunk.id" class="chunk-card">
+            <article
+              v-for="chunk in chunks"
+              :id="`source-chunk-${chunk.id}`"
+              :key="chunk.id"
+              class="chunk-card"
+              :class="{ highlighted: highlightedChunkId === chunk.id }"
+              :data-testid="`source-chunk-${chunk.id}`"
+            >
               <h3>Chunk #{{ chunk.chunk_index }}</h3>
               <p>{{ chunk.text }}</p>
               <small>{{ citationSummary(chunk.citation) }}</small>
@@ -2078,6 +2124,12 @@ p {
   border: 0;
   border-left: 2px solid rgba(20, 184, 166, 0.42);
   background: rgba(236, 253, 245, 0.52);
+}
+
+.chunk-card.highlighted {
+  border-left-color: #0f766e;
+  background: rgba(204, 251, 241, 0.78);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.14);
 }
 
 @media (max-width: 1120px) {
