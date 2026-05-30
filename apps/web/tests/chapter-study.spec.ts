@@ -1,5 +1,11 @@
+// @ts-ignore - Vitest runs this in Node; the app tsconfig intentionally omits Node globals.
+import { readFileSync } from 'node:fs'
+// @ts-ignore - Vitest runs this in Node; the app tsconfig intentionally omits Node globals.
+import { join } from 'node:path'
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+declare const process: { cwd: () => string }
 
 const fetchMock = vi.fn()
 const confirmMock = vi.fn()
@@ -20,6 +26,10 @@ vi.stubGlobal('useRoute', () => ({
 }))
 
 const { default: ChapterStudyPage } = await import('../pages/chapters/[id]/index.vue')
+const chapterStudySource = readFileSync(
+  join(process.cwd(), 'pages/chapters/[id]/index.vue'),
+  'utf8'
+)
 
 function mountPage() {
   return mount(ChapterStudyPage, {
@@ -168,6 +178,11 @@ describe('ChapterStudyPage', () => {
     expect(wrapper.text()).not.toContain('Chapter runtime')
     expect(wrapper.text()).not.toContain('Source evidence')
     expect(wrapper.text()).not.toContain('Planner review')
+  })
+
+  it('keeps the chapter page scrollable on mobile layouts', () => {
+    expect(chapterStudySource).toContain(':global(body.chapter-study-page) {\n    overflow: auto;')
+    expect(chapterStudySource).toContain('.chat-workspace {\n    height: auto;')
   })
 
   it('lists every chapter from the current route in the left rail', async () => {

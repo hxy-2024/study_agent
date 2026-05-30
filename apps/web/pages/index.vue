@@ -28,11 +28,38 @@ interface DashboardAgentRun {
   summary: string
 }
 
+interface DashboardRecommendationAction {
+  title: string
+  action_label: string
+  action_url: string
+  recommendation_type: string
+  reason?: string | null
+  estimated_minutes?: number | null
+  study_space_id?: string | null
+  chapter_id?: string | null
+}
+
+interface DashboardRecommendation extends DashboardRecommendationAction {
+  agent_type: string
+  freshness: string
+  secondary_actions: DashboardRecommendationAction[]
+}
+
+type TodayRecommendationIntent = 'balanced' | 'new_material' | 'review' | 'quiz'
+
+interface MainAgentMessage {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  recommendation?: DashboardRecommendation
+}
+
 interface DashboardSummary {
   spaces: DashboardSpace[]
   pending_actions: DashboardAction[]
   supervision_refresh_count: number
   recent_agent_runs: DashboardAgentRun[]
+  today_recommendation?: DashboardRecommendation | null
 }
 
 interface ChapterListResponse {
@@ -59,6 +86,8 @@ const spaceSearch = ref('')
 const selectedSpaceId = ref('')
 const continueChapterBySpace = ref<Record<string, string>>({})
 const deletingSpaceId = ref('')
+const archivedSpaces = ref<DashboardSpace[]>([])
+const restoringSpaceId = ref('')
 
 const fallbackSpaces = computed(() => store.spaces.filter(space => space.status !== 'archived'))
 const activeSpaces = computed(() => dashboard.value?.spaces ?? fallbackSpaces.value)
@@ -89,6 +118,26 @@ function getContinueChapterId(spaceId: string) {
 const continueChapterId = computed(() => currentSpace.value ? getContinueChapterId(currentSpace.value.id) : null)
 const continueHref = computed(() => continueChapterId.value ? `/chapters/${continueChapterId.value}` : '/spaces/new')
 const continueLabel = computed(() => continueChapterId.value ? 'Continue study' : 'Prepare route')
+const todayRecommendation = computed(() => dashboard.value?.today_recommendation ?? null)
+const todayActionHref = computed(() => todayRecommendation.value?.action_url ?? continueHref.value)
+const todayActionLabel = computed(() => todayRecommendation.value?.action_label ?? continueLabel.value)
+const todayEstimatedMinutes = computed(() => todayRecommendation.value?.estimated_minutes ?? null)
+const todayRecommendationAvailableMinutes = ref(30)
+const todayRecommendationIntent = ref<TodayRecommendationIntent>('balanced')
+const todayRecommendationLoading = ref(false)
+const todayRecommendationError = ref('')
+const mainAgentOpen = ref(false)
+const mainAgentPrompt = ref('')
+const mainAgentMessageId = ref(0)
+const mainAgentMessages = ref<MainAgentMessage[]>([
+  {
+    id: mainAgentMessageId.value++,
+    role: 'assistant',
+    content: 'Tell me what kind of session you want. I can adjust today\'s plan around your time, energy, and study intent.'
+  }
+])
+const currentExportUrl = computed(() => currentSpace.value ? `${config.public.apiBaseUrl}/study-spaces/${currentSpace.value.id}/export` : '')
+const currentMarkdownExportUrl = computed(() => currentSpace.value ? `${config.public.apiBaseUrl}/study-spaces/${currentSpace.value.id}/export?format=markdown` : '')
 const today = new Date()
 const currentDay = today.getDate()
 const calendarDays = Array.from({ length: 35 }, (_, index) => index + 1)
@@ -97,8 +146,128 @@ const progressPercent = computed(() => {
   return Math.max(12, Math.min(78, Math.round(100 / Math.max(1, currentSpace.value.target_days) * 7)))
 })
 
+function devAuthHeaders() {
+  return {
+    'X-User-Id': '00000000-0000-0000-0000-000000000002',
+    'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
+  }
+}
+
 function selectSpace(spaceId: string) {
   selectedSpaceId.value = spaceId
+}
+
+function ensureDashboardSummary() {
+  if (dashboard.value) return dashboard.value
+  return {
+    spaces: [],
+    pending_actions: [],
+    supervision_refresh_count: 0,
+    recent_agent_runs: [],
+    today_recommendation: null
+  }
+}
+
+function inferMainAgentRequest(prompt: string) {
+  const normalized = prompt.toLowerCase()
+  let availableMinutes = todayRecommendationAvailableMinutes.value
+  const minuteMatch = normalized.match(/\b(15|30|45|60|90)\b/)
+  if (minuteMatch) {
+    availableMinutes = Number(minuteMatch[1])
+  }
+
+  let intent: TodayRecommendationIntent = todayRecommendationIntent.value
+  if (/\bquiz|test|exam|测验|考试\b/.test(normalized)) {
+    intent = 'quiz'
+  } else if (/\breview|revise|weak|forgot|复习|薄弱|回顾\b/.test(normalized)) {
+    intent = 'review'
+  } else if (/\bnew|next|continue|新|继续|下一/.test(normalized)) {
+    intent = 'new_material'
+  } else if (/\bbalanced|mix|综合|均衡\b/.test(normalized)) {
+    intent = 'balanced'
+  }
+
+  return {
+    available_minutes: availableMinutes,
+    intent
+  }
+}
+
+async function requestTodayRecommendation(overrides?: {
+  available_minutes?: number
+  intent?: TodayRecommendationIntent
+}) {
+  if (todayRecommendationLoading.value) return
+
+  if (typeof overrides?.available_minutes === 'number') {
+    todayRecommendationAvailableMinutes.value = overrides.available_minutes
+  }
+  if (overrides?.intent) {
+    todayRecommendationIntent.value = overrides.intent
+  }
+
+  todayRecommendationLoading.value = true
+  todayRecommendationError.value = ''
+  try {
+    const recommendation = await $fetch<DashboardRecommendation>(`${config.public.apiBaseUrl}/dashboard/recommendation`, {
+      method: 'POST',
+      headers: devAuthHeaders(),
+      body: {
+        available_minutes: todayRecommendationAvailableMinutes.value,
+        intent: todayRecommendationIntent.value
+      }
+    })
+    dashboard.value = {
+      ...ensureDashboardSummary(),
+      today_recommendation: recommendation
+    }
+  } catch (error) {
+    todayRecommendationError.value = error instanceof Error ? error.message : 'Request failed'
+  } finally {
+    todayRecommendationLoading.value = false
+  }
+}
+
+function openMainAgent() {
+  mainAgentOpen.value = true
+}
+
+function closeMainAgent() {
+  mainAgentOpen.value = false
+}
+
+async function sendMainAgentPrompt(prompt?: string) {
+  const content = (prompt ?? mainAgentPrompt.value).trim()
+  if (!content || todayRecommendationLoading.value) return
+
+  const request = inferMainAgentRequest(content)
+  todayRecommendationAvailableMinutes.value = request.available_minutes
+  todayRecommendationIntent.value = request.intent
+  mainAgentPrompt.value = ''
+  mainAgentMessages.value.push({
+    id: mainAgentMessageId.value++,
+    role: 'user',
+    content
+  })
+
+  await requestTodayRecommendation(request)
+  if (todayRecommendationError.value) {
+    mainAgentMessages.value.push({
+      id: mainAgentMessageId.value++,
+      role: 'assistant',
+      content: `Unable to load recommendation: ${todayRecommendationError.value}`
+    })
+    return
+  }
+
+  if (todayRecommendation.value) {
+    mainAgentMessages.value.push({
+      id: mainAgentMessageId.value++,
+      role: 'assistant',
+      content: todayRecommendation.value.reason ?? 'I updated today\'s plan based on your request.',
+      recommendation: todayRecommendation.value
+    })
+  }
 }
 
 async function archiveSpace(spaceId: string, spaceName: string) {
@@ -109,14 +278,36 @@ async function archiveSpace(spaceId: string, spaceName: string) {
   try {
     await $fetch(`${config.public.apiBaseUrl}/study-spaces/${spaceId}`, {
       method: 'DELETE',
-      headers: {
-        'X-User-Id': '00000000-0000-0000-0000-000000000002',
-        'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
-      }
+      headers: devAuthHeaders()
     })
     await Promise.all([store.loadSpaces(), loadDashboard()])
+    await loadArchivedSpaces()
   } finally {
     deletingSpaceId.value = ''
+  }
+}
+
+async function loadArchivedSpaces() {
+  try {
+    archivedSpaces.value = await $fetch<DashboardSpace[]>(`${config.public.apiBaseUrl}/study-spaces/archived`, {
+      headers: devAuthHeaders()
+    })
+  } catch {
+    archivedSpaces.value = []
+  }
+}
+
+async function restoreSpace(spaceId: string) {
+  if (restoringSpaceId.value) return
+  restoringSpaceId.value = spaceId
+  try {
+    await $fetch(`${config.public.apiBaseUrl}/study-spaces/${spaceId}/restore`, {
+      method: 'POST',
+      headers: devAuthHeaders()
+    })
+    await Promise.all([store.loadSpaces(), loadDashboard(), loadArchivedSpaces()])
+  } finally {
+    restoringSpaceId.value = ''
   }
 }
 
@@ -138,10 +329,7 @@ async function loadContinueChapter(spaceId: string) {
   let nextChapterId: string | null = null
   try {
     const response = await $fetch<ChapterListResponse>(`${config.public.apiBaseUrl}/study-spaces/${spaceId}/chapters`, {
-      headers: {
-        'X-User-Id': '00000000-0000-0000-0000-000000000002',
-        'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
-      }
+      headers: devAuthHeaders()
     })
     const chapters = response.chapters ?? []
     const nextChapter = chapters.find(chapter => chapter.status !== 'completed') ?? chapters[0]
@@ -153,10 +341,7 @@ async function loadContinueChapter(spaceId: string) {
   if (!nextChapterId) {
     try {
       const routesResponse = await $fetch<RoutesListResponse>(`${config.public.apiBaseUrl}/study-spaces/${spaceId}/routes`, {
-        headers: {
-          'X-User-Id': '00000000-0000-0000-0000-000000000002',
-          'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
-        }
+        headers: devAuthHeaders()
       })
       for (const route of routesResponse.routes ?? []) {
         const chapters = route.chapters ?? []
@@ -180,6 +365,7 @@ async function loadContinueChapter(spaceId: string) {
 onMounted(() => {
   store.loadSpaces()
   loadDashboard()
+  loadArchivedSpaces()
 })
 
 watch(
@@ -264,17 +450,41 @@ watch(
 
         <section v-if="currentSpace" class="card continue-panel">
           <div class="continue-copy">
-            <p class="eyebrow">Continue</p>
-            <h2>{{ currentSpace.name }}</h2>
-            <p>{{ currentSpace.goal }}</p>
+            <p class="eyebrow">{{ todayRecommendation ? 'Main Agent' : 'Continue' }}</p>
+            <h2>{{ todayRecommendation?.title ?? currentSpace.name }}</h2>
+            <p>{{ todayRecommendation?.reason ?? currentSpace.goal }}</p>
             <div class="progress-track" aria-label="Current space progress">
               <span :style="{ width: `${progressPercent}%` }" />
             </div>
-            <small>{{ progressPercent }}% route foundation prepared · {{ currentSpace.target_days }} target days</small>
+            <small v-if="todayEstimatedMinutes">{{ todayEstimatedMinutes }} min suggested · {{ todayRecommendation?.freshness }}</small>
+            <small v-else>{{ progressPercent }}% route foundation prepared · {{ currentSpace.target_days }} target days</small>
+            <div v-if="todayRecommendation?.secondary_actions?.length" class="today-secondary-list">
+              <NuxtLink
+                v-for="action in todayRecommendation.secondary_actions"
+                :key="`${action.recommendation_type}-${action.action_url}-${action.title}`"
+                class="today-secondary-action"
+                :to="action.action_url"
+              >
+                <strong>{{ action.title }}</strong>
+                <span>{{ action.action_label }}</span>
+              </NuxtLink>
+            </div>
           </div>
           <div class="continue-actions">
             <span class="status-badge">{{ currentSpace.status }}</span>
-            <NuxtLink class="primary-button" :to="continueHref">{{ continueLabel }}</NuxtLink>
+            <NuxtLink class="primary-button" :to="todayActionHref">{{ todayActionLabel }}</NuxtLink>
+          </div>
+        </section>
+
+        <section v-if="currentSpace" class="panel export-panel">
+          <div>
+            <p class="eyebrow">Data safety</p>
+            <h2>Export current space</h2>
+            <p>Download a local snapshot before large edits or cleanup.</p>
+          </div>
+          <div class="export-actions">
+            <a class="secondary-button" :href="currentExportUrl" target="_blank" rel="noreferrer">JSON</a>
+            <a class="secondary-button" :href="currentMarkdownExportUrl" target="_blank" rel="noreferrer">Markdown</a>
           </div>
         </section>
 
@@ -303,6 +513,32 @@ watch(
             <p v-else>Upload text or Markdown in a study space to prepare retrieval and route generation.</p>
           </section>
         </div>
+
+        <section v-if="archivedSpaces.length" class="panel archived-panel">
+          <div class="section-heading archived-heading">
+            <div>
+              <p class="eyebrow">Archived</p>
+              <h2>Archived spaces</h2>
+            </div>
+          </div>
+          <div class="archived-list">
+            <article v-for="space in archivedSpaces" :key="space.id" class="archived-row">
+              <div>
+                <strong>{{ space.name }}</strong>
+                <small>{{ space.goal }}</small>
+              </div>
+              <button
+                class="secondary-button"
+                type="button"
+                :disabled="restoringSpaceId === space.id"
+                :data-testid="`restore-space-${space.id}`"
+                @click="restoreSpace(space.id)"
+              >
+                Restore
+              </button>
+            </article>
+          </div>
+        </section>
       </section>
 
       <aside class="calendar-column" aria-label="Calendar and events">
@@ -324,6 +560,75 @@ watch(
         </section>
       </aside>
     </div>
+
+    <button
+      type="button"
+      class="main-agent-fab"
+      data-testid="main-agent-fab"
+      aria-label="Open Main Agent"
+      @click="openMainAgent"
+    >
+      <span class="main-agent-fab-orbit" aria-hidden="true" />
+      <span class="main-agent-fab-core">AI</span>
+    </button>
+
+    <section
+      v-if="mainAgentOpen"
+      class="main-agent-window"
+      aria-label="Main Agent conversation"
+    >
+      <header class="main-agent-header">
+        <div>
+          <p class="eyebrow">Main Agent</p>
+          <h2>Plan today's study</h2>
+        </div>
+        <button type="button" class="main-agent-close" aria-label="Close Main Agent" @click="closeMainAgent">
+          ×
+        </button>
+      </header>
+
+      <div class="main-agent-scope">
+        Reads learning state, updates dashboard recommendations, and opens approved study actions.
+      </div>
+
+      <div class="main-agent-messages">
+        <article
+          v-for="message in mainAgentMessages"
+          :key="message.id"
+          class="main-agent-message"
+          :class="message.role"
+        >
+          <p>{{ message.content }}</p>
+          <NuxtLink
+            v-if="message.recommendation"
+            class="main-agent-message-action"
+            :to="message.recommendation.action_url"
+          >
+            {{ message.recommendation.action_label }}
+          </NuxtLink>
+        </article>
+        <article v-if="todayRecommendationLoading" class="main-agent-message assistant">
+          <p>Thinking through today's best next step...</p>
+        </article>
+      </div>
+
+      <div class="main-agent-prompts" aria-label="Suggested prompts">
+        <button type="button" @click="sendMainAgentPrompt('I only have 15 minutes and want to review')">15 min review</button>
+        <button type="button" @click="sendMainAgentPrompt('I want new material for the next hour')">New material</button>
+        <button type="button" @click="sendMainAgentPrompt('Quiz me today')">Quiz me</button>
+      </div>
+
+      <form class="main-agent-form" data-testid="main-agent-form" @submit.prevent="sendMainAgentPrompt()">
+        <input
+          v-model="mainAgentPrompt"
+          data-testid="main-agent-input"
+          type="text"
+          placeholder="Tell Main Agent what you need today..."
+          :disabled="todayRecommendationLoading"
+        >
+        <button type="submit" :disabled="todayRecommendationLoading || !mainAgentPrompt.trim()">Send</button>
+      </form>
+    </section>
   </section>
 </template>
 
@@ -396,6 +701,195 @@ watch(
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
+}
+
+.today-secondary-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.today-secondary-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid rgba(161, 211, 202, 0.48);
+  color: var(--color-text);
+  padding-top: 8px;
+  text-decoration: none;
+}
+
+.today-secondary-action strong,
+.today-secondary-action span {
+  font-size: 13px;
+}
+
+.today-secondary-action span {
+  color: var(--color-primary);
+  font-weight: 800;
+}
+
+.main-agent-fab {
+  position: fixed;
+  right: 26px;
+  bottom: 24px;
+  z-index: 40;
+  width: 66px;
+  height: 66px;
+  border: 1px solid rgba(20, 184, 166, 0.5);
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, #ccfbf1, #14b8a6 56%, #0f766e);
+  box-shadow: 0 18px 38px rgba(15, 118, 110, 0.28);
+  color: white;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.main-agent-fab-orbit {
+  position: absolute;
+  inset: -7px;
+  border: 1px solid rgba(20, 184, 166, 0.38);
+  border-radius: inherit;
+  animation: agent-pulse 2.8s ease-in-out infinite;
+}
+
+.main-agent-fab-core {
+  position: relative;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.main-agent-window {
+  position: fixed;
+  right: 26px;
+  bottom: 104px;
+  z-index: 41;
+  width: min(430px, calc(100vw - 32px));
+  max-height: min(680px, calc(100dvh - 132px));
+  border: 1px solid rgba(161, 211, 202, 0.72);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(240, 253, 250, 0.94), rgba(255, 255, 255, 0.94)),
+    var(--color-surface);
+  box-shadow: 0 24px 70px rgba(15, 118, 110, 0.22);
+  display: grid;
+  grid-template-rows: auto auto minmax(180px, 1fr) auto auto;
+  overflow: hidden;
+}
+
+.main-agent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px 12px;
+}
+
+.main-agent-header h2 {
+  margin: 0;
+}
+
+.main-agent-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(161, 211, 202, 0.7);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.main-agent-scope {
+  margin: 0 18px 12px;
+  border-left: 3px solid var(--color-primary-bright);
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  padding-left: 10px;
+}
+
+.main-agent-messages {
+  display: grid;
+  gap: 10px;
+  overflow: auto;
+  padding: 0 18px 14px;
+}
+
+.main-agent-message {
+  max-width: 86%;
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.main-agent-message p {
+  margin: 0;
+}
+
+.main-agent-message.assistant {
+  justify-self: start;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(161, 211, 202, 0.48);
+}
+
+.main-agent-message.user {
+  justify-self: end;
+  background: #0f766e;
+  color: white;
+}
+
+.main-agent-message-action {
+  display: inline-flex;
+  margin-top: 10px;
+  color: var(--color-primary);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.main-agent-prompts {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 18px 12px;
+}
+
+.main-agent-prompts button,
+.main-agent-form button {
+  border: 1px solid rgba(20, 184, 166, 0.42);
+  border-radius: 10px;
+  background: rgba(204, 251, 241, 0.62);
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 850;
+  min-height: 36px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.main-agent-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  border-top: 1px solid rgba(161, 211, 202, 0.5);
+  padding: 12px;
+}
+
+.main-agent-form input {
+  min-width: 0;
+  border: 1px solid rgba(161, 211, 202, 0.72);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--color-text);
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+.main-agent-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .spaces-toolbar {
@@ -610,6 +1104,18 @@ watch(
   }
 }
 
+@keyframes agent-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.08);
+  }
+}
+
 @media (max-width: 1000px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
@@ -679,6 +1185,53 @@ watch(
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
+.export-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.export-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.archived-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.archived-heading {
+  min-height: auto;
+}
+
+.archived-list {
+  display: grid;
+  gap: 8px;
+}
+
+.archived-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid rgba(161, 211, 202, 0.42);
+  padding-top: 10px;
+}
+
+.archived-row strong,
+.archived-row small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.archived-row small {
+  color: var(--color-muted);
+  margin-top: 3px;
+}
+
 .dashboard-stats .panel {
   border: 0;
   border-top: 1px solid rgba(161, 211, 202, 0.55);
@@ -744,6 +1297,17 @@ watch(
 
   .dashboard-stats {
     grid-template-columns: 1fr;
+  }
+
+  .export-panel,
+  .archived-row {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .export-panel,
+  .export-actions {
+    flex-direction: column;
   }
 }
 </style>

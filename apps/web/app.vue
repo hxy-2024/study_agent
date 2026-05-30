@@ -1,8 +1,24 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 
+interface RuntimeCheck {
+  name: string
+  status: 'ok' | 'warning' | 'error' | string
+  detail: string
+}
+
+interface RuntimeStatus {
+  status: 'ok' | 'warning' | 'degraded' | string
+  checks: RuntimeCheck[]
+}
+
+const config = useRuntimeConfig()
 const drawerOpen = ref(false)
 const settingsOpen = ref(false)
+const runtimeStatusOpen = ref(false)
+const runtimeStatusLoading = ref(false)
+const runtimeStatusError = ref('')
+const runtimeStatus = ref<RuntimeStatus | null>(null)
 
 const settings = reactive({
   baseUrl: 'http://127.0.0.1:8000/api/v1',
@@ -28,6 +44,20 @@ async function openNavigationItem(item: { action?: string; enabled?: boolean; to
     await navigateTo(item.to)
   }
   drawerOpen.value = false
+}
+
+async function openRuntimeStatus() {
+  runtimeStatusOpen.value = true
+  runtimeStatusLoading.value = true
+  runtimeStatusError.value = ''
+  try {
+    runtimeStatus.value = await $fetch<RuntimeStatus>(`${config.public.apiBaseUrl}/runtime/status`)
+  } catch (error) {
+    runtimeStatus.value = null
+    runtimeStatusError.value = error instanceof Error ? error.message : 'Runtime status is unavailable.'
+  } finally {
+    runtimeStatusLoading.value = false
+  }
 }
 </script>
 
@@ -56,7 +86,14 @@ async function openNavigationItem(item: { action?: string; enabled?: boolean; to
       </div>
 
       <div class="topbar-center">
-        <span class="runtime-pill">Local runtime</span>
+        <button
+          class="runtime-pill runtime-status-button"
+          type="button"
+          data-testid="runtime-status-button"
+          @click="openRuntimeStatus"
+        >
+          Local runtime
+        </button>
       </div>
 
       <button class="avatar-button" type="button" aria-label="Local user profile">U</button>
@@ -125,6 +162,35 @@ async function openNavigationItem(item: { action?: string; enabled?: boolean; to
 
         <p class="settings-note">These defaults stay local in this browser for now. Account editing remains reserved.</p>
         <button class="primary-button" type="button" @click="settingsOpen = false">Done</button>
+      </section>
+    </div>
+
+    <div v-if="runtimeStatusOpen" class="overlay" @click.self="runtimeStatusOpen = false">
+      <section class="settings-modal runtime-status-modal" aria-label="Local runtime status">
+        <div class="drawer-heading">
+          <div>
+            <p class="eyebrow">Runtime</p>
+            <h2>Local status</h2>
+          </div>
+          <button class="icon-button" type="button" aria-label="Close runtime status" @click="runtimeStatusOpen = false">脳</button>
+        </div>
+
+        <p v-if="runtimeStatusLoading" class="settings-note">Checking local services...</p>
+        <p v-else-if="runtimeStatusError" class="settings-note">{{ runtimeStatusError }}</p>
+        <div v-else-if="runtimeStatus" class="runtime-status-list">
+          <article
+            v-for="check in runtimeStatus.checks"
+            :key="check.name"
+            class="runtime-status-row"
+            :class="`runtime-status-${check.status}`"
+          >
+            <span class="runtime-status-dot" aria-hidden="true" />
+            <div>
+              <strong>{{ check.name.replace('_', ' ') }}</strong>
+              <p>{{ check.detail }}</p>
+            </div>
+          </article>
+        </div>
       </section>
     </div>
   </div>

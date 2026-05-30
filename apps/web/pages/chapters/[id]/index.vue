@@ -2449,4 +2449,16 @@ onBeforeUnmount(() => {
     transform: translateY(0);
   }
 }
+
+@media (max-width: 760px) {
+  :global(body.chapter-study-page) {
+    overflow: auto;
+  }
+
+  .chat-workspace {
+    height: auto;
+    min-height: calc(100dvh - 58px);
+    overflow: visible;
+  }
+}
 </style>
