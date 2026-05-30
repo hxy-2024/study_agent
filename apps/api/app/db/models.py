@@ -2,12 +2,11 @@ import enum
 import uuid
 from datetime import datetime
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.db.types import EmbeddingVector, GUID, JSONValue
 
 
 class StudySpaceStatus(str, enum.Enum):
@@ -110,7 +109,7 @@ class ChapterAnnotationKind(str, enum.Enum):
 class Tenant(Base):
     __tablename__ = "tenants"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -118,7 +117,7 @@ class Tenant(Base):
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -127,7 +126,7 @@ class User(Base):
 class Membership(Base):
     __tablename__ = "memberships"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(40), nullable=False, default="owner")
@@ -136,7 +135,7 @@ class Membership(Base):
 class StudySpace(Base):
     __tablename__ = "study_spaces"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     owner_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
@@ -149,7 +148,7 @@ class StudySpace(Base):
         nullable=False,
         default=StudySpaceStatus.active,
     )
-    route_outline: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    route_outline: Mapped[list[dict]] = mapped_column(JSONValue, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -168,7 +167,7 @@ class StudySpace(Base):
 class Source(Base):
     __tablename__ = "sources"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     study_space_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("study_spaces.id"),
@@ -195,7 +194,7 @@ class Source(Base):
 class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
     source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sources.id"), nullable=False, index=True)
@@ -218,15 +217,15 @@ class SourceChunk(Base):
         UniqueConstraint("source_id", "chunk_index", name="uq_source_chunks_source_index"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
     source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sources.id"), nullable=False, index=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    citation: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    embedding: Mapped[list[float]] = mapped_column(Vector(16), nullable=False)
+    citation: Mapped[dict] = mapped_column(JSONValue, nullable=False, default=dict)
+    embedding: Mapped[list[float]] = mapped_column(EmbeddingVector(16), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -241,7 +240,7 @@ class LearningRoute(Base):
         UniqueConstraint("study_space_id", "version", name="uq_learning_routes_space_version"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -266,7 +265,7 @@ class Chapter(Base):
         UniqueConstraint("learning_route_id", "order_index", name="uq_chapters_route_order"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
     learning_route_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("learning_routes.id"), nullable=False, index=True)
@@ -280,7 +279,7 @@ class Chapter(Base):
         nullable=False,
         default=ChapterStatus.not_started,
     )
-    source_chunk_refs: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    source_chunk_refs: Mapped[list[dict]] = mapped_column(JSONValue, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     study_space: Mapped["StudySpace"] = relationship(back_populates="chapters")
@@ -298,14 +297,14 @@ class ChapterMentorState(Base):
         UniqueConstraint("chapter_id", name="uq_chapter_mentor_states_chapter"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
     chapter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chapters.id"), nullable=False, index=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
-    weak_points: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
-    next_actions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
-    evidence: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    weak_points: Mapped[list[str]] = mapped_column(JSONValue, nullable=False, default=list)
+    next_actions: Mapped[list[str]] = mapped_column(JSONValue, nullable=False, default=list)
+    evidence: Mapped[list[dict]] = mapped_column(JSONValue, nullable=False, default=list)
     source_session_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     source_message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -318,7 +317,7 @@ class ChapterMentorState(Base):
 class Quiz(Base):
     __tablename__ = "quizzes"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
@@ -346,16 +345,16 @@ class QuizQuestion(Base):
         UniqueConstraint("quiz_id", "order_index", name="uq_quiz_questions_quiz_order"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     quiz_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("quizzes.id"), nullable=False, index=True)
     chapter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chapters.id"), nullable=False, index=True)
     order_index: Mapped[int] = mapped_column(Integer, nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    options: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    options: Mapped[list[str]] = mapped_column(JSONValue, nullable=False, default=list)
     correct_option_index: Mapped[int] = mapped_column(Integer, nullable=False)
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
-    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    evidence: Mapped[dict] = mapped_column(JSONValue, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     quiz: Mapped["Quiz"] = relationship(back_populates="questions")
@@ -364,17 +363,17 @@ class QuizQuestion(Base):
 class QuizSubmission(Base):
     __tablename__ = "quiz_submissions"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     quiz_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("quizzes.id"), nullable=False, index=True)
     chapter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chapters.id"), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
-    answers: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list)
+    answers: Mapped[list[int]] = mapped_column(JSONValue, nullable=False, default=list)
     score_percent: Mapped[int] = mapped_column(Integer, nullable=False)
     correct_count: Mapped[int] = mapped_column(Integer, nullable=False)
     question_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    results: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
-    weak_points: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    results: Mapped[list[dict]] = mapped_column(JSONValue, nullable=False, default=list)
+    weak_points: Mapped[list[str]] = mapped_column(JSONValue, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     quiz: Mapped["Quiz"] = relationship(back_populates="submissions")
@@ -387,7 +386,7 @@ class MasteryRecord(Base):
         UniqueConstraint("tenant_id", "chapter_id", "user_id", name="uq_mastery_records_tenant_chapter_user"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
@@ -398,7 +397,7 @@ class MasteryRecord(Base):
         nullable=False,
         default=MasteryLevel.new,
     )
-    weak_points: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    weak_points: Mapped[list[str]] = mapped_column(JSONValue, nullable=False, default=list)
     last_quiz_submission_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("quiz_submissions.id"),
         nullable=False,
@@ -422,16 +421,16 @@ class SpacePlannerState(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     next_chapter_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chapters.id"), nullable=True, index=True)
-    risk_chapters: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
-    review_recommendations: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
-    route_adjustments: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
-    evidence: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    risk_chapters: Mapped[list[dict]] = mapped_column(JSONValue, nullable=False, default=list)
+    review_recommendations: Mapped[list[dict]] = mapped_column(JSONValue, nullable=False, default=list)
+    route_adjustments: Mapped[list[dict]] = mapped_column(JSONValue, nullable=False, default=list)
+    evidence: Mapped[list[dict]] = mapped_column(JSONValue, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -441,7 +440,7 @@ class SpacePlannerState(Base):
 class PlannerAction(Base):
     __tablename__ = "planner_actions"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
@@ -462,7 +461,7 @@ class PlannerAction(Base):
     )
     title: Mapped[str] = mapped_column(String(220), nullable=False)
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
-    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    payload: Mapped[dict] = mapped_column(JSONValue, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -472,7 +471,7 @@ class PlannerAction(Base):
 class ChapterAnnotation(Base):
     __tablename__ = "chapter_annotations"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
@@ -484,7 +483,7 @@ class ChapterAnnotation(Base):
     )
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     quote: Mapped[str | None] = mapped_column(Text, nullable=True)
-    anchor: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    anchor: Mapped[dict] = mapped_column(JSONValue, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -499,7 +498,7 @@ class LearningSignal(Base):
         UniqueConstraint("tenant_id", "user_id", "dedupe_key", name="uq_learning_signals_tenant_user_dedupe"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     study_space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_spaces.id"), nullable=False, index=True)
@@ -519,7 +518,7 @@ class LearningSignal(Base):
     dedupe_key: Mapped[str] = mapped_column(String(240), nullable=False)
     available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    payload: Mapped[dict] = mapped_column(JSONValue, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -527,7 +526,7 @@ class LearningSignal(Base):
 class Session(Base):
     __tablename__ = "sessions"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id"),
         nullable=False,
@@ -562,7 +561,7 @@ class Session(Base):
 class Message(Base):
     __tablename__ = "messages"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id"),
         nullable=False,
@@ -583,7 +582,7 @@ class Message(Base):
         nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONValue, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     session: Mapped["Session"] = relationship(back_populates="messages")
@@ -594,7 +593,7 @@ class Message(Base):
 class MessageCitation(Base):
     __tablename__ = "message_citations"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id"),
         nullable=False,
@@ -616,7 +615,7 @@ class MessageCitation(Base):
         index=True,
     )
     quote: Mapped[str] = mapped_column(Text, nullable=False)
-    citation: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    citation: Mapped[dict] = mapped_column(JSONValue, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     message: Mapped["Message"] = relationship(back_populates="citations")
@@ -627,7 +626,7 @@ class MessageCitation(Base):
 class AgentRun(Base):
     __tablename__ = "agent_runs"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id"),
         nullable=False,
@@ -658,8 +657,8 @@ class AgentRun(Base):
         default=AgentRunStatus.pending,
     )
     model: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    input_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    output_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    input_payload: Mapped[dict] = mapped_column(JSONValue, nullable=False, default=dict)
+    output_payload: Mapped[dict] = mapped_column(JSONValue, nullable=False, default=dict)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -670,3 +669,4 @@ class AgentRun(Base):
 
     session: Mapped["Session"] = relationship(back_populates="agent_runs")
     message: Mapped["Message"] = relationship(back_populates="agent_runs")
+

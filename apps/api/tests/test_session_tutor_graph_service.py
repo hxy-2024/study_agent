@@ -29,6 +29,7 @@ class FakeAnswerProvider:
         chunks: list[RetrievedChunk],
         source_filenames: dict[uuid.UUID, str],
         web_search_results: list[dict[str, str]] | None = None,
+        thinking_effort: str = "medium",
     ) -> ChapterMentorResponse:
         self.web_search_results = web_search_results
         return ChapterMentorResponse(
@@ -53,6 +54,7 @@ class FailingAnswerProvider:
         chunks: list[RetrievedChunk],
         source_filenames: dict[uuid.UUID, str],
         web_search_results: list[dict[str, str]] | None = None,
+        thinking_effort: str = "medium",
     ) -> ChapterMentorResponse:
         raise RuntimeError("provider unavailable")
 

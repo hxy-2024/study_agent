@@ -394,6 +394,33 @@ describe('ChapterStudyPage', () => {
     expect(wrapper.find('[aria-label="Interrupt generation"]').exists()).toBe(false)
   })
 
+  it('renders fenced code from mentor messages inside a code block', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
+        return Promise.resolve([mentorSession()])
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
+        return Promise.resolve([
+          mentorMessage({
+            content: 'Here is the pattern:\n```python\n# keep this as code\nfrom langgraph.graph import StateGraph\n```\nThen explain it.',
+            citations: []
+          })
+        ])
+      }
+      return Promise.resolve(chapterDetail())
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const codeBlock = wrapper.find('pre.code-block')
+    expect(codeBlock.exists()).toBe(true)
+    expect(codeBlock.attributes('data-language')).toBe('python')
+    expect(codeBlock.find('code').text()).toContain('# keep this as code')
+    expect(codeBlock.find('code').text()).toContain('from langgraph.graph import StateGraph')
+    expect(wrapper.html()).toContain('Then explain it.')
+  })
+
   it('turns the send button into an interrupt control while mentor generation is running', async () => {
     let abortWasCalled = false
     fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown; signal?: AbortSignal }) => {
@@ -493,7 +520,7 @@ describe('ChapterStudyPage', () => {
       'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
       expect.objectContaining({
         method: 'POST',
-        body: { content: 'How does RAG work?', web_search_enabled: false }
+        body: { content: 'How does RAG work?', web_search_enabled: false, thinking_effort: 'medium' }
       })
     )
     expect(wrapper.text()).toContain('RAG retrieves relevant evidence before answering.')
@@ -529,7 +556,136 @@ describe('ChapterStudyPage', () => {
       'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
       expect.objectContaining({
         method: 'POST',
-        body: { content: 'What changed recently?', web_search_enabled: true }
+        body: { content: 'What changed recently?', web_search_enabled: true, thinking_effort: 'medium' }
+      })
+    )
+  })
+
+  it('loads configured models into the mentor model selector and sends the selected model', async () => {
+    fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
+      if (url.endsWith('/local-settings/ai')) {
+        return Promise.resolve({
+          llm_model: 'deepseek-chat',
+          available_models: ['deepseek-chat', 'deepseek-reasoner']
+        })
+      }
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
+        return Promise.resolve([mentorSession()])
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages') && options?.method === 'POST') {
+        return Promise.resolve(mentorMessage())
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
+        return Promise.resolve([])
+      }
+      return Promise.resolve(chapterDetail())
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await flushPromises()
+
+    const modelSelect = wrapper.find('[data-testid="mentor-model-select"]')
+    expect(modelSelect.text()).toContain('deepseek-chat')
+    expect(modelSelect.text()).toContain('deepseek-reasoner')
+
+    await modelSelect.setValue('deepseek-reasoner')
+    await wrapper.find('[data-testid="mentor-question"]').setValue('Use the stronger model')
+    await wrapper.find('form.mentor-form').trigger('submit')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
+      expect.objectContaining({
+        method: 'POST',
+        body: {
+          content: 'Use the stronger model',
+          web_search_enabled: false,
+          thinking_effort: 'medium',
+          model: 'deepseek-reasoner'
+        }
+      })
+    )
+  })
+
+  it('sends the selected thinking effort for mentor questions', async () => {
+    fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
+        return Promise.resolve([mentorSession()])
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages') && options?.method === 'POST') {
+        return Promise.resolve(mentorMessage())
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
+        return Promise.resolve([])
+      }
+      return Promise.resolve(chapterDetail())
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const thinkingSelect = wrapper.find('[data-testid="mentor-thinking-select"]')
+    expect(thinkingSelect.text()).toContain('Low')
+    expect(thinkingSelect.text()).toContain('Medium')
+    expect(thinkingSelect.text()).toContain('High')
+
+    await thinkingSelect.setValue('high')
+    await wrapper.find('[data-testid="mentor-question"]').setValue('Think more carefully')
+    await wrapper.find('form.mentor-form').trigger('submit')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
+      expect.objectContaining({
+        method: 'POST',
+        body: {
+          content: 'Think more carefully',
+          web_search_enabled: false,
+          thinking_effort: 'high'
+        }
+      })
+    )
+  })
+
+  it('sends mentor question on Enter and keeps Shift Enter for multiline input', async () => {
+    fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
+        return Promise.resolve([mentorSession()])
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages') && options?.method === 'POST') {
+        return Promise.resolve(mentorMessage())
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
+        return Promise.resolve([])
+      }
+      return Promise.resolve(chapterDetail())
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const input = wrapper.find('[data-testid="mentor-question"]')
+    await input.setValue('Do not send yet')
+    await input.trigger('keydown', { key: 'Enter', shiftKey: true })
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
+      expect.objectContaining({ method: 'POST' })
+    )
+
+    await input.setValue('Send with Enter')
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
+      expect.objectContaining({
+        method: 'POST',
+        body: {
+          content: 'Send with Enter',
+          web_search_enabled: false,
+          thinking_effort: 'medium'
+        }
       })
     )
   })

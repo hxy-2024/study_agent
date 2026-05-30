@@ -71,6 +71,38 @@ async def test_list_archived_spaces_uses_authorized_tenant(monkeypatch) -> None:
     assert captured["tenant_id"] == tenant_id
 
 
+async def test_create_space_rejects_duplicate_name(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    async def fake_context() -> CurrentUserContext:
+        return CurrentUserContext(user_id=user_id, tenant_id=tenant_id)
+
+    async def fake_create_study_space(**kwargs):
+        from app.domain.study_spaces.service import StudySpaceNameConflictError
+
+        raise StudySpaceNameConflictError("A study space with this name already exists")
+
+    monkeypatch.setattr(routes_study_spaces, "create_study_space", fake_create_study_space)
+    app.dependency_overrides[get_db_session] = fake_get_db_session
+    app.dependency_overrides[get_authorized_user_context] = fake_context
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/study-spaces",
+                json={
+                    "name": "Duplicate",
+                    "goal": "Learn without duplicate spaces",
+                    "target_days": 30,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 409
+    assert "already exists" in response.json()["detail"]
+
+
 async def test_restore_archived_space_uses_authorized_tenant(monkeypatch) -> None:
     tenant_id = uuid.uuid4()
     study_space_id = uuid.uuid4()

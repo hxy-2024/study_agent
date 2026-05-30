@@ -48,6 +48,7 @@ describe('DashboardPage', () => {
     storeState.loadSpaces.mockReset()
     fetchMock.mockReset()
     fetchMock.mockRejectedValue(new Error('Dashboard not ready'))
+    window.localStorage.clear()
   })
 
   it('renders an empty continue-learning workspace with create action', () => {
@@ -59,7 +60,7 @@ describe('DashboardPage', () => {
     expect(wrapper.text()).toContain('Calendar')
     expect(wrapper.text()).toContain('Add diary')
     expect(wrapper.find('a[href="/spaces/new"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('AI Mentor')
+    expect(wrapper.text()).not.toContain('AI Mentor')
     expect(storeState.loadSpaces).toHaveBeenCalledTimes(1)
   })
 
@@ -467,5 +468,30 @@ describe('DashboardPage', () => {
 
     expect(wrapper.find('a[href="http://localhost:8000/api/v1/study-spaces/space-1/export"]').exists()).toBe(true)
     expect(wrapper.find('a[href="http://localhost:8000/api/v1/study-spaces/space-1/export?format=markdown"]').exists()).toBe(true)
+  })
+
+  it('adds a local calendar diary entry from the dashboard calendar', async () => {
+    const wrapper = mountPage()
+
+    await wrapper.find('[data-testid="add-diary"]').trigger('click')
+
+    expect(wrapper.text()).toContain('Add diary')
+    await wrapper.find('.calendar-composer input').setValue('Study note')
+    await wrapper.find('.calendar-composer textarea').setValue('Reviewed the first retrieval chapter.')
+    await wrapper.find('.calendar-composer form').trigger('submit')
+
+    expect(wrapper.text()).toContain('Study note')
+    expect(wrapper.text()).toContain('Reviewed the first retrieval chapter.')
+    expect(window.localStorage.getItem('study_agent.calendar_entries.v1')).toContain('Study note')
+  })
+
+  it('selects a calendar day and shows that day learning status', async () => {
+    const wrapper = mountPage()
+
+    await wrapper.findAll('.calendar-grid button')[0].trigger('click')
+
+    expect(wrapper.text()).toContain('Selected day')
+    expect(wrapper.text()).toContain('1')
+    expect(wrapper.text()).toContain('No notes or events for this day.')
   })
 })

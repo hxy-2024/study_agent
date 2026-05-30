@@ -71,7 +71,7 @@ async def ask_chapter_mentor_question(
             chapter_id=chapter_id,
             question=payload.question,
             embedding_provider=embedding_provider,
-            answer_provider=create_answer_provider(settings),
+            answer_provider=create_answer_provider(settings, agent_layer="chapter_mentor"),
         )
     except ValueError as exc:
         raise map_chapter_error(exc) from exc

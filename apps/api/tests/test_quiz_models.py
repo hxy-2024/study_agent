@@ -1,5 +1,3 @@
-from sqlalchemy.dialects.postgresql import JSONB
-
 from app.db.models import (
     Chapter,
     MasteryLevel,
@@ -10,6 +8,7 @@ from app.db.models import (
     QuizSubmission,
     StudySpace,
 )
+from tests.model_type_helpers import assert_json_column_compiles_for_supported_dialects
 
 
 def _column_names(model: type) -> set[str]:
@@ -111,13 +110,13 @@ def test_quiz_mastery_models_have_expected_defaults() -> None:
     assert _default_value(MasteryRecord, "weak_points") == []
 
 
-def test_quiz_mastery_json_columns_use_jsonb() -> None:
-    assert isinstance(QuizQuestion.__table__.columns["options"].type, JSONB)
-    assert isinstance(QuizQuestion.__table__.columns["evidence"].type, JSONB)
-    assert isinstance(QuizSubmission.__table__.columns["answers"].type, JSONB)
-    assert isinstance(QuizSubmission.__table__.columns["results"].type, JSONB)
-    assert isinstance(QuizSubmission.__table__.columns["weak_points"].type, JSONB)
-    assert isinstance(MasteryRecord.__table__.columns["weak_points"].type, JSONB)
+def test_quiz_mastery_json_columns_compile_for_supported_dialects() -> None:
+    assert_json_column_compiles_for_supported_dialects(QuizQuestion.__table__.columns["options"])
+    assert_json_column_compiles_for_supported_dialects(QuizQuestion.__table__.columns["evidence"])
+    assert_json_column_compiles_for_supported_dialects(QuizSubmission.__table__.columns["answers"])
+    assert_json_column_compiles_for_supported_dialects(QuizSubmission.__table__.columns["results"])
+    assert_json_column_compiles_for_supported_dialects(QuizSubmission.__table__.columns["weak_points"])
+    assert_json_column_compiles_for_supported_dialects(MasteryRecord.__table__.columns["weak_points"])
 
 
 def test_quiz_mastery_tables_have_expected_unique_constraints() -> None:

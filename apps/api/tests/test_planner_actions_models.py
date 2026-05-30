@@ -1,6 +1,5 @@
-from sqlalchemy.dialects.postgresql import JSONB
-
 from app.db.models import PlannerAction, PlannerActionStatus, PlannerActionType, StudySpace
+from tests.model_type_helpers import assert_json_column_compiles_for_supported_dialects
 
 
 def test_planner_action_model_shape() -> None:
@@ -20,14 +19,14 @@ def test_planner_action_model_shape() -> None:
     assert "updated_at" in columns
 
 
-def test_planner_action_enums_and_jsonb() -> None:
+def test_planner_action_enums_and_json_column_type() -> None:
     assert PlannerActionType.review_chapter.value == "review_chapter"
     assert PlannerActionType.route_adjustment.value == "route_adjustment"
     assert PlannerActionStatus.proposed.value == "proposed"
     assert PlannerActionStatus.accepted.value == "accepted"
     assert PlannerActionStatus.completed.value == "completed"
     assert PlannerActionStatus.dismissed.value == "dismissed"
-    assert isinstance(PlannerAction.__table__.columns["payload"].type, JSONB)
+    assert_json_column_compiles_for_supported_dialects(PlannerAction.__table__.columns["payload"])
 
 
 def test_planner_action_relationship() -> None:

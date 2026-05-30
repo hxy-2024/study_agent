@@ -4,6 +4,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.db.models import (
     AgentRun,
     AgentRunStatus,
@@ -18,8 +19,6 @@ from app.db.models import (
     StudySpace,
     StudySpaceStatus,
 )
-from app.domain.dashboard.recommendations import STRATEGY_VERSION
-from app.domain.dashboard.recommendations import build_main_agent_recommendation
 from app.domain.dashboard.schemas import (
     DashboardAction,
     DashboardAgentRun,
@@ -28,10 +27,12 @@ from app.domain.dashboard.schemas import (
     DashboardResponse,
     DashboardSpace,
 )
-from app.domain.review_planner.schemas import ReviewCandidate
-from app.domain.review_planner.service import build_review_candidates
+from app.domain.local_settings.service import load_local_ai_settings
+from app.domain.main_agent_graph.service import run_main_agent_graph
 from app.domain.quiz_mastery.schemas import QuizMasterySignal
 from app.domain.quiz_mastery.service import build_quiz_mastery_signals
+from app.domain.review_planner.schemas import ReviewCandidate
+from app.domain.review_planner.service import build_review_candidates
 from app.domain.learning_signals.service import (
     learning_signal_from_quiz_mastery,
     learning_signal_from_review_candidate,
@@ -350,7 +351,7 @@ async def get_main_agent_recommendation(
             planner_actions=planner_actions,
         )
 
-    recommendation = build_main_agent_recommendation(
+    graph_result = await run_main_agent_graph(
         spaces=spaces,
         chapters=chapters,
         planner_actions=planner_actions,
@@ -361,32 +362,34 @@ async def get_main_agent_recommendation(
         review_queue=review_queue,
         request=request,
     )
-    if recommendation is None:
-        recommendation = DashboardRecommendation(
-            title="Create your first study space",
-            action_label="Create space",
-            action_url="/spaces/new",
-            recommendation_type="create_space",
-            reason="No active learning space exists yet.",
-            estimated_minutes=10,
-        )
+    recommendation = graph_result.recommendation
 
     if recommendation.study_space_id is None or not persist_run:
         return recommendation
 
+    local_settings = load_local_ai_settings(path=get_settings().local_settings_path)
     run = AgentRun(
         tenant_id=tenant_id,
         study_space_id=recommendation.study_space_id,
         agent_type=AgentType.main_agent,
         status=AgentRunStatus.completed,
-        model="deterministic",
+        model="langgraph:main_agent_v1",
         input_payload={
             "request": request.model_dump(),
             "signal_counts": recommendation.source_signals,
-            "strategy_version": STRATEGY_VERSION,
+            "strategy_version": recommendation.strategy_version,
             "selected_queue_item": review_queue[0].model_dump(mode="json") if review_queue else None,
+            "main_agent_system_prompt": local_settings.main_agent_system_prompt,
+            "node_trace": graph_result.node_trace,
+            "route_decision": graph_result.route_decision,
+            "tool_calls": graph_result.tool_calls,
         },
-        output_payload=recommendation.model_dump(mode="json"),
+        output_payload={
+            **recommendation.model_dump(mode="json"),
+            "node_trace": graph_result.node_trace,
+            "route_decision": graph_result.route_decision,
+            "tool_calls": graph_result.tool_calls,
+        },
     )
     try:
         session.add(run)

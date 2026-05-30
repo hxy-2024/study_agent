@@ -14,6 +14,7 @@ from app.domain.study_spaces.import_restore import (
 )
 from app.domain.study_spaces.schemas import StudySpaceCreate, StudySpaceImportRequest, StudySpaceImportResult, StudySpaceRead
 from app.domain.study_spaces.service import (
+    StudySpaceNameConflictError,
     archive_study_space,
     create_study_space,
     list_archived_study_spaces,
@@ -46,12 +47,15 @@ async def create_space(
     context: CurrentUserContext = Depends(get_authorized_user_context),
     session: AsyncSession = Depends(get_db_session),
 ):
-    return await create_study_space(
-        session=session,
-        payload=payload,
-        tenant_id=context.tenant_id,
-        owner_user_id=context.user_id,
-    )
+    try:
+        return await create_study_space(
+            session=session,
+            payload=payload,
+            tenant_id=context.tenant_id,
+            owner_user_id=context.user_id,
+        )
+    except StudySpaceNameConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/import", response_model=StudySpaceImportResult)

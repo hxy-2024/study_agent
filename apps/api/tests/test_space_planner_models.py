@@ -1,6 +1,5 @@
-from sqlalchemy.dialects.postgresql import JSONB
-
 from app.db.models import AgentType, SpacePlannerState, StudySpace
+from tests.model_type_helpers import assert_json_column_compiles_for_supported_dialects
 
 
 def test_space_planner_state_model_has_expected_columns() -> None:
@@ -19,11 +18,17 @@ def test_space_planner_state_model_has_expected_columns() -> None:
     assert "updated_at" in columns
 
 
-def test_space_planner_state_json_columns_use_jsonb() -> None:
-    assert isinstance(SpacePlannerState.__table__.columns["risk_chapters"].type, JSONB)
-    assert isinstance(SpacePlannerState.__table__.columns["review_recommendations"].type, JSONB)
-    assert isinstance(SpacePlannerState.__table__.columns["route_adjustments"].type, JSONB)
-    assert isinstance(SpacePlannerState.__table__.columns["evidence"].type, JSONB)
+def test_space_planner_state_json_columns_compile_for_supported_dialects() -> None:
+    assert_json_column_compiles_for_supported_dialects(
+        SpacePlannerState.__table__.columns["risk_chapters"]
+    )
+    assert_json_column_compiles_for_supported_dialects(
+        SpacePlannerState.__table__.columns["review_recommendations"]
+    )
+    assert_json_column_compiles_for_supported_dialects(
+        SpacePlannerState.__table__.columns["route_adjustments"]
+    )
+    assert_json_column_compiles_for_supported_dialects(SpacePlannerState.__table__.columns["evidence"])
 
 
 def test_space_planner_state_unique_and_relationships() -> None:

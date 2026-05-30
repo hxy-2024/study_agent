@@ -105,6 +105,11 @@ interface ChapterAnnotation {
   updated_at: string | null
 }
 
+interface LocalSettingsResponse {
+  llm_model?: string
+  available_models?: string[]
+}
+
 const DEV_AUTH_HEADERS = {
   'X-User-Id': '00000000-0000-0000-0000-000000000002',
   'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
@@ -112,7 +117,157 @@ const DEV_AUTH_HEADERS = {
 
 const route = useRoute()
 const config = useRuntimeConfig()
+const { isZh, loadLocale } = useLocalI18n()
 const chapterId = computed(() => String(route.params.id))
+const copy = computed(() => isZh.value ? {
+  notStarted: '未开始',
+  mentorIntro: '我是你的章节 AI 导师。',
+  focus: '本章聚焦于',
+  goal: '目标',
+  askPrompt: '你可以直接提问，也可以问下一步学什么。我会按你的节奏继续。',
+  untitledNote: '未命名笔记',
+  failedLoadChapter: '无法加载章节。',
+  failedSaveNote: '无法保存笔记。',
+  failedDeleteNote: '无法删除笔记。',
+  failedLoadMentor: '无法加载导师会话。',
+  createSessionConfirm: '创建新的导师会话？',
+  chapterSession: '章节会话',
+  failedRenameSession: '无法重命名会话。',
+  deleteSessionConfirm: '删除这个会话及其已保存消息？',
+  failedDeleteSession: '无法删除会话。',
+  failedAskMentor: '无法向导师提问。',
+  completeConfirm: '标记本章为完成？',
+  failedComplete: '无法完成章节。',
+  failedGenerateQuiz: '无法生成测验。',
+  loadingChapter: '正在加载章节...',
+  chapters: '章节',
+  nextChapter: '下一章',
+  loadingSession: '正在加载导师会话...',
+  you: '你',
+  chunk: '分块',
+  openSource: '打开来源分块',
+  fork: '分叉检查点',
+  addAttachment: '添加附件',
+  enableSearch: '开启联网补充',
+  disableSearch: '关闭联网补充',
+  searchTitle: '联网补充，不属于上传资料',
+  model: '模型',
+  defaultModel: '默认模型',
+  fastTutor: '快速导师',
+  deepTutor: '深度导师',
+  thinking: '思考强度',
+  lowThinking: '低',
+  mediumThinking: '中',
+  highThinking: '高',
+  askPlaceholder: '提问、请求下一步，或粘贴让你困惑的片段',
+  interrupt: '中断生成',
+  send: '发送消息',
+  sessions: '会话',
+  new: '新建',
+  renameSession: '重命名会话',
+  deleteSession: '删除会话',
+  progress: '进度',
+  completed: '已完成',
+  completing: '完成中...',
+  markComplete: '标记完成',
+  estimatedDays: '预计天数',
+  mastery: '掌握度',
+  generating: '生成中...',
+  generateQuiz: '生成测验',
+  studyNotes: '学习笔记',
+  personalNotes: '个人笔记',
+  openNote: '打开笔记',
+  deleteNote: '删除笔记',
+  noNotes: '还没有笔记。创建一条',
+  studyNote: '学习笔记',
+  newNote: '新建笔记',
+  closeNote: '关闭笔记弹窗',
+  notePlaceholder: '记录你想记住的要点',
+  cancel: '取消',
+  saving: '保存中...',
+  saveNote: '保存笔记',
+  noteDetail: '笔记详情',
+  close: '关闭',
+  delete: '删除',
+  session: '会话',
+  closeRename: '关闭重命名弹窗',
+  name: '名称',
+  save: '保存'
+} : {
+  notStarted: 'not started',
+  mentorIntro: 'I am your chapter AI Mentor.',
+  focus: 'This chapter focuses on',
+  goal: 'Goal',
+  askPrompt: 'Ask a question directly, or ask what to learn next. I will continue at your pace.',
+  untitledNote: 'Untitled note',
+  failedLoadChapter: 'Failed to load chapter.',
+  failedSaveNote: 'Failed to save note.',
+  failedDeleteNote: 'Failed to delete annotation.',
+  failedLoadMentor: 'Failed to load mentor session.',
+  createSessionConfirm: 'Create a new mentor session?',
+  chapterSession: 'Chapter session',
+  failedRenameSession: 'Failed to rename session.',
+  deleteSessionConfirm: 'Delete this session and its saved messages?',
+  failedDeleteSession: 'Failed to delete session.',
+  failedAskMentor: 'Failed to ask mentor.',
+  completeConfirm: 'Mark this chapter as complete?',
+  failedComplete: 'Failed to complete chapter.',
+  failedGenerateQuiz: 'Failed to generate quiz.',
+  loadingChapter: 'Loading chapter...',
+  chapters: 'Chapters',
+  nextChapter: 'Next chapter',
+  loadingSession: 'Loading mentor session...',
+  you: 'You',
+  chunk: 'Chunk',
+  openSource: 'Open source chunk',
+  fork: 'Fork checkpoint',
+  addAttachment: 'Add attachment',
+  enableSearch: 'Enable web search',
+  disableSearch: 'Disable web search',
+  searchTitle: 'Web supplement, not part of uploaded material',
+  model: 'Model',
+  defaultModel: 'Default model',
+  fastTutor: 'Fast tutor',
+  deepTutor: 'Deep tutor',
+  thinking: 'Thinking strength',
+  lowThinking: 'Low',
+  mediumThinking: 'Medium',
+  highThinking: 'High',
+  askPlaceholder: 'Ask a question, request the next step, or paste a confusing excerpt',
+  interrupt: 'Interrupt generation',
+  send: 'Send message',
+  sessions: 'Sessions',
+  new: 'New',
+  renameSession: 'Rename session',
+  deleteSession: 'Delete session',
+  progress: 'Progress',
+  completed: 'Completed',
+  completing: 'Completing...',
+  markComplete: 'Mark complete',
+  estimatedDays: 'estimated days',
+  mastery: 'Mastery',
+  generating: 'Generating...',
+  generateQuiz: 'Generate quiz',
+  studyNotes: 'Study notes',
+  personalNotes: 'Personal notes',
+  openNote: 'Open note',
+  deleteNote: 'Delete note',
+  noNotes: 'No notes yet. Create one',
+  studyNote: 'Study note',
+  newNote: 'New note',
+  closeNote: 'Close note dialog',
+  notePlaceholder: 'Capture the point you want to remember',
+  cancel: 'Cancel',
+  saving: 'Saving...',
+  saveNote: 'Save note',
+  noteDetail: 'Note detail',
+  close: 'Close',
+  delete: 'Delete',
+  session: 'Session',
+  closeRename: 'Close rename dialog',
+  name: 'Name',
+  save: 'Save'
+})
 
 const detail = ref<ChapterStudyDetail | null>(null)
 const chapterNavigation = ref<ChapterStudyChapter[]>([])
@@ -133,6 +288,10 @@ const generatingQuiz = ref(false)
 const deletingSessionId = ref<string | null>(null)
 const chapterRailCollapsed = ref(false)
 const webSearchEnabled = ref(false)
+const configuredMentorModel = ref('')
+const availableMentorModels = ref<string[]>([])
+const selectedMentorModel = ref('')
+const selectedThinkingEffort = ref<'low' | 'medium' | 'high'>('medium')
 const renameSessionTarget = ref<MentorSession | null>(null)
 const renameSessionTitle = ref('')
 const noteComposerOpen = ref(false)
@@ -148,23 +307,41 @@ const notes = computed(() => annotations.value.filter(annotation => annotation.k
 const isCompleted = computed(() => chapter.value?.status === 'completed')
 const canSaveNote = computed(() => noteDraft.value.trim().length > 0 && !savingNote.value)
 const masteryLabel = computed(() => {
-  if (!mastery.value) return 'not started'
+  if (!mastery.value) return copy.value.notStarted
   return `${mastery.value.level} ${mastery.value.score_percent}%`
+})
+const mentorModelOptions = computed(() => {
+  return Array.from(new Set([configuredMentorModel.value, ...availableMentorModels.value].filter(Boolean)))
 })
 const bodyClassName = 'chapter-study-page'
 
 const introMessage = computed(() => {
   if (!chapter.value) return ''
   return [
-    'I am your chapter AI Mentor.',
-    `This chapter focuses on **${displayTitle(chapter.value.title)}**.`,
-    `Goal: ${chapter.value.goal}`,
-    'Ask a question directly, or ask what to learn next. I will continue at your pace.'
+    copy.value.mentorIntro,
+    `${copy.value.focus} **${displayTitle(chapter.value.title)}**.`,
+    `${copy.value.goal}: ${chapter.value.goal}`,
+    copy.value.askPrompt
   ].join('\n\n')
 })
 
 function protectedHeaders() {
   return DEV_AUTH_HEADERS
+}
+
+async function loadLocalAiSettings() {
+  try {
+    const response = await $fetch<LocalSettingsResponse>(`${config.public.apiBaseUrl}/local-settings/ai`, {
+      headers: protectedHeaders()
+    })
+    configuredMentorModel.value = response.llm_model || ''
+    availableMentorModels.value = response.available_models || []
+    selectedMentorModel.value = configuredMentorModel.value || availableMentorModels.value[0] || ''
+  } catch {
+    configuredMentorModel.value = ''
+    availableMentorModels.value = []
+    selectedMentorModel.value = ''
+  }
 }
 
 function appendBackendMessage(base: string, error: unknown) {
@@ -192,7 +369,7 @@ function scrollChatToLatest() {
 }
 
 function noteContent(note: ChapterAnnotation) {
-  return note.content?.trim() || 'Untitled note'
+  return note.content?.trim() || copy.value.untitledNote
 }
 
 function notePreview(note: ChapterAnnotation) {
@@ -252,7 +429,7 @@ function escapeHtml(value: string) {
     .replace(/'/g, '&#039;')
 }
 
-function renderMarkdown(value: string) {
+function renderMarkdownText(value: string) {
   const escaped = escapeHtml(value)
   return escaped
     .replace(/^### (.*)$/gm, '<h3>$1</h3>')
@@ -261,6 +438,32 @@ function renderMarkdown(value: string) {
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\n/g, '<br>')
+}
+
+function renderMarkdownCodeBlock(language: string, code: string) {
+  const normalizedLanguage = language.trim().replace(/[^\w+-]/g, '').slice(0, 32)
+  const normalizedCode = code.replace(/^\n/, '').replace(/\n$/, '')
+  const languageAttributes = normalizedLanguage
+    ? ` data-language="${escapeHtml(normalizedLanguage)}"`
+    : ''
+  const codeClass = normalizedLanguage ? ` class="language-${normalizedLanguage}"` : ''
+  return `<pre class="code-block"${languageAttributes}><code${codeClass}>${escapeHtml(normalizedCode)}</code></pre>`
+}
+
+function renderMarkdown(value: string) {
+  const codeFencePattern = /```([A-Za-z0-9_+-]*)?[^\S\r\n]*\r?\n?([\s\S]*?)```/g
+  let cursor = 0
+  let html = ''
+  let match: RegExpExecArray | null
+
+  while ((match = codeFencePattern.exec(value)) !== null) {
+    html += renderMarkdownText(value.slice(cursor, match.index))
+    html += renderMarkdownCodeBlock(match[1] ?? '', match[2] ?? '')
+    cursor = match.index + match[0].length
+  }
+
+  html += renderMarkdownText(value.slice(cursor))
+  return html
 }
 
 function displayTitle(value?: string | null) {
@@ -291,7 +494,7 @@ async function loadChapter() {
       await loadChapterNavigation(detail.value.chapter.study_space_id)
     }
   } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to load chapter.', error)
+    errorMessage.value = appendBackendMessage(copy.value.failedLoadChapter, error)
   } finally {
     loading.value = false
   }
@@ -342,7 +545,7 @@ async function createNote() {
     noteDraft.value = ''
     noteComposerOpen.value = false
   } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to save note.', error)
+    errorMessage.value = appendBackendMessage(copy.value.failedSaveNote, error)
   } finally {
     savingNote.value = false
   }
@@ -358,7 +561,7 @@ async function deleteAnnotation(annotation: ChapterAnnotation) {
     annotations.value = annotations.value.filter(item => item.id !== annotation.id)
     if (selectedNote.value?.id === annotation.id) selectedNote.value = null
   } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to delete annotation.', error)
+    errorMessage.value = appendBackendMessage(copy.value.failedDeleteNote, error)
   }
 }
 
@@ -422,7 +625,7 @@ async function loadMentorSession() {
       scrollChatToLatest()
     }
   } catch (error) {
-    mentorErrorMessage.value = appendBackendMessage('Failed to load mentor session.', error)
+    mentorErrorMessage.value = appendBackendMessage(copy.value.failedLoadMentor, error)
   } finally {
     loadingMentor.value = false
   }
@@ -454,13 +657,13 @@ async function createMentorSession() {
 }
 
 async function createNewSession() {
-  if (!confirm('Create a new mentor session?')) return null
+  if (!confirm(copy.value.createSessionConfirm)) return null
   return createMentorSession()
 }
 
 function openRenameSessionModal(session: MentorSession) {
   renameSessionTarget.value = session
-  renameSessionTitle.value = displayTitle(session.title) || 'Chapter session'
+  renameSessionTitle.value = displayTitle(session.title) || copy.value.chapterSession
 }
 
 function closeRenameSessionModal() {
@@ -471,7 +674,7 @@ function closeRenameSessionModal() {
 async function renameMentorSession() {
   const session = renameSessionTarget.value
   if (!session) return
-  const currentTitle = displayTitle(session.title) || 'Chapter session'
+  const currentTitle = displayTitle(session.title) || copy.value.chapterSession
   const nextTitle = renameSessionTitle.value.trim()
   if (!nextTitle || nextTitle === currentTitle) return
 
@@ -493,12 +696,12 @@ async function renameMentorSession() {
     }
     closeRenameSessionModal()
   } catch (error) {
-    mentorErrorMessage.value = appendBackendMessage('Failed to rename session.', error)
+    mentorErrorMessage.value = appendBackendMessage(copy.value.failedRenameSession, error)
   }
 }
 
 async function deleteMentorSession(session: MentorSession) {
-  if (!confirm('Delete this session and its saved messages?')) return
+  if (!confirm(copy.value.deleteSessionConfirm)) return
 
   deletingSessionId.value = session.id
   mentorErrorMessage.value = ''
@@ -521,7 +724,7 @@ async function deleteMentorSession(session: MentorSession) {
       }
     }
   } catch (error) {
-    mentorErrorMessage.value = appendBackendMessage('Failed to delete session.', error)
+    mentorErrorMessage.value = appendBackendMessage(copy.value.failedDeleteSession, error)
   } finally {
     deletingSessionId.value = null
   }
@@ -540,12 +743,25 @@ async function askMentor() {
     mentorMessages.value = [...mentorMessages.value, localUserMessage(session.id, question)]
     scrollChatToLatest()
     mentorQuestion.value = ''
+    const requestBody: {
+      content: string
+      web_search_enabled: boolean
+      model?: string
+      thinking_effort: 'low' | 'medium' | 'high'
+    } = {
+      content: question,
+      web_search_enabled: webSearchEnabled.value,
+      thinking_effort: selectedThinkingEffort.value
+    }
+    if (selectedMentorModel.value) {
+      requestBody.model = selectedMentorModel.value
+    }
     const answer = await $fetch<MentorMessage>(
       `${config.public.apiBaseUrl}/sessions/${session.id}/messages`,
       {
         method: 'POST',
         headers: protectedHeaders(),
-        body: { content: question, web_search_enabled: webSearchEnabled.value },
+        body: requestBody,
         signal: abortController.signal
       }
     )
@@ -553,7 +769,7 @@ async function askMentor() {
     scrollChatToLatest()
   } catch (error) {
     if (isAbortError(error)) return
-    mentorErrorMessage.value = appendBackendMessage('Failed to ask mentor.', error)
+    mentorErrorMessage.value = appendBackendMessage(copy.value.failedAskMentor, error)
   } finally {
     if (mentorAbortController.value === abortController) {
       mentorAbortController.value = null
@@ -566,9 +782,15 @@ function stopMentorGeneration() {
   mentorAbortController.value?.abort()
 }
 
+function handleMentorTextareaKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+  event.preventDefault()
+  void askMentor()
+}
+
 async function completeCurrentChapter() {
   if (!chapter.value || isCompleted.value) return
-  if (!confirm('Mark this chapter as complete?')) return
+  if (!confirm(copy.value.completeConfirm)) return
   completing.value = true
   errorMessage.value = ''
   try {
@@ -580,7 +802,7 @@ async function completeCurrentChapter() {
       }
     )
   } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to complete chapter.', error)
+    errorMessage.value = appendBackendMessage(copy.value.failedComplete, error)
   } finally {
     completing.value = false
   }
@@ -602,14 +824,16 @@ async function generateQuiz() {
     )
     await navigateTo(`/quizzes/${quiz.id}`)
   } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to generate quiz.', error)
+    errorMessage.value = appendBackendMessage(copy.value.failedGenerateQuiz, error)
   } finally {
     generatingQuiz.value = false
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadLocale()
   document.body.classList.add(bodyClassName)
+  loadLocalAiSettings()
   loadChapter()
   loadMentorSession()
   loadMastery()
@@ -624,7 +848,7 @@ onBeforeUnmount(() => {
 <template>
   <section class="chapter-workbench page-enter" :class="{ 'rail-is-collapsed': chapterRailCollapsed }">
     <p v-if="errorMessage" class="error-alert">{{ errorMessage }}</p>
-    <p v-if="loading" class="muted">Loading chapter...</p>
+    <p v-if="loading" class="muted">{{ copy.loadingChapter }}</p>
 
     <template v-if="detail && chapter">
       <aside class="chapter-sidebar" :class="{ collapsed: chapterRailCollapsed }">
@@ -635,10 +859,10 @@ onBeforeUnmount(() => {
         <template v-if="!chapterRailCollapsed">
           <div class="rail-title">
             <span>{{ detail.study_space.name }}</span>
-            <strong>Chapters</strong>
+            <strong>{{ copy.chapters }}</strong>
           </div>
 
-          <nav class="chapter-list" aria-label="Chapter navigation">
+          <nav class="chapter-list" :aria-label="copy.chapters">
             <NuxtLink
               v-for="item in chapterNavigation"
               :key="item.id"
@@ -661,7 +885,7 @@ onBeforeUnmount(() => {
             <h1>{{ displayTitle(chapter.title) }}</h1>
           </div>
           <NuxtLink v-if="detail.next_chapter_id" class="next-link topbar-next-link" :to="`/chapters/${detail.next_chapter_id}`">
-            Next chapter
+            {{ copy.nextChapter }}
           </NuxtLink>
         </header>
 
@@ -671,7 +895,7 @@ onBeforeUnmount(() => {
             <div class="message-bubble">
               <div class="markdown-body" v-html="renderMarkdown(introMessage)" />
               <div class="message-actions">
-                <button class="fork-action" type="button" aria-label="Fork checkpoint" title="Fork checkpoint">
+                <button class="fork-action" type="button" :aria-label="copy.fork" :title="copy.fork">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M7 4v7a4 4 0 0 0 4 4h6" />
                     <path d="M7 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
@@ -686,7 +910,7 @@ onBeforeUnmount(() => {
 
           <article v-if="loadingMentor" class="message-row assistant">
             <div class="message-avatar">AI</div>
-            <div class="message-bubble">Loading mentor session...</div>
+            <div class="message-bubble">{{ copy.loadingSession }}</div>
           </article>
 
           <article
@@ -695,21 +919,21 @@ onBeforeUnmount(() => {
             class="message-row"
             :class="message.role === 'user' ? 'user' : 'assistant'"
           >
-            <div class="message-avatar">{{ message.role === 'user' ? 'You' : 'AI' }}</div>
+            <div class="message-avatar">{{ message.role === 'user' ? copy.you : 'AI' }}</div>
             <div class="message-bubble">
               <div class="markdown-body" v-html="renderMarkdown(message.content)" />
               <div v-if="message.citations?.length" class="citation-list">
                 <details v-for="citation in message.citations" :key="citation.chunk_id" class="citation-card">
                   <summary>
                     <strong>{{ citation.source_filename }}</strong>
-                    <span>Chunk #{{ citation.chunk_index }}</span>
+                    <span>{{ copy.chunk }} #{{ citation.chunk_index }}</span>
                   </summary>
                   <p>{{ citation.text }}</p>
-                  <NuxtLink class="source-jump-link" :to="citationJumpUrl(citation)">Open source chunk</NuxtLink>
+                   <NuxtLink class="source-jump-link" :to="citationJumpUrl(citation)">{{ copy.openSource }}</NuxtLink>
                 </details>
               </div>
               <div v-if="message.role !== 'user'" class="message-actions">
-                <button class="fork-action" type="button" aria-label="Fork checkpoint" title="Fork checkpoint">
+                <button class="fork-action" type="button" :aria-label="copy.fork" :title="copy.fork">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M7 4v7a4 4 0 0 0 4 4h6" />
                     <path d="M7 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
@@ -726,7 +950,7 @@ onBeforeUnmount(() => {
         <p v-if="mentorErrorMessage" class="error-alert">{{ mentorErrorMessage }}</p>
         <form class="mentor-form composer" @submit.prevent="askMentor">
           <div class="composer-tools">
-            <button class="composer-icon-button" type="button" aria-label="Add attachment">
+            <button class="composer-icon-button" type="button" :aria-label="copy.addAttachment">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M12 5v14" />
                 <path d="M5 12h14" />
@@ -738,7 +962,7 @@ onBeforeUnmount(() => {
               type="button"
               :class="{ active: webSearchEnabled }"
               :aria-pressed="webSearchEnabled"
-              :aria-label="webSearchEnabled ? 'Disable web search' : 'Enable web search'"
+              :aria-label="webSearchEnabled ? copy.disableSearch : copy.enableSearch"
               title="联网补充，不属于上传资料"
               @click="webSearchEnabled = !webSearchEnabled"
             >
@@ -749,14 +973,26 @@ onBeforeUnmount(() => {
                 <path d="M12 3a14 14 0 0 0 0 18" />
               </svg>
             </button>
-            <select class="select" aria-label="Model">
-              <option>Default model</option>
-              <option>Fast tutor</option>
-              <option>Deep tutor</option>
+            <select
+              v-model="selectedMentorModel"
+              class="select"
+              data-testid="mentor-model-select"
+              :aria-label="copy.model"
+            >
+              <option v-if="!mentorModelOptions.length" value="">{{ copy.defaultModel }}</option>
+              <option v-for="model in mentorModelOptions" :key="model" :value="model">
+                {{ model }}
+              </option>
             </select>
-            <select class="select" aria-label="Thinking strength">
-              <option>Normal thinking</option>
-              <option>Deep thinking</option>
+            <select
+              v-model="selectedThinkingEffort"
+              class="select"
+              data-testid="mentor-thinking-select"
+              :aria-label="copy.thinking"
+            >
+              <option value="low">{{ copy.lowThinking }}</option>
+              <option value="medium">{{ copy.mediumThinking }}</option>
+              <option value="high">{{ copy.highThinking }}</option>
             </select>
           </div>
 
@@ -764,15 +1000,16 @@ onBeforeUnmount(() => {
             <textarea
               v-model="mentorQuestion"
               data-testid="mentor-question"
-              placeholder="Ask a question, request the next step, or paste a confusing excerpt"
+              :placeholder="copy.askPlaceholder"
               :disabled="askingMentor"
+              @keydown="handleMentorTextareaKeydown"
             />
             <button
               data-testid="ask-mentor"
               class="send-button"
               :class="{ 'is-stopping': askingMentor }"
               :type="askingMentor ? 'button' : 'submit'"
-              :aria-label="askingMentor ? 'Interrupt generation' : 'Send message'"
+              :aria-label="askingMentor ? copy.interrupt : copy.send"
               @click="askingMentor && stopMentorGeneration()"
             >
               <svg v-if="askingMentor" viewBox="0 0 24 24" aria-hidden="true">
@@ -791,9 +1028,9 @@ onBeforeUnmount(() => {
         <section class="session-section">
           <div class="panel-heading">
             <div>
-              <p>Sessions</p>
+              <p>{{ copy.sessions }}</p>
             </div>
-            <button data-testid="new-mentor-session" type="button" @click="createNewSession">New</button>
+            <button data-testid="new-mentor-session" type="button" @click="createNewSession">{{ copy.new }}</button>
           </div>
           <div class="session-list">
             <div
@@ -807,13 +1044,13 @@ onBeforeUnmount(() => {
                 type="button"
                 @click="selectMentorSession(session)"
               >
-                {{ displayTitle(session.title) || 'Chapter session' }}
+                {{ displayTitle(session.title) || copy.chapterSession }}
               </button>
               <button
                 data-testid="rename-mentor-session"
                 class="session-rename"
                 type="button"
-                :aria-label="`Rename session ${displayTitle(session.title) || 'Chapter session'}`"
+                :aria-label="`${copy.renameSession} ${displayTitle(session.title) || copy.chapterSession}`"
                 @click.stop="openRenameSessionModal(session)"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -824,7 +1061,7 @@ onBeforeUnmount(() => {
               <button
                 class="session-delete"
                 type="button"
-                :aria-label="`Delete session ${displayTitle(session.title) || 'Chapter session'}`"
+                :aria-label="`${copy.deleteSession} ${displayTitle(session.title) || copy.chapterSession}`"
                 :disabled="deletingSessionId === session.id"
                 @click.stop="deleteMentorSession(session)"
               >
@@ -842,13 +1079,13 @@ onBeforeUnmount(() => {
 
         <section class="session-section">
           <div class="panel-heading progress-heading">
-            <p>Progress</p>
+            <p>{{ copy.progress }}</p>
             <button
               data-testid="complete-chapter"
               class="complete-button"
               type="button"
-              :aria-label="isCompleted ? 'Chapter completed' : completing ? 'Completing chapter' : 'Mark chapter complete'"
-              :title="isCompleted ? 'Completed' : completing ? 'Completing...' : 'Mark complete'"
+              :aria-label="isCompleted ? copy.completed : completing ? copy.completing : copy.markComplete"
+              :title="isCompleted ? copy.completed : completing ? copy.completing : copy.markComplete"
               :disabled="isCompleted || completing"
               @click="completeCurrentChapter"
             >
@@ -860,7 +1097,7 @@ onBeforeUnmount(() => {
           <div class="progress-strip">
             <span>{{ chapter.status }}</span>
           </div>
-          <p>{{ chapter.estimated_days }} estimated days - Mastery: {{ masteryLabel }}</p>
+          <p>{{ chapter.estimated_days }} {{ copy.estimatedDays }} - {{ copy.mastery }}: {{ masteryLabel }}</p>
           <button
             data-testid="generate-quiz"
             class="quiz-button"
@@ -868,25 +1105,25 @@ onBeforeUnmount(() => {
             :disabled="generatingQuiz"
             @click="generateQuiz"
           >
-            {{ generatingQuiz ? 'Generating...' : 'Generate quiz' }}
+            {{ generatingQuiz ? copy.generating : copy.generateQuiz }}
           </button>
         </section>
 
         <section class="session-section">
           <div class="panel-heading">
             <div>
-              <p>Study notes</p>
-              <h2>Personal notes</h2>
+              <p>{{ copy.studyNotes }}</p>
+              <h2>{{ copy.personalNotes }}</h2>
             </div>
-            <button data-testid="open-note-composer" type="button" @click="openNoteComposer">New</button>
+            <button data-testid="open-note-composer" type="button" @click="openNoteComposer">{{ copy.new }}</button>
           </div>
           <div v-if="notes.length" class="note-list">
             <article v-for="note in notes" :key="note.id" class="note-card">
-              <button class="note-open" type="button" :aria-label="`Open note ${noteContent(note)}`" @click="openNoteDetail(note)">
+              <button class="note-open" type="button" :aria-label="`${copy.openNote} ${noteContent(note)}`" @click="openNoteDetail(note)">
                 <span>{{ notePreview(note) }}</span>
                 <small v-if="noteDate(note)">{{ noteDate(note) }}</small>
               </button>
-              <button class="note-delete" type="button" :aria-label="`Delete note ${noteContent(note)}`" @click.stop="deleteAnnotation(note)">
+              <button class="note-delete" type="button" :aria-label="`${copy.deleteNote} ${noteContent(note)}`" @click.stop="deleteAnnotation(note)">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M3 6h18" />
                   <path d="M8 6V4h8v2" />
@@ -897,7 +1134,7 @@ onBeforeUnmount(() => {
               </button>
             </article>
           </div>
-          <button v-else class="empty-state note-empty-action" type="button" @click="openNoteComposer">No notes yet. Create one</button>
+          <button v-else class="empty-state note-empty-action" type="button" @click="openNoteComposer">{{ copy.noNotes }}</button>
         </section>
       </aside>
 
@@ -905,10 +1142,10 @@ onBeforeUnmount(() => {
         <section class="note-modal" role="dialog" aria-modal="true" aria-labelledby="new-note-title">
           <header class="note-modal-header">
             <div>
-              <p class="eyebrow">Study note</p>
-              <h2 id="new-note-title">New note</h2>
+              <p class="eyebrow">{{ copy.studyNote }}</p>
+              <h2 id="new-note-title">{{ copy.newNote }}</h2>
             </div>
-            <button class="note-modal-close" type="button" aria-label="Close note dialog" @click="closeNoteComposer">
+            <button class="note-modal-close" type="button" :aria-label="copy.closeNote" @click="closeNoteComposer">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M6 6l12 12" />
                 <path d="M18 6 6 18" />
@@ -919,18 +1156,18 @@ onBeforeUnmount(() => {
             <textarea
               v-model="noteDraft"
               data-testid="chapter-note-input"
-              placeholder="Capture the point you want to remember"
+              :placeholder="copy.notePlaceholder"
               :disabled="savingNote"
             />
             <div class="note-modal-actions">
-              <button class="secondary-button" type="button" :disabled="savingNote" @click="closeNoteComposer">Cancel</button>
+              <button class="secondary-button" type="button" :disabled="savingNote" @click="closeNoteComposer">{{ copy.cancel }}</button>
               <button
                 data-testid="save-chapter-note"
                 class="primary-button"
                 type="submit"
                 :disabled="!canSaveNote"
               >
-                {{ savingNote ? 'Saving...' : 'Save note' }}
+                {{ savingNote ? copy.saving : copy.saveNote }}
               </button>
             </div>
           </form>
@@ -941,10 +1178,10 @@ onBeforeUnmount(() => {
         <section class="note-modal note-detail-modal" role="dialog" aria-modal="true" aria-labelledby="note-detail-title">
           <header class="note-modal-header">
             <div>
-              <p class="eyebrow">Study note</p>
-              <h2 id="note-detail-title">Note detail</h2>
+              <p class="eyebrow">{{ copy.studyNote }}</p>
+              <h2 id="note-detail-title">{{ copy.noteDetail }}</h2>
             </div>
-            <button class="note-modal-close" type="button" aria-label="Close note detail" @click="closeNoteDetail">
+            <button class="note-modal-close" type="button" :aria-label="copy.close" @click="closeNoteDetail">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M6 6l12 12" />
                 <path d="M18 6 6 18" />
@@ -955,8 +1192,8 @@ onBeforeUnmount(() => {
             <p>{{ noteContent(selectedNote) }}</p>
           </div>
           <footer class="note-modal-actions">
-            <button class="secondary-button" type="button" @click="closeNoteDetail">Close</button>
-            <button class="danger-button" type="button" @click="deleteAnnotation(selectedNote)">Delete</button>
+            <button class="secondary-button" type="button" @click="closeNoteDetail">{{ copy.close }}</button>
+            <button class="danger-button" type="button" @click="deleteAnnotation(selectedNote)">{{ copy.delete }}</button>
           </footer>
         </section>
       </div>
@@ -965,10 +1202,10 @@ onBeforeUnmount(() => {
         <section class="session-rename-modal" role="dialog" aria-modal="true" aria-labelledby="rename-session-title">
           <header class="session-rename-header">
             <div>
-              <p class="eyebrow">Session</p>
-              <h2 id="rename-session-title">Rename session</h2>
+              <p class="eyebrow">{{ copy.session }}</p>
+              <h2 id="rename-session-title">{{ copy.renameSession }}</h2>
             </div>
-            <button class="session-rename-close" type="button" aria-label="Close rename dialog" @click="closeRenameSessionModal">
+            <button class="session-rename-close" type="button" :aria-label="copy.closeRename" @click="closeRenameSessionModal">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M6 6l12 12" />
                 <path d="M18 6 6 18" />
@@ -977,12 +1214,12 @@ onBeforeUnmount(() => {
           </header>
           <form class="session-rename-form" @submit.prevent="renameMentorSession">
             <label class="form-field">
-              Name
+              {{ copy.name }}
               <input v-model="renameSessionTitle" data-testid="rename-session-input" class="input" maxlength="160" autofocus>
             </label>
             <div class="session-rename-actions">
-              <button class="secondary-button" type="button" @click="closeRenameSessionModal">Cancel</button>
-              <button class="primary-button" type="submit" :disabled="!renameSessionTitle.trim()">Save</button>
+              <button class="secondary-button" type="button" @click="closeRenameSessionModal">{{ copy.cancel }}</button>
+              <button class="primary-button" type="submit" :disabled="!renameSessionTitle.trim()">{{ copy.save }}</button>
             </div>
           </form>
         </section>
@@ -1223,6 +1460,40 @@ onBeforeUnmount(() => {
   background: var(--color-primary-soft);
   color: var(--color-primary);
   padding: 2px 5px;
+}
+
+.markdown-body :deep(pre.code-block) {
+  position: relative;
+  margin: 12px 0;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: #0f172a;
+  color: #e2e8f0;
+  overflow: auto;
+  padding: 14px 16px;
+  white-space: pre;
+}
+
+.markdown-body :deep(pre.code-block[data-language]::before) {
+  content: attr(data-language);
+  display: block;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.markdown-body :deep(pre.code-block code) {
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  padding: 0;
+  white-space: pre;
 }
 
 .message-actions {

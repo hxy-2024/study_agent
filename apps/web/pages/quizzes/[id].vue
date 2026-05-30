@@ -70,6 +70,7 @@ const DEV_AUTH_HEADERS = {
 
 const route = useRoute()
 const config = useRuntimeConfig()
+const { isZh, loadLocale } = useLocalI18n()
 const quizId = computed(() => String(route.params.id))
 
 const quiz = ref<QuizDetail | null>(null)
@@ -79,6 +80,69 @@ const loading = ref(false)
 const submitting = ref(false)
 const retaking = ref(false)
 const errorMessage = ref('')
+const copy = computed(() => isZh.value ? {
+  correctAnswer: '正确答案',
+  yourAnswer: '你的答案',
+  evidence: '证据',
+  sourceEvidence: '来源证据',
+  chunk: '分块',
+  failedLoad: '无法加载测验。',
+  failedSubmit: '无法提交测验。',
+  failedRetake: '无法开始重做。',
+  loading: '正在加载测验...',
+  quiz: '测验',
+  answered: '已回答',
+  backToChapter: '返回章节',
+  result: '结果',
+  correct: '正确',
+  mastery: '掌握度',
+  weakPoints: '薄弱点',
+  noWeakPoints: '本次提交没有发现薄弱点。',
+  masteryRecord: '掌握记录',
+  retake: '重做测验',
+  starting: '正在开始...',
+  question: '题目',
+  review: '复习',
+  submit: '提交',
+  submittedTitle: '测验已提交',
+  readyTitle: '答完所有题目后即可提交',
+  submitted: '已提交',
+  submitting: '提交中...',
+  submitQuiz: '提交测验',
+  feedback: '反馈',
+  needsReview: '需要复习'
+} : {
+  correctAnswer: 'Correct answer',
+  yourAnswer: 'Your answer',
+  evidence: 'Evidence',
+  sourceEvidence: 'Source evidence',
+  chunk: 'Chunk',
+  failedLoad: 'Failed to load quiz.',
+  failedSubmit: 'Failed to submit quiz.',
+  failedRetake: 'Failed to start retake.',
+  loading: 'Loading quiz...',
+  quiz: 'Quiz',
+  answered: 'answered',
+  backToChapter: 'Back to chapter',
+  result: 'Result',
+  correct: 'correct',
+  mastery: 'Mastery',
+  weakPoints: 'Weak points',
+  noWeakPoints: 'No weak points from this submission.',
+  masteryRecord: 'Mastery record',
+  retake: 'Retake quiz',
+  starting: 'Starting...',
+  question: 'Question',
+  review: 'Review',
+  submit: 'Submit',
+  submittedTitle: 'Quiz submitted',
+  readyTitle: 'Ready when every question is answered',
+  submitted: 'Submitted',
+  submitting: 'Submitting...',
+  submitQuiz: 'Submit quiz',
+  feedback: 'Feedback',
+  needsReview: 'Needs review'
+})
 
 const questions = computed(() => {
   return [...(quiz.value?.questions ?? [])].sort((a, b) => a.order_index - b.order_index)
@@ -127,8 +191,8 @@ function questionResult(questionId: string) {
 function optionMarker(question: QuizQuestion, optionIndex: number) {
   const feedback = questionResult(question.id)
   if (!feedback) return ''
-  if (feedback.correct_option_index === optionIndex) return 'Correct answer'
-  if (feedback.selected_option_index === optionIndex) return 'Your answer'
+  if (feedback.correct_option_index === optionIndex) return copy.value.correctAnswer
+  if (feedback.selected_option_index === optionIndex) return copy.value.yourAnswer
   return ''
 }
 
@@ -141,10 +205,10 @@ function hasEvidence(evidence?: QuizEvidence) {
 }
 
 function evidenceTitle(evidence?: QuizEvidence) {
-  if (!evidence) return 'Evidence'
-  const source = evidence.source_filename || 'Source evidence'
+  if (!evidence) return copy.value.evidence
+  const source = evidence.source_filename || copy.value.sourceEvidence
   if (evidence.chunk_index === null || evidence.chunk_index === undefined) return source
-  return `${source} / Chunk #${evidence.chunk_index}`
+  return `${source} / ${copy.value.chunk} #${evidence.chunk_index}`
 }
 
 async function loadQuiz() {
@@ -156,7 +220,7 @@ async function loadQuiz() {
       { headers: protectedHeaders() }
     )
   } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to load quiz.', error)
+    errorMessage.value = appendBackendMessage(copy.value.failedLoad, error)
   } finally {
     loading.value = false
   }
@@ -178,7 +242,7 @@ async function submitQuiz() {
       }
     )
   } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to submit quiz.', error)
+    errorMessage.value = appendBackendMessage(copy.value.failedSubmit, error)
   } finally {
     submitting.value = false
   }
@@ -198,13 +262,14 @@ async function retakeQuiz() {
     )
     await navigateTo(`/quizzes/${nextQuiz.id}`)
   } catch (error) {
-    errorMessage.value = appendBackendMessage('Failed to start retake.', error)
+    errorMessage.value = appendBackendMessage(copy.value.failedRetake, error)
   } finally {
     retaking.value = false
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadLocale()
   loadQuiz()
 })
 </script>
@@ -212,29 +277,29 @@ onMounted(() => {
 <template>
   <section class="quiz-page page-enter">
     <p v-if="errorMessage" class="error-alert">{{ errorMessage }}</p>
-    <p v-if="loading" class="muted">Loading quiz...</p>
+    <p v-if="loading" class="muted">{{ copy.loading }}</p>
 
     <template v-if="quiz">
       <div class="topbar quiz-topbar">
         <div>
-          <p class="eyebrow">Quiz / {{ quiz.status }}</p>
+          <p class="eyebrow">{{ copy.quiz }} / {{ quiz.status }}</p>
           <h1>{{ displayText(quiz.title) }}</h1>
-          <p>{{ answeredCount }} / {{ questions.length }} answered</p>
+          <p>{{ answeredCount }} / {{ questions.length }} {{ copy.answered }}</p>
         </div>
         <NuxtLink class="secondary-button back-link" :to="`/chapters/${quiz.chapter_id}`">
-          Back to chapter
+          {{ copy.backToChapter }}
         </NuxtLink>
       </div>
 
       <section v-if="result" class="card result-panel" aria-live="polite">
         <div class="section-heading result-heading">
           <div>
-            <p class="eyebrow">Result</p>
+            <p class="eyebrow">{{ copy.result }}</p>
             <h2>{{ result.score_percent }}%</h2>
-            <p>{{ result.correct_count }} / {{ result.question_count }} correct</p>
+            <p>{{ result.correct_count }} / {{ result.question_count }} {{ copy.correct }}</p>
           </div>
           <div class="result-actions">
-            <span class="status-badge">Mastery: {{ result.mastery.level }}</span>
+            <span class="status-badge">{{ copy.mastery }}: {{ result.mastery.level }}</span>
             <button
               data-testid="retake-quiz"
               class="secondary-button"
@@ -242,22 +307,22 @@ onMounted(() => {
               :disabled="retaking"
               @click="retakeQuiz"
             >
-              {{ retaking ? 'Starting...' : 'Retake quiz' }}
+              {{ retaking ? copy.starting : copy.retake }}
             </button>
           </div>
         </div>
 
         <div class="result-grid">
           <section>
-            <h3>Weak points</h3>
+            <h3>{{ copy.weakPoints }}</h3>
             <ul v-if="result.weak_points.length" class="compact-list">
               <li v-for="point in result.weak_points" :key="point">{{ point }}</li>
             </ul>
-            <p v-else class="empty-state">No weak points from this submission.</p>
+            <p v-else class="empty-state">{{ copy.noWeakPoints }}</p>
           </section>
 
           <section>
-            <h3>Mastery record</h3>
+            <h3>{{ copy.masteryRecord }}</h3>
             <p class="mastery-copy">
               {{ result.mastery.level }} at {{ result.mastery.score_percent }}%.
             </p>
@@ -272,13 +337,13 @@ onMounted(() => {
           class="card question-card"
         >
           <div class="question-header">
-            <span class="status-badge">Question {{ question.order_index }}</span>
+            <span class="status-badge">{{ copy.question }} {{ question.order_index }}</span>
             <span
               v-if="questionResult(question.id)"
               class="feedback-badge"
               :class="{ correct: questionResult(question.id)?.is_correct }"
             >
-              {{ questionResult(question.id)?.is_correct ? 'Correct' : 'Review' }}
+              {{ questionResult(question.id)?.is_correct ? copy.correct : copy.review }}
             </span>
           </div>
 
@@ -328,8 +393,8 @@ onMounted(() => {
 
       <section class="card submit-panel">
         <div>
-          <p class="eyebrow">Submit</p>
-          <h2>{{ result ? 'Quiz submitted' : 'Ready when every question is answered' }}</h2>
+          <p class="eyebrow">{{ copy.submit }}</p>
+          <h2>{{ result ? copy.submittedTitle : copy.readyTitle }}</h2>
         </div>
         <button
           data-testid="submit-quiz"
@@ -338,7 +403,7 @@ onMounted(() => {
           :disabled="submitDisabled"
           @click="submitQuiz"
         >
-          {{ result ? 'Submitted' : submitting ? 'Submitting...' : 'Submit quiz' }}
+          {{ result ? copy.submitted : submitting ? copy.submitting : copy.submitQuiz }}
         </button>
       </section>
 
@@ -349,9 +414,9 @@ onMounted(() => {
           class="card feedback-card"
         >
           <div class="question-header">
-            <span class="status-badge">Feedback {{ item.order_index }}</span>
+            <span class="status-badge">{{ copy.feedback }} {{ item.order_index }}</span>
             <span class="feedback-badge" :class="{ correct: item.is_correct }">
-              {{ item.is_correct ? 'Correct' : 'Needs review' }}
+              {{ item.is_correct ? copy.correct : copy.needsReview }}
             </span>
           </div>
           <h3>{{ displayText(item.prompt) }}</h3>

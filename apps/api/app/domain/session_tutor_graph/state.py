@@ -61,6 +61,7 @@ class SessionTutorGraphState(TypedDict):
     user_id: str
     session_id: str
     content: str
+    thinking_effort: NotRequired[str]
     study_space_id: NotRequired[str]
     chapter_id: NotRequired[str]
     user_message_id: NotRequired[str]

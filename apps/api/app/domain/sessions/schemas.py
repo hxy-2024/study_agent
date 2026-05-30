@@ -1,6 +1,8 @@
 import uuid
 from datetime import datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import MessageRole
@@ -92,3 +94,5 @@ class TutorMessageRequest(BaseModel):
 
     content: str = Field(min_length=1, max_length=4000)
     web_search_enabled: bool | None = None
+    model: str | None = Field(default=None, max_length=120)
+    thinking_effort: Literal["low", "medium", "high"] = "medium"

@@ -24,6 +24,7 @@ from app.domain.session_tutor_graph.state import (
     MessageResponsePayload,
     SessionTutorGraphState,
 )
+from app.domain.local_settings.service import load_local_ai_settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -115,10 +116,12 @@ async def run_session_tutor_graph(
     embedding_provider: EmbeddingProvider,
     answer_provider: AnswerProvider,
     web_search_enabled: bool | None = None,
+    thinking_effort: str = "medium",
 ) -> MessageResponse:
     settings = get_settings()
+    local_settings = load_local_ai_settings(path=settings.local_settings_path)
     effective_web_search_enabled = (
-        settings.session_tutor_web_search_enabled
+        local_settings.web_search_default_enabled
         if web_search_enabled is None
         else web_search_enabled
     )
@@ -130,6 +133,7 @@ async def run_session_tutor_graph(
         user_id=str(user_id),
         session_id=str(session_id),
         content=content,
+        thinking_effort=thinking_effort,
         node_trace=[],
         learning_signals=[],
     )
@@ -250,6 +254,7 @@ async def run_session_tutor_graph(
                 "graph_enabled": runtime_config.session_tutor_graph_enabled,
                 "checkpoint_backend": runtime_config.checkpoint_backend,
                 "web_search_enabled": effective_web_search_enabled,
+                "thinking_effort": state.get("thinking_effort", "medium"),
             },
             output_payload={
                 **metadata,
@@ -260,6 +265,7 @@ async def run_session_tutor_graph(
                 "learning_signals": state["learning_signals"],
                 "chapter_supervision_used": state.get("chapter_supervision") is not None,
                 "graph_enabled": runtime_config.session_tutor_graph_enabled,
+                "thinking_effort": state.get("thinking_effort", "medium"),
             },
             model="langgraph:deterministic",
             status=AgentRunStatus.completed,

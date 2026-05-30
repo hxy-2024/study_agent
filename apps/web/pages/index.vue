@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 const store = useStudySpacesStore()
 const config = useRuntimeConfig()
+const { loadLocale, t } = useLocalI18n()
 
 interface DashboardSpace {
   id: string
@@ -60,12 +61,22 @@ interface ReviewQueueItem {
 }
 
 type TodayRecommendationIntent = 'balanced' | 'new_material' | 'review' | 'quiz'
+type CalendarEntryKind = 'diary' | 'event'
 
 interface MainAgentMessage {
   id: number
   role: 'user' | 'assistant'
   content: string
   recommendation?: DashboardRecommendation
+}
+
+interface CalendarEntry {
+  id: string
+  kind: CalendarEntryKind
+  title: string
+  body: string
+  entry_date?: string
+  created_at: string
 }
 
 interface DashboardSummary {
@@ -117,10 +128,12 @@ const currentSpace = computed(() => {
   return visibleSpaces.value.find(space => space.id === selectedSpaceId.value) ?? visibleSpaces.value[0] ?? activeSpaces.value[0] ?? null
 })
 const pendingActionCount = computed(() => dashboard.value?.pending_actions?.length ?? 0)
-const pendingActionLabel = computed(() => `${pendingActionCount.value} ${pendingActionCount.value === 1 ? 'pending action' : 'pending actions'}`)
+const pendingActionLabel = computed(() => {
+  return `${pendingActionCount.value} ${pendingActionCount.value === 1 ? t('dashboard.pendingAction') : t('dashboard.pendingActions')}`
+})
 const supervisionRefreshCount = computed(() => dashboard.value?.supervision_refresh_count ?? 0)
 const supervisionRefreshLabel = computed(() => {
-  return `${supervisionRefreshCount.value} ${supervisionRefreshCount.value === 1 ? 'supervision refresh' : 'supervision refreshes'}`
+  return `${supervisionRefreshCount.value} ${supervisionRefreshCount.value === 1 ? t('dashboard.supervisionRefresh') : t('dashboard.supervisionRefreshes')}`
 })
 const recentAgentRuns = computed(() => dashboard.value?.recent_agent_runs ?? [])
 const reviewQueue = computed(() => dashboard.value?.review_queue ?? [])
@@ -134,7 +147,7 @@ function getContinueChapterId(spaceId: string) {
 
 const continueChapterId = computed(() => currentSpace.value ? getContinueChapterId(currentSpace.value.id) : null)
 const continueHref = computed(() => continueChapterId.value ? `/chapters/${continueChapterId.value}` : '/spaces/new')
-const continueLabel = computed(() => continueChapterId.value ? 'Continue study' : 'Prepare route')
+const continueLabel = computed(() => continueChapterId.value ? t('dashboard.continueStudy') : t('dashboard.prepareRoute'))
 const todayRecommendation = computed(() => dashboard.value?.today_recommendation ?? null)
 const todayActionHref = computed(() => todayRecommendation.value?.action_url ?? continueHref.value)
 const todayActionLabel = computed(() => todayRecommendation.value?.action_label ?? continueLabel.value)
@@ -150,14 +163,39 @@ const mainAgentMessages = ref<MainAgentMessage[]>([
   {
     id: mainAgentMessageId.value++,
     role: 'assistant',
-    content: 'Tell me what kind of session you want. I can adjust today\'s plan around your time, energy, and study intent.'
+    content: t('dashboard.agentIntro')
   }
 ])
 const currentExportUrl = computed(() => currentSpace.value ? `${config.public.apiBaseUrl}/study-spaces/${currentSpace.value.id}/export` : '')
 const currentMarkdownExportUrl = computed(() => currentSpace.value ? `${config.public.apiBaseUrl}/study-spaces/${currentSpace.value.id}/export?format=markdown` : '')
 const today = new Date()
+const currentYear = today.getFullYear()
+const currentMonth = today.getMonth() + 1
 const currentDay = today.getDate()
 const calendarDays = Array.from({ length: 35 }, (_, index) => index + 1)
+const calendarEntriesStorageKey = 'study_agent.calendar_entries.v1'
+const calendarEntries = ref<CalendarEntry[]>([])
+const selectedCalendarDay = ref(currentDay)
+const calendarComposerOpen = ref(false)
+const calendarComposerKind = ref<CalendarEntryKind>('diary')
+const calendarEntryTitle = ref('')
+const calendarEntryBody = ref('')
+const todayDateKey = calendarDateKey(currentDay)
+const selectedCalendarDateKey = computed(() => calendarDateKey(selectedCalendarDay.value))
+const selectedCalendarDayLabel = computed(() => `${currentMonth}/${selectedCalendarDay.value}`)
+const selectedDayEntries = computed(() => {
+  return calendarEntries.value.filter(entry => (entry.entry_date ?? todayDateKey) === selectedCalendarDateKey.value)
+})
+const visibleCalendarEntries = computed(() => selectedDayEntries.value.slice(0, 3))
+const selectedDayStudyQueue = computed(() => {
+  return selectedCalendarDay.value === currentDay ? visibleReviewQueue.value : []
+})
+const calendarComposerTitle = computed(() => {
+  return calendarComposerKind.value === 'diary' ? t('dashboard.addDiaryTitle') : t('dashboard.addEventTitle')
+})
+const calendarBodyPlaceholder = computed(() => {
+  return calendarComposerKind.value === 'diary' ? t('dashboard.diaryBodyPlaceholder') : t('dashboard.eventBodyPlaceholder')
+})
 const progressPercent = computed(() => {
   if (!currentSpace.value) return 0
   return Math.max(12, Math.min(78, Math.round(100 / Math.max(1, currentSpace.value.target_days) * 7)))
@@ -172,6 +210,16 @@ function devAuthHeaders() {
 
 function selectSpace(spaceId: string) {
   selectedSpaceId.value = spaceId
+}
+
+function calendarDateKey(day: number) {
+  const month = String(currentMonth).padStart(2, '0')
+  const date = String(day).padStart(2, '0')
+  return `${currentYear}-${month}-${date}`
+}
+
+function selectCalendarDay(day: number) {
+  selectedCalendarDay.value = day
 }
 
 function ensureDashboardSummary() {
@@ -240,7 +288,7 @@ async function requestTodayRecommendation(overrides?: {
       today_recommendation: recommendation
     }
   } catch (error) {
-    todayRecommendationError.value = error instanceof Error ? error.message : 'Request failed'
+    todayRecommendationError.value = error instanceof Error ? error.message : t('dashboard.requestFailed')
   } finally {
     todayRecommendationLoading.value = false
   }
@@ -273,7 +321,7 @@ async function sendMainAgentPrompt(prompt?: string) {
     mainAgentMessages.value.push({
       id: mainAgentMessageId.value++,
       role: 'assistant',
-      content: `Unable to load recommendation: ${todayRecommendationError.value}`
+      content: `${t('dashboard.requestFailed')} ${todayRecommendationError.value}`
     })
     return
   }
@@ -282,7 +330,7 @@ async function sendMainAgentPrompt(prompt?: string) {
     mainAgentMessages.value.push({
       id: mainAgentMessageId.value++,
       role: 'assistant',
-      content: todayRecommendation.value.reason ?? 'I updated today\'s plan based on your request.',
+      content: todayRecommendation.value.reason ?? t('dashboard.agentUpdated'),
       recommendation: todayRecommendation.value
     })
   }
@@ -290,7 +338,7 @@ async function sendMainAgentPrompt(prompt?: string) {
 
 async function archiveSpace(spaceId: string, spaceName: string) {
   if (deletingSpaceId.value) return
-  if (!window.confirm(`Delete "${spaceName}"? This will archive the space.`)) return
+  if (!window.confirm(`${t('common.delete')} "${spaceName}"? ${t('dashboard.archiveConfirm')}`)) return
 
   deletingSpaceId.value = spaceId
   try {
@@ -380,10 +428,67 @@ async function loadContinueChapter(spaceId: string) {
   }
 }
 
-onMounted(() => {
-  store.loadSpaces()
-  loadDashboard()
-  loadArchivedSpaces()
+function loadCalendarEntries() {
+  if (typeof window === 'undefined') return
+  try {
+    const rawEntries = window.localStorage.getItem(calendarEntriesStorageKey)
+    const parsedEntries = rawEntries ? JSON.parse(rawEntries) : []
+    calendarEntries.value = Array.isArray(parsedEntries) ? parsedEntries : []
+  } catch {
+    calendarEntries.value = []
+  }
+}
+
+function persistCalendarEntries() {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(calendarEntriesStorageKey, JSON.stringify(calendarEntries.value))
+}
+
+function openCalendarComposer(kind: CalendarEntryKind) {
+  calendarComposerKind.value = kind
+  calendarEntryTitle.value = ''
+  calendarEntryBody.value = ''
+  calendarComposerOpen.value = true
+}
+
+function closeCalendarComposer() {
+  calendarComposerOpen.value = false
+}
+
+function saveCalendarEntry() {
+  const body = calendarEntryBody.value.trim()
+  const title = calendarEntryTitle.value.trim()
+  if (!body && !title) return
+
+  const fallbackTitle = calendarComposerKind.value === 'diary' ? t('dashboard.diary') : t('dashboard.event')
+  calendarEntries.value = [
+    {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      kind: calendarComposerKind.value,
+      title: title || fallbackTitle,
+      body,
+      entry_date: selectedCalendarDateKey.value,
+      created_at: new Date().toISOString()
+    },
+    ...calendarEntries.value
+  ]
+  persistCalendarEntries()
+  closeCalendarComposer()
+}
+
+async function loadContinueChaptersForSpaces(spaces: DashboardSpace[]) {
+  const uniqueSpaceIds = Array.from(new Set(spaces.map(space => space.id).filter(Boolean)))
+  await Promise.all(uniqueSpaceIds.map(spaceId => loadContinueChapter(spaceId)))
+}
+
+onMounted(async () => {
+  await loadLocale()
+  loadCalendarEntries()
+  if (mainAgentMessages.value[0]?.role === 'assistant') {
+    mainAgentMessages.value[0].content = t('dashboard.agentIntro')
+  }
+  await Promise.all([store.loadSpaces(), loadDashboard(), loadArchivedSpaces()])
+  await loadContinueChaptersForSpaces(activeSpaces.value)
 })
 
 watch(
@@ -393,27 +498,34 @@ watch(
   },
   { immediate: true }
 )
+
+watch(
+  () => activeSpaces.value.map(space => space.id).join('|'),
+  () => {
+    void loadContinueChaptersForSpaces(activeSpaces.value)
+  }
+)
 </script>
 
 <template>
   <section class="dashboard page-enter">
     <div class="dashboard-grid">
-      <aside class="spaces-column" aria-label="Study spaces">
+      <aside class="spaces-column" :aria-label="t('dashboard.studySpaces')">
         <div class="spaces-toolbar">
           <label class="space-search">
-            <span class="sr-only">Search spaces</span>
-            <input v-model="spaceSearch" class="input" type="search" placeholder="Search spaces">
+            <span class="sr-only">{{ t('dashboard.searchSpaces') }}</span>
+            <input v-model="spaceSearch" class="input" type="search" :placeholder="t('dashboard.searchSpaces')">
           </label>
-          <NuxtLink class="primary-button compact-button" to="/spaces/new">New</NuxtLink>
+          <NuxtLink class="primary-button compact-button" to="/spaces/new">{{ t('common.new') }}</NuxtLink>
         </div>
 
-        <section v-if="store.loading" class="card skeleton" aria-label="Loading study spaces" />
+        <section v-if="store.loading" class="card skeleton" :aria-label="t('dashboard.loadingSpaces')" />
 
         <section v-else-if="!activeSpaces.length" class="empty-state dashboard-empty">
-          <p class="eyebrow">Start here</p>
-          <h2>Create your first study space</h2>
-          <p>Set a goal, upload material, and let the workspace organize a route.</p>
-          <NuxtLink class="primary-button" to="/spaces/new">New Study Space</NuxtLink>
+          <p class="eyebrow">{{ t('dashboard.startHere') }}</p>
+          <h2>{{ t('dashboard.createFirstSpace') }}</h2>
+          <p>{{ t('dashboard.createFirstSpaceBody') }}</p>
+          <NuxtLink class="primary-button" to="/spaces/new">{{ t('dashboard.newStudySpace') }}</NuxtLink>
         </section>
 
         <div v-else class="space-list">
@@ -433,49 +545,49 @@ watch(
                 class="space-row-continue"
                 :to="`/chapters/${getContinueChapterId(space.id)}`"
               >
-                Continue study
+                {{ t('dashboard.continueStudy') }}
               </NuxtLink>
               <button
                 class="space-row-delete"
                 type="button"
                 :disabled="deletingSpaceId === space.id"
-                :aria-label="`Delete ${space.name}`"
-                title="Delete space"
+                :aria-label="`${t('common.delete')} ${space.name}`"
+                :title="t('dashboard.deleteSpace')"
                 @click="archiveSpace(space.id, space.name)"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M4 7h16" />
-                  <path d="M9 7V5h6v2" />
-                  <path d="M8 7l1 12h6l1-12" />
-                  <path d="M10 11v4" />
-                  <path d="M14 11v4" />
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v5" />
+                  <path d="M14 11v5" />
                 </svg>
               </button>
             </div>
           </article>
-          <p v-if="!visibleSpaces.length" class="empty-state">No spaces match this search.</p>
+          <p v-if="!visibleSpaces.length" class="empty-state">{{ t('dashboard.noSearchMatch') }}</p>
         </div>
       </aside>
 
       <section class="dashboard-main">
         <div class="section-heading dashboard-heading">
           <div>
-            <p class="eyebrow">Home</p>
-            <h1>Home</h1>
-            <p>Main Agent keeps the next useful learning move visible and reversible.</p>
+            <p class="eyebrow">{{ t('dashboard.home') }}</p>
+            <h1>{{ t('dashboard.home') }}</h1>
+            <p>{{ t('dashboard.homeBody') }}</p>
           </div>
         </div>
 
         <section v-if="currentSpace" class="continue-panel">
           <div class="continue-copy">
-            <p class="eyebrow">{{ todayRecommendation ? 'Main Agent' : 'Continue' }}</p>
+            <p class="eyebrow">{{ todayRecommendation ? t('dashboard.mainAgent') : t('dashboard.continue') }}</p>
             <h2>{{ todayRecommendation?.title ?? currentSpace.name }}</h2>
             <p>{{ todayRecommendation?.reason ?? currentSpace.goal }}</p>
-            <div class="progress-track" aria-label="Current space progress">
+            <div class="progress-track" :aria-label="t('dashboard.currentProgress')">
               <span :style="{ width: `${progressPercent}%` }" />
             </div>
-            <small v-if="todayEstimatedMinutes">{{ todayEstimatedMinutes }} min suggested · {{ todayRecommendation?.freshness }}</small>
-            <small v-else>{{ progressPercent }}% route foundation prepared · {{ currentSpace.target_days }} target days</small>
+            <small v-if="todayEstimatedMinutes">{{ todayEstimatedMinutes }} {{ t('dashboard.minSuggested') }} · {{ todayRecommendation?.freshness }}</small>
+            <small v-else>{{ progressPercent }}% {{ t('dashboard.routeFoundation') }} · {{ currentSpace.target_days }} {{ t('dashboard.targetDays') }}</small>
             <div v-if="todayRecommendation?.secondary_actions?.length" class="today-secondary-list">
               <NuxtLink
                 v-for="action in todayRecommendation.secondary_actions"
@@ -495,9 +607,9 @@ watch(
 
         <section v-if="currentSpace" class="export-panel">
           <div>
-            <p class="eyebrow">Data safety</p>
-            <h2>Export current space</h2>
-            <p>Download a local snapshot before large edits or cleanup.</p>
+            <p class="eyebrow">{{ t('dashboard.dataSafety') }}</p>
+            <h2>{{ t('dashboard.exportCurrentSpace') }}</h2>
+            <p>{{ t('dashboard.exportBody') }}</p>
           </div>
           <div class="export-actions">
             <a class="secondary-button" :href="currentExportUrl" target="_blank" rel="noreferrer">JSON</a>
@@ -507,35 +619,34 @@ watch(
 
         <section v-else class="continue-panel dashboard-empty">
           <div>
-            <p class="eyebrow">No active space</p>
-            <h2>Your dashboard is ready</h2>
-            <p>Create a study space to start the local learning loop.</p>
+            <p class="eyebrow">{{ t('dashboard.noActiveSpace') }}</p>
+            <h2>{{ t('dashboard.ready') }}</h2>
+            <p>{{ t('dashboard.readyBody') }}</p>
           </div>
-          <NuxtLink class="primary-button" to="/spaces/new">New Study Space</NuxtLink>
+          <NuxtLink class="primary-button" to="/spaces/new">{{ t('dashboard.newStudySpace') }}</NuxtLink>
         </section>
 
         <div class="dashboard-stats">
           <section class="dashboard-row-panel">
-            <p class="eyebrow">Today</p>
-            <h2>Study queue</h2>
-            <p v-if="dashboardLoading">Loading local dashboard...</p>
+            <p class="eyebrow">{{ t('dashboard.today') }}</p>
+            <h2>{{ t('dashboard.studyQueue') }}</h2>
+            <p v-if="dashboardLoading">{{ t('dashboard.loadingDashboard') }}</p>
             <p v-else>{{ pendingActionLabel }}</p>
             <p>{{ supervisionRefreshLabel }}</p>
           </section>
 
-          <section class="dashboard-row-panel mentor-panel">
-            <p class="eyebrow">AI Mentor</p>
-            <h2>{{ recentAgentRuns.length ? 'Recent runtime' : 'Ready for sources' }}</h2>
-            <p v-if="recentAgentRuns.length">{{ recentAgentRuns[0]?.summary }}</p>
-            <p v-else>Upload text or Markdown in a study space to prepare retrieval and route generation.</p>
+          <section v-if="recentAgentRuns.length" class="dashboard-row-panel mentor-panel">
+            <p class="eyebrow">{{ t('dashboard.aiMentor') }}</p>
+            <h2>{{ t('dashboard.recentRuntime') }}</h2>
+            <p>{{ recentAgentRuns[0]?.summary }}</p>
           </section>
         </div>
 
         <section v-if="visibleReviewQueue.length" class="review-queue-panel">
           <div class="section-heading review-queue-heading">
             <div>
-              <p class="eyebrow">Review Planner</p>
-              <h2>Next learning signals</h2>
+              <p class="eyebrow">{{ t('dashboard.reviewPlanner') }}</p>
+              <h2>{{ t('dashboard.nextSignals') }}</h2>
             </div>
           </div>
           <div class="review-queue-list">
@@ -547,7 +658,7 @@ watch(
             >
               <span>{{ item.kind.replace('_', ' ') }}</span>
               <strong>{{ item.title }}</strong>
-              <small>{{ item.reason }} 路 {{ item.estimated_minutes }} min</small>
+              <small>{{ item.reason }} · {{ item.estimated_minutes }} min</small>
             </NuxtLink>
           </div>
         </section>
@@ -555,8 +666,8 @@ watch(
         <section v-if="archivedSpaces.length" class="archived-panel">
           <div class="section-heading archived-heading">
             <div>
-              <p class="eyebrow">Archived</p>
-              <h2>Archived spaces</h2>
+              <p class="eyebrow">{{ t('dashboard.archived') }}</p>
+              <h2>{{ t('dashboard.archivedSpaces') }}</h2>
             </div>
           </div>
           <div class="archived-list">
@@ -572,38 +683,109 @@ watch(
                 :data-testid="`restore-space-${space.id}`"
                 @click="restoreSpace(space.id)"
               >
-                Restore
+                {{ t('common.restore') }}
               </button>
             </article>
           </div>
         </section>
       </section>
 
-      <aside class="calendar-column" aria-label="Calendar and events">
+      <aside class="calendar-column" :aria-label="t('dashboard.calendar')">
         <section class="calendar-panel">
           <div class="calendar-heading">
             <div>
-              <p class="eyebrow">Calendar</p>
-              <h2>Today</h2>
+              <p class="eyebrow">{{ t('dashboard.calendar') }}</p>
+              <h2>{{ selectedCalendarDay === currentDay ? t('dashboard.today') : t('dashboard.selectedDay') }}</h2>
             </div>
-            <strong>{{ currentDay }}</strong>
+            <strong>{{ selectedCalendarDay }}</strong>
           </div>
-          <div class="calendar-grid" aria-label="Local calendar">
-            <span v-for="day in calendarDays" :key="day" :class="{ today: day === currentDay }">{{ day }}</span>
+          <div class="calendar-grid" :aria-label="t('dashboard.calendar')">
+            <button
+              v-for="day in calendarDays"
+              :key="day"
+              type="button"
+              :class="{ today: day === currentDay, selected: day === selectedCalendarDay }"
+              :aria-pressed="day === selectedCalendarDay"
+              @click="selectCalendarDay(day)"
+            >
+              {{ day }}
+            </button>
           </div>
           <div class="event-list">
-            <button type="button">Add diary</button>
-            <button type="button">Add event</button>
+            <button type="button" data-testid="add-diary" @click="openCalendarComposer('diary')">
+              {{ t('dashboard.addDiary') }}
+            </button>
+            <button type="button" data-testid="add-event" @click="openCalendarComposer('event')">
+              {{ t('dashboard.addEvent') }}
+            </button>
+          </div>
+          <div class="calendar-entry-list">
+            <div class="calendar-status-heading">
+              <p class="eyebrow">{{ t('dashboard.learningStatus') }}</p>
+              <strong>{{ selectedCalendarDayLabel }}</strong>
+            </div>
+            <p class="calendar-status-label">{{ t('dashboard.notesAndEvents') }}</p>
+            <article v-for="entry in visibleCalendarEntries" :key="entry.id" class="calendar-entry">
+              <span>{{ entry.kind === 'diary' ? t('dashboard.diary') : t('dashboard.event') }}</span>
+              <strong>{{ entry.title }}</strong>
+              <p v-if="entry.body">{{ entry.body }}</p>
+            </article>
+            <p v-if="!selectedDayEntries.length" class="calendar-empty">{{ t('dashboard.noDayEntries') }}</p>
+            <p class="calendar-status-label">{{ t('dashboard.dayStudyQueue') }}</p>
+            <NuxtLink
+              v-for="item in selectedDayStudyQueue"
+              :key="item.id"
+              class="calendar-queue-row"
+              :to="item.action_url"
+            >
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.estimated_minutes }} min · {{ item.reason }}</small>
+            </NuxtLink>
+            <p v-if="!selectedDayStudyQueue.length" class="calendar-empty">{{ t('dashboard.noDayQueue') }}</p>
           </div>
         </section>
       </aside>
     </div>
 
+    <section
+      v-if="calendarComposerOpen"
+      class="calendar-composer"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="calendarComposerTitle"
+    >
+      <form class="calendar-composer-card" @submit.prevent="saveCalendarEntry">
+        <header>
+          <div>
+            <p class="eyebrow">{{ t('dashboard.calendar') }}</p>
+            <h2>{{ calendarComposerTitle }}</h2>
+          </div>
+          <button type="button" class="calendar-composer-close" :aria-label="t('common.close')" @click="closeCalendarComposer">
+            ×
+          </button>
+        </header>
+        <label class="form-field">
+          {{ t('dashboard.entryTitle') }}
+          <input v-model="calendarEntryTitle" class="input" :placeholder="t('dashboard.entryTitlePlaceholder')">
+        </label>
+        <label class="form-field">
+          {{ t('dashboard.entryBody') }}
+          <textarea v-model="calendarEntryBody" class="textarea" rows="5" :placeholder="calendarBodyPlaceholder" />
+        </label>
+        <div class="calendar-composer-actions">
+          <button type="button" class="secondary-button" @click="closeCalendarComposer">{{ t('common.cancel') }}</button>
+          <button type="submit" class="primary-button" :disabled="!calendarEntryTitle.trim() && !calendarEntryBody.trim()">
+            {{ t('dashboard.saveEntry') }}
+          </button>
+        </div>
+      </form>
+    </section>
+
     <button
       type="button"
       class="main-agent-fab"
       data-testid="main-agent-fab"
-      aria-label="Open Main Agent"
+      :aria-label="t('dashboard.openMainAgent')"
       @click="openMainAgent"
     >
       <span class="main-agent-fab-orbit" aria-hidden="true" />
@@ -613,20 +795,20 @@ watch(
     <section
       v-if="mainAgentOpen"
       class="main-agent-window"
-      aria-label="Main Agent conversation"
+      :aria-label="t('dashboard.mainAgentConversation')"
     >
       <header class="main-agent-header">
         <div>
-          <p class="eyebrow">Main Agent</p>
-          <h2>Plan today's study</h2>
+          <p class="eyebrow">{{ t('dashboard.mainAgent') }}</p>
+          <h2>{{ t('dashboard.planToday') }}</h2>
         </div>
-        <button type="button" class="main-agent-close" aria-label="Close Main Agent" @click="closeMainAgent">
+        <button type="button" class="main-agent-close" :aria-label="t('dashboard.closeMainAgent')" @click="closeMainAgent">
           ×
         </button>
       </header>
 
       <div class="main-agent-scope">
-        Reads learning state, updates dashboard recommendations, and opens approved study actions.
+        {{ t('dashboard.mainAgentScope') }}
       </div>
 
       <div class="main-agent-messages">
@@ -646,14 +828,14 @@ watch(
           </NuxtLink>
         </article>
         <article v-if="todayRecommendationLoading" class="main-agent-message assistant">
-          <p>Thinking through today's best next step...</p>
+          <p>{{ t('dashboard.mainAgentThinking') }}</p>
         </article>
       </div>
 
-      <div class="main-agent-prompts" aria-label="Suggested prompts">
-        <button type="button" @click="sendMainAgentPrompt('I only have 15 minutes and want to review')">15 min review</button>
-        <button type="button" @click="sendMainAgentPrompt('I want new material for the next hour')">New material</button>
-        <button type="button" @click="sendMainAgentPrompt('Quiz me today')">Quiz me</button>
+      <div class="main-agent-prompts" :aria-label="t('dashboard.promptReview')">
+        <button type="button" @click="sendMainAgentPrompt('I only have 15 minutes and want to review')">{{ t('dashboard.promptReview') }}</button>
+        <button type="button" @click="sendMainAgentPrompt('I want new material for the next hour')">{{ t('dashboard.promptNewMaterial') }}</button>
+        <button type="button" @click="sendMainAgentPrompt('Quiz me today')">{{ t('dashboard.promptQuiz') }}</button>
       </div>
 
       <form class="main-agent-form" data-testid="main-agent-form" @submit.prevent="sendMainAgentPrompt()">
@@ -661,10 +843,10 @@ watch(
           v-model="mainAgentPrompt"
           data-testid="main-agent-input"
           type="text"
-          placeholder="Tell Main Agent what you need today..."
+          :placeholder="t('dashboard.inputPlaceholder')"
           :disabled="todayRecommendationLoading"
         >
-        <button type="submit" :disabled="todayRecommendationLoading || !mainAgentPrompt.trim()">Send</button>
+        <button type="submit" :disabled="todayRecommendationLoading || !mainAgentPrompt.trim()">{{ t('dashboard.send') }}</button>
       </form>
     </section>
   </section>
@@ -1101,18 +1283,27 @@ watch(
   gap: 4px;
 }
 
-.calendar-grid span {
+.calendar-grid button {
+  border: 0;
   border-radius: 6px;
+  background: transparent;
   color: var(--color-muted);
+  cursor: pointer;
   display: grid;
   font-size: 12px;
   font-weight: 800;
+  min-height: 28px;
   place-items: center;
 }
 
 .calendar-grid .today {
   background: var(--color-primary);
   color: #fff;
+}
+
+.calendar-grid .selected {
+  outline: 2px solid rgba(22, 163, 74, 0.42);
+  outline-offset: -2px;
 }
 
 .event-list {
@@ -1129,6 +1320,125 @@ watch(
   cursor: pointer;
   font-weight: 800;
   min-height: 34px;
+}
+
+.calendar-entry-list {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.calendar-status-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.calendar-status-heading strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.calendar-status-label {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 900;
+  margin: 4px 0 0;
+}
+
+.calendar-entry {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+}
+
+.calendar-entry span {
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.calendar-entry strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.calendar-entry p,
+.calendar-empty {
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.calendar-queue-row {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-page);
+  color: var(--color-text);
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  text-decoration: none;
+}
+
+.calendar-queue-row strong {
+  font-size: 13px;
+}
+
+.calendar-queue-row small {
+  color: var(--color-muted);
+  line-height: 1.35;
+}
+
+.calendar-composer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(15, 23, 42, 0.24);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.calendar-composer-card {
+  width: min(430px, 100%);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.calendar-composer-card header,
+.calendar-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.calendar-composer-card h2 {
+  margin: 0;
+}
+
+.calendar-composer-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-muted);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
 }
 
 @keyframes progress-in {
@@ -1423,7 +1733,7 @@ watch(
   top: 12px;
   right: 8px;
   border-radius: 6px;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .dashboard-heading {
@@ -1574,21 +1884,28 @@ watch(
   gap: 0;
 }
 
-.calendar-grid span {
+.calendar-grid button {
+  border: 0;
   min-height: 34px;
   border-right: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
   border-radius: 0;
+  background: transparent;
+  cursor: pointer;
   font-weight: 600;
 }
 
-.calendar-grid span:nth-child(7n) {
+.calendar-grid button:nth-child(7n) {
   border-right: 0;
 }
 
 .calendar-grid .today {
   background: var(--color-success-soft);
   color: var(--color-success);
+}
+
+.calendar-grid .selected {
+  box-shadow: inset 0 0 0 2px rgba(22, 163, 74, 0.45);
 }
 
 .event-list {
@@ -1601,24 +1918,41 @@ watch(
 }
 
 .main-agent-fab {
-  width: auto;
-  height: 36px;
+  width: 72px;
+  height: 72px;
   right: 24px;
-  bottom: 22px;
-  border: 1px solid var(--color-border);
+  bottom: 24px;
+  border: 1px solid rgba(22, 163, 74, 0.45);
   border-radius: 999px;
-  background: var(--color-surface);
-  box-shadow: var(--shadow-floating);
-  color: var(--color-primary);
-  padding: 0 14px;
+  background:
+    radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.98), rgba(240, 253, 244, 0.92) 34%, rgba(22, 163, 74, 0.95) 100%);
+  box-shadow:
+    0 18px 48px rgba(22, 163, 74, 0.28),
+    0 5px 14px rgba(15, 23, 42, 0.16);
+  color: white;
+  padding: 0;
+  transform: translateY(0);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.main-agent-fab:hover,
+.main-agent-fab:focus-visible {
+  border-color: rgba(22, 163, 74, 0.72);
+  box-shadow:
+    0 24px 64px rgba(22, 163, 74, 0.34),
+    0 8px 22px rgba(15, 23, 42, 0.2);
+  transform: translateY(-4px);
 }
 
 .main-agent-fab-orbit {
-  display: none;
+  display: block;
+  inset: -8px;
+  border-color: rgba(22, 163, 74, 0.3);
 }
 
 .main-agent-fab-core {
-  font-size: 13px;
+  font-size: 18px;
+  letter-spacing: 0;
 }
 
 .main-agent-window {

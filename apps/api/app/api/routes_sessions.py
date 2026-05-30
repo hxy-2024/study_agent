@@ -140,8 +140,13 @@ async def create_tutor_message(
             session_id=session_id,
             content=payload.content,
             embedding_provider=DeterministicEmbeddingProvider(settings.rag_embedding_dimension),
-            answer_provider=create_answer_provider(settings),
+            answer_provider=create_answer_provider(
+                settings,
+                agent_layer="session_tutor",
+                model_override=payload.model,
+            ),
             web_search_enabled=payload.web_search_enabled,
+            thinking_effort=payload.thinking_effort,
         )
     except ValueError as exc:
         raise map_session_error(exc) from exc

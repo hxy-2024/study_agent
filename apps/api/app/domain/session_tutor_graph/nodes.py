@@ -177,6 +177,7 @@ async def generate_answer(
         chunks=chunks,
         source_filenames=_source_filenames_by_uuid(state),
         web_search_results=state.get("web_search_results", []),
+        thinking_effort=state.get("thinking_effort", "medium"),
     )
     state["answer"] = answer.answer
     state["citations"] = [
@@ -270,6 +271,7 @@ async def persist_assistant_message(
         payload=MessageCreate(
             role=MessageRole.assistant,
             content=state["answer"],
+            metadata={"thinking_effort": state.get("thinking_effort", "medium")},
             citations=[
                 MessageCitationCreate(
                     source_id=uuid.UUID(citation["source_id"]),

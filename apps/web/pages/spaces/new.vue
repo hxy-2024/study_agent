@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+
+const { loadLocale, t } = useLocalI18n()
+const studySpacesStore = useStudySpacesStore()
 
 type RouteChapter = {
   id?: string
@@ -46,6 +49,11 @@ type RouteDraftResponse = {
   }>
 }
 
+type LocalSettingsResponse = {
+  llm_model?: string
+  available_models?: string[]
+}
+
 const form = reactive({
   name: '',
   goal: '',
@@ -55,9 +63,7 @@ const form = reactive({
 })
 
 const modelSettings = reactive({
-  defaultModel: 'gpt-4.1-mini',
-  customModel: '',
-  embeddingModel: ''
+  embeddingPreset: 'local-deterministic'
 })
 
 const material = reactive({
@@ -79,27 +85,33 @@ const showChunkModal = ref(false)
 const showChapterModal = ref(false)
 const generatingDetails = ref(false)
 const runningRag = ref(false)
+const generatingRoute = ref(false)
 const submitting = ref(false)
 const errorMessage = ref('')
 const selectedChapter = ref(0)
+const configuredModel = ref('')
+const configuredModels = ref<string[]>([])
+const createLayoutRef = ref<HTMLFormElement | null>(null)
+const formColumnPercent = ref(50)
+const resizingLayout = ref(false)
 
 const chapterDetails = ref<RouteChapter[]>([
   {
     order: 1,
-    title: 'Goal breakdown',
-    description: 'Clarify scope, prerequisites, completion criteria, and the daily learning cadence.',
+    title: '目标拆解',
+    description: '明确范围、前置知识、完成标准和每日学习节奏。',
     estimated_days: 2
   },
   {
     order: 2,
-    title: 'Concept map',
-    description: 'Turn uploaded material into a chapter structure and mark concept dependencies.',
+    title: '概念地图',
+    description: '把上传资料整理成章节结构，并标记概念依赖。',
     estimated_days: 4
   },
   {
     order: 3,
-    title: 'Practice reinforcement',
-    description: 'Generate review prompts, quizzes, and weak-point follow-up tasks around chapter goals.',
+    title: '练习强化',
+    description: '围绕章节目标生成复习提示、测验和薄弱点追踪任务。',
     estimated_days: 2
   }
 ])
@@ -107,15 +119,61 @@ const chapterDetails = ref<RouteChapter[]>([
 const selectedChapterDetail = computed(() => {
   return chapterDetails.value[selectedChapter.value] ?? chapterDetails.value[0] ?? {
     order: 1,
-    title: 'Chapter detail',
-    description: 'No chapter detail has been generated yet.',
+    title: t('create.chapterDetail'),
+    description: t('create.emptyRoute'),
     estimated_days: 1
   }
 })
 
 const canRunRag = computed(() => {
-  return Boolean(form.name.trim() && form.goal.trim() && material.content.trim())
+  return Boolean(form.name.trim() && form.goal.trim() && material.content.trim() && !hasDuplicateName.value)
 })
+
+const normalizedSpaceName = computed(() => form.name.trim().toLowerCase())
+const hasDuplicateName = computed(() => {
+  if (!normalizedSpaceName.value) return false
+  return studySpacesStore.spaces.some(space => space.name.trim().toLowerCase() === normalizedSpaceName.value)
+})
+const nameValidationMessage = computed(() => (hasDuplicateName.value ? t('create.duplicateName') : ''))
+
+const canGenerateRoute = computed(() => {
+  return Boolean(form.name.trim() && form.goal.trim() && !hasDuplicateName.value)
+})
+
+const createLayoutStyle = computed(() => ({
+  '--form-column-percent': `${formColumnPercent.value}%`
+}))
+
+const embeddingPresetOptions = computed(() => {
+  const options = [
+    {
+      value: 'local-deterministic',
+      label: t('create.localChunkEmbeddings')
+    }
+  ]
+  const uniqueModels = Array.from(new Set([configuredModel.value, ...configuredModels.value].filter(Boolean)))
+  for (const model of uniqueModels) {
+    options.push({
+      value: `configured:${model}`,
+      label: model === configuredModel.value ? `${t('create.currentDefaultModel')}: ${model}` : model
+    })
+  }
+  return options
+})
+
+async function loadLocalModelSettings() {
+  const config = useRuntimeConfig()
+  try {
+    const response = await $fetch<LocalSettingsResponse>(`${config.public.apiBaseUrl}/local-settings/ai`, {
+      headers: DEV_AUTH_HEADERS
+    })
+    configuredModel.value = response.llm_model || ''
+    configuredModels.value = response.available_models || []
+  } catch {
+    configuredModel.value = ''
+    configuredModels.value = []
+  }
+}
 
 function syncRouteDraftText(chapters: RouteChapter[]) {
   routeDraftText.value = chapters
@@ -123,33 +181,6 @@ function syncRouteDraftText(chapters: RouteChapter[]) {
       return `${chapter.order}. ${chapter.title} (${chapter.estimated_days} days)\n${chapter.description}`
     })
     .join('\n\n')
-}
-
-function renderDraftRoute() {
-  const first = Math.max(1, Math.floor(form.target_days / 4))
-  const second = Math.max(1, Math.floor(form.target_days / 2))
-  const third = Math.max(1, form.target_days - first - second)
-  routeOutline.value = [
-    {
-      order: 1,
-      title: 'Clarify the learning goal',
-      description: `Define the scope, existing foundation, and completion criteria for ${form.goal || 'this study goal'}.`,
-      estimated_days: first
-    },
-    {
-      order: 2,
-      title: 'Build the core knowledge map',
-      description: 'Break source material into key concepts and connect them into a usable learning structure.',
-      estimated_days: second
-    },
-    {
-      order: 3,
-      title: 'Review, test, and reinforce',
-      description: 'Use quizzes, weak-point review, and spaced practice to check mastery.',
-      estimated_days: third
-    }
-  ]
-  syncRouteDraftText(routeOutline.value)
 }
 
 async function handleMaterialFile(event: Event) {
@@ -162,6 +193,9 @@ async function handleMaterialFile(event: Event) {
 
 async function ensureSpace() {
   if (createdSpaceId.value) return createdSpaceId.value
+  if (hasDuplicateName.value) {
+    throw new Error(t('create.duplicateName'))
+  }
   const config = useRuntimeConfig()
   const created = await $fetch<CreatedSpace>(`${config.public.apiBaseUrl}/study-spaces`, {
     method: 'POST',
@@ -195,9 +229,30 @@ async function createRouteDraft(studySpaceId: string) {
   syncRouteDraftText(routeOutline.value)
 }
 
+async function generateRouteDraft() {
+  if (hasDuplicateName.value) {
+    errorMessage.value = t('create.duplicateName')
+    return
+  }
+  if (!form.name.trim() || !form.goal.trim()) {
+    errorMessage.value = t('create.fillRoute')
+    return
+  }
+  generatingRoute.value = true
+  errorMessage.value = ''
+  try {
+    const studySpaceId = await ensureSpace()
+    await createRouteDraft(studySpaceId)
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : t('create.routeFailed')
+  } finally {
+    generatingRoute.value = false
+  }
+}
+
 async function runRag() {
   if (!canRunRag.value) {
-    errorMessage.value = 'Fill in the space name, learning goal, and material before running ingestion.'
+    errorMessage.value = hasDuplicateName.value ? t('create.duplicateName') : t('create.fillRag')
     return
   }
   const config = useRuntimeConfig()
@@ -226,7 +281,7 @@ async function runRag() {
     materialChunks.value = chunks.chunks
     await createRouteDraft(studySpaceId)
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'RAG processing failed'
+    errorMessage.value = error instanceof Error ? error.message : t('create.ragFailed')
   } finally {
     runningRag.value = false
   }
@@ -242,7 +297,7 @@ async function generateChapterDetails() {
       if (canRunRag.value) {
         await runRag()
       } else {
-        renderDraftRoute()
+        await generateRouteDraft()
       }
     }
     chapterDetails.value = routeOutline.value.length ? [...routeOutline.value] : [...chapterDetails.value]
@@ -266,66 +321,116 @@ async function confirmChapterDetails() {
     }
     const firstChapterId = chapterDetails.value[0]?.id ?? routeOutline.value[0]?.id
     if (!firstChapterId) {
-      throw new Error('Chapters are not ready yet. Run RAG or generate a route first.')
+      throw new Error(t('create.notReady'))
     }
     await router.push(`/chapters/${firstChapterId}`)
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to enter chapter study'
+    errorMessage.value = error instanceof Error ? error.message : t('create.enterFailed')
   } finally {
     submitting.value = false
   }
 }
+
+function clampFormColumnPercent(value: number) {
+  return Math.min(68, Math.max(42, value))
+}
+
+function updateFormColumnFromPointer(clientX: number) {
+  const layout = createLayoutRef.value
+  if (!layout) return
+  const rect = layout.getBoundingClientRect()
+  if (rect.width <= 0) return
+  const nextPercent = ((clientX - rect.left) / rect.width) * 100
+  formColumnPercent.value = clampFormColumnPercent(nextPercent)
+}
+
+function stopLayoutResize() {
+  resizingLayout.value = false
+  window.removeEventListener('pointermove', handleLayoutResize)
+  window.removeEventListener('pointerup', stopLayoutResize)
+}
+
+function handleLayoutResize(event: PointerEvent) {
+  if (!resizingLayout.value) return
+  updateFormColumnFromPointer(event.clientX)
+}
+
+function startLayoutResize(event: PointerEvent) {
+  if (window.matchMedia('(max-width: 1000px)').matches) return
+  resizingLayout.value = true
+  updateFormColumnFromPointer(event.clientX)
+  window.addEventListener('pointermove', handleLayoutResize)
+  window.addEventListener('pointerup', stopLayoutResize)
+}
+
+function adjustLayoutWithKeyboard(event: KeyboardEvent) {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  event.preventDefault()
+  formColumnPercent.value = clampFormColumnPercent(
+    formColumnPercent.value + (event.key === 'ArrowRight' ? 2 : -2)
+  )
+}
+
+onMounted(async () => {
+  await loadLocale()
+  await Promise.all([loadLocalModelSettings(), studySpacesStore.loadSpaces()])
+})
+
+onBeforeUnmount(stopLayoutResize)
 </script>
 
 <template>
   <section class="create-space page-enter">
     <div class="create-shell">
       <header class="create-header">
-        <NuxtLink data-testid="back-home" class="back-link" to="/" aria-label="Back to dashboard">
+        <NuxtLink data-testid="back-home" class="back-link" to="/" :aria-label="t('common.back')">
           <span aria-hidden="true">←</span>
         </NuxtLink>
         <div>
-          <p class="eyebrow">New learning space</p>
-          <h1>Create learning space</h1>
-          <p>Set the goal, upload material, run ingestion, review the AI route, and enter chapter study.</p>
+          <h1>{{ t('create.title') }}</h1>
+          <p>{{ t('create.subtitle') }}</p>
         </div>
       </header>
 
-      <form class="create-layout" @submit.prevent="generateChapterDetails">
+      <form
+        ref="createLayoutRef"
+        class="create-layout"
+        :class="{ resizing: resizingLayout }"
+        :style="createLayoutStyle"
+        @submit.prevent="generateChapterDetails"
+      >
         <main class="form-stack">
           <section class="card form-panel">
-            <div class="section-heading">
-              <p class="eyebrow">Step 1</p>
-              <h2>Space and learning goal</h2>
+            <div class="section-heading step-inline-heading">
+              <p class="eyebrow">{{ t('create.step1') }}</p>
+              <h2>{{ t('create.spaceGoal') }}</h2>
             </div>
 
             <label class="form-field">
-              Space name
-              <input v-model="form.name" name="space-name" class="input" required maxlength="160">
+              {{ t('create.spaceName') }}
+              <input
+                v-model="form.name"
+                name="space-name"
+                class="input"
+                :class="{ invalid: hasDuplicateName }"
+                required
+                maxlength="160"
+                :aria-invalid="hasDuplicateName"
+                aria-describedby="space-name-error"
+              >
+              <small v-if="nameValidationMessage" id="space-name-error" class="field-error">
+                {{ nameValidationMessage }}
+              </small>
             </label>
 
             <label class="form-field">
-              Learning goal
+              {{ t('create.learningGoal') }}
               <textarea v-model="form.goal" name="learning-goal" class="textarea" required rows="4" />
             </label>
 
-            <div class="field-grid">
+            <div class="field-grid target-days-grid">
               <label class="form-field">
-                Default model
-                <select v-model="modelSettings.defaultModel" class="select">
-                  <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-                  <option value="gpt-4.1">gpt-4.1</option>
-                  <option value="custom">Custom model</option>
-                </select>
-              </label>
-
-              <label class="form-field">
-                Model input
-                <input v-model="modelSettings.customModel" class="input" placeholder="Optional custom model id">
-              </label>
-
-              <label class="form-field">
-                Target days
+                {{ t('create.targetDays') }}
                 <input v-model.number="form.target_days" class="input" type="number" min="1" max="365">
               </label>
             </div>
@@ -333,9 +438,9 @@ async function confirmChapterDetails() {
 
           <section class="card form-panel">
             <div class="section-heading split">
-              <div>
-                <p class="eyebrow">Step 2</p>
-                <h2>Material and RAG ingestion</h2>
+              <div class="step-inline-heading">
+                <p class="eyebrow">{{ t('create.step2') }}</p>
+                <h2>{{ t('create.materialRag') }}</h2>
               </div>
               <button
                 data-testid="open-chunk-modal"
@@ -344,62 +449,90 @@ async function confirmChapterDetails() {
                 :disabled="!materialChunks.length"
                 @click="showChunkModal = true"
               >
-                View chunks
+                {{ t('create.viewChunks') }}
               </button>
             </div>
 
             <label class="upload-zone">
-              <span>Upload Markdown or text</span>
+              <span>{{ t('create.upload') }}</span>
               <small>{{ material.filename }}</small>
               <input type="file" accept=".md,.txt,text/markdown,text/plain" @change="handleMaterialFile">
             </label>
 
             <label class="form-field">
-              Or paste material
-              <textarea v-model="material.content" class="textarea" rows="7" placeholder="Paste course notes, Markdown, or article text..." />
+              {{ t('create.pasteMaterial') }}
+              <textarea v-model="material.content" class="textarea" rows="7" :placeholder="t('create.pastePlaceholder')" />
             </label>
 
             <div class="field-grid two">
               <label class="form-field">
-                Embedding model
-                <input v-model="modelSettings.embeddingModel" class="input" placeholder="Optional; empty uses default chunk embeddings">
+                {{ t('create.embeddingPreset') }}
+                <select v-model="modelSettings.embeddingPreset" class="select" data-testid="embedding-preset">
+                  <option
+                    v-for="option in embeddingPresetOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
               </label>
               <button
-                data-testid="run-rag"
-                class="primary-button rag-button"
-                type="button"
-                :disabled="runningRag || !canRunRag"
+              data-testid="run-rag"
+              class="primary-button rag-button"
+              type="button"
+              :disabled="runningRag || !canRunRag"
                 @click="runRag"
               >
-                {{ runningRag ? 'Running ingestion...' : 'Run ingestion' }}
+                {{ runningRag ? t('create.runningIngestion') : t('create.runIngestion') }}
               </button>
             </div>
           </section>
         </main>
 
+        <div
+          class="layout-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          :aria-valuenow="Math.round(formColumnPercent)"
+          aria-valuemin="42"
+          aria-valuemax="68"
+          tabindex="0"
+          @keydown="adjustLayoutWithKeyboard"
+          @pointerdown.prevent="startLayoutResize"
+        />
+
         <aside class="route-panel">
           <div class="route-heading">
             <div>
-              <p class="eyebrow">Step 3</p>
-              <h2>Learning route outline</h2>
+              <p class="eyebrow">{{ t('create.step3') }}</p>
+              <h2>{{ t('create.routeOutline') }}</h2>
             </div>
-            <button class="secondary-button ai-render" type="button" @click="renderDraftRoute">AI Render</button>
+            <button
+              class="secondary-button"
+              type="button"
+              data-testid="generate-route"
+              :disabled="generatingRoute || !canGenerateRoute"
+              @click="generateRouteDraft"
+            >
+              {{ generatingRoute ? t('common.generating') : t('create.generateRoute') }}
+            </button>
           </div>
 
           <textarea
             v-if="routeDraftText"
             v-model="routeDraftText"
             class="textarea route-textarea"
-            aria-label="Editable route outline"
+            :aria-label="t('create.editableRoute')"
           />
           <div v-else class="empty-route">
-            <p>After ingestion, the AI-generated route appears here. You can also render a draft first.</p>
+            <p>{{ t('create.emptyRoute') }}</p>
           </div>
 
           <ol v-if="routeOutline.length" class="route-list">
             <li v-for="chapter in routeOutline" :key="`${chapter.order}-${chapter.title}`">
               <strong>{{ chapter.title }}</strong>
-              <small>{{ chapter.estimated_days }} days</small>
+              <small>{{ chapter.estimated_days }} {{ t('create.days') }}</small>
             </li>
           </ol>
 
@@ -407,12 +540,13 @@ async function confirmChapterDetails() {
             data-testid="generate-chapter-details"
             class="primary-button detail-button"
             type="submit"
-            :disabled="generatingDetails || runningRag"
+            :disabled="generatingDetails || runningRag || hasDuplicateName"
           >
-            {{ generatingDetails ? 'Generating, please wait...' : 'Generate chapter study details' }}
+            {{ generatingDetails ? t('create.generatingDetails') : t('create.generateDetails') }}
           </button>
 
-          <p v-if="generatingDetails" class="loading-copy">Generating, please wait...</p>
+          <p v-if="generatingRoute" class="loading-copy">{{ t('create.generatingRoute') }}</p>
+          <p v-if="generatingDetails" class="loading-copy">{{ t('create.generatingDetails') }}</p>
           <p v-if="errorMessage" class="error-alert">{{ errorMessage }}</p>
         </aside>
       </form>
@@ -424,16 +558,16 @@ async function confirmChapterDetails() {
           data-testid="close-chunk-modal"
           class="modal-close"
           type="button"
-          aria-label="Close chunk modal"
+          :aria-label="t('common.close')"
           @click="showChunkModal = false"
         >
           ×
         </button>
-        <p class="eyebrow">RAG preview</p>
-        <h2 id="chunk-title">Embedded chunks</h2>
+        <p class="eyebrow">{{ t('create.ragPreview') }}</p>
+        <h2 id="chunk-title">{{ t('create.embeddedChunks') }}</h2>
         <div class="chunk-list">
           <article v-for="chunk in materialChunks" :key="chunk.id">
-            <strong>Chunk {{ chunk.chunk_index + 1 }}</strong>
+            <strong>{{ t('create.chunk') }} {{ chunk.chunk_index + 1 }}</strong>
             <p>{{ chunk.text }}</p>
           </article>
         </div>
@@ -444,12 +578,12 @@ async function confirmChapterDetails() {
       <section class="modal-card chapter-card" role="dialog" aria-modal="true" aria-labelledby="chapter-title">
         <button class="chapter-back" type="button" @click="showChapterModal = false">
           <span aria-hidden="true">←</span>
-          Back
+          {{ t('common.back') }}
         </button>
 
         <div class="chapter-layout">
           <aside class="chapter-list">
-            <p class="eyebrow">Chapters</p>
+            <p class="eyebrow">{{ t('create.chapters') }}</p>
             <button
               v-for="(chapter, index) in chapterDetails"
               :key="`${chapter.order}-${chapter.title}`"
@@ -462,7 +596,7 @@ async function confirmChapterDetails() {
           </aside>
 
           <article class="chapter-detail">
-            <p class="eyebrow">Chapter detail</p>
+            <p class="eyebrow">{{ t('create.chapterDetail') }}</p>
             <h2 id="chapter-title">{{ selectedChapterDetail.title }}</h2>
             <p>{{ selectedChapterDetail.description }}</p>
           </article>
@@ -475,7 +609,7 @@ async function confirmChapterDetails() {
           :disabled="submitting"
           @click="confirmChapterDetails"
         >
-          {{ submitting ? 'Entering...' : 'Confirm and enter chapter study' }}
+          {{ submitting ? t('create.entering') : t('create.confirmEnter') }}
         </button>
       </section>
     </div>
@@ -533,10 +667,33 @@ async function confirmChapterDetails() {
 }
 
 .create-layout {
+  --form-column-percent: 50%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.42fr);
-  gap: 18px;
+  grid-template-columns: minmax(360px, var(--form-column-percent)) 10px minmax(320px, 1fr);
+  gap: 14px;
   align-items: start;
+}
+
+.layout-resizer {
+  align-self: stretch;
+  min-height: calc(100dvh - 170px);
+  cursor: col-resize;
+  position: relative;
+  touch-action: none;
+}
+
+.layout-resizer::before {
+  content: "";
+  position: absolute;
+  inset: 0 4px;
+  border-radius: 999px;
+  background: var(--color-border);
+}
+
+.layout-resizer:hover::before,
+.layout-resizer:focus-visible::before,
+.create-layout.resizing .layout-resizer::before {
+  background: var(--color-primary);
 }
 
 .form-stack,
@@ -558,6 +715,10 @@ async function confirmChapterDetails() {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.target-days-grid {
+  grid-template-columns: minmax(180px, 280px);
 }
 
 .field-grid.two {
@@ -600,13 +761,6 @@ async function confirmChapterDetails() {
   background: var(--color-surface);
   box-shadow: var(--shadow-card);
   padding: 18px;
-}
-
-.ai-render {
-  background: linear-gradient(90deg, #e5484d, #2563eb);
-  background-clip: text;
-  color: transparent;
-  font-weight: 900;
 }
 
 .route-textarea {
@@ -771,6 +925,7 @@ async function confirmChapterDetails() {
 @media (max-width: 1000px) {
   .create-layout {
     grid-template-columns: 1fr;
+    row-gap: 18px;
   }
 
   .route-panel {
@@ -822,7 +977,7 @@ async function confirmChapterDetails() {
 }
 
 .create-layout {
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  grid-template-columns: minmax(360px, var(--form-column-percent)) 10px minmax(320px, 1fr);
   gap: 0;
 }
 
@@ -962,14 +1117,14 @@ async function confirmChapterDetails() {
 }
 
 .create-layout {
-  grid-template-columns: minmax(0, 1fr) minmax(330px, 390px);
-  gap: 0;
+  grid-template-columns: minmax(360px, var(--form-column-percent)) 10px minmax(320px, 1fr);
+  column-gap: 18px;
 }
 
 .form-stack {
-  border-right: 1px solid var(--color-border);
+  border-right: 0;
   gap: 0;
-  padding: 18px 22px 18px 0;
+  padding: 18px 0;
 }
 
 .form-panel {
@@ -987,6 +1142,16 @@ async function confirmChapterDetails() {
 
 .section-heading {
   min-height: auto;
+}
+
+.step-inline-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.step-inline-heading .eyebrow {
+  margin-bottom: 0;
 }
 
 .section-heading h2,
@@ -1018,16 +1183,12 @@ async function confirmChapterDetails() {
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  padding: 18px 0 18px 22px;
+  padding: 18px 0;
 }
 
 .route-heading {
   border-bottom: 1px solid var(--color-border);
   padding-bottom: 12px;
-}
-
-.ai-render {
-  color: var(--color-primary);
 }
 
 .route-textarea {
@@ -1105,6 +1266,10 @@ async function confirmChapterDetails() {
 @media (max-width: 1000px) {
   .create-layout {
     grid-template-columns: 1fr;
+  }
+
+  .layout-resizer {
+    display: none;
   }
 
   .form-stack {

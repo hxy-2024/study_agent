@@ -169,7 +169,179 @@ const DEV_AUTH_HEADERS = {
 
 const route = useRoute()
 const config = useRuntimeConfig()
+const { isZh, loadLocale } = useLocalI18n()
 const spaceId = computed(() => String(route.params.id))
+const copy = computed(() => isZh.value ? {
+  studySpace: '学习空间',
+  spaceId: '空间 ID',
+  learningRoute: '学习路线',
+  activeRoute: '已激活路线',
+  draftRoute: '路线草稿',
+  noRoute: '还没有学习路线。',
+  routeEmpty: '从你的目标和已提取资料分块生成路线。',
+  generating: '生成中...',
+  regenerateDraft: '重新生成草稿',
+  generateRoute: '生成路线',
+  activating: '激活中...',
+  activateRoute: '激活路线',
+  loadingRoutes: '正在加载学习路线...',
+  days: '天',
+  study: '学习',
+  routeEmptyLong: '还没有学习路线。上传或提取资料后生成路线。',
+  planner: '空间规划器',
+  nextBest: '下一步最佳动作',
+  plannerBody: '读取路线进度、导师状态和测验掌握度，不会自动改变你的路线。',
+  planning: '规划中...',
+  refreshPlan: '刷新计划',
+  runPlanner: '运行规划器',
+  loadingPlanner: '正在加载规划状态...',
+  recommendedNext: '推荐下一步',
+  noNext: '暂无必须继续的具体章节。',
+  updated: '更新于',
+  riskChapters: '风险章节',
+  noRisk: '未检测到风险章节。',
+  mastery: '掌握度',
+  reviews: '复习',
+  noReview: '暂无复习动作排队。',
+  routeProposals: '路线建议',
+  noRouteProposal: '暂无路线调整建议。',
+  runPlannerHint: '激活路线或提交测验后运行规划器。',
+  actionQueue: '动作队列',
+  plannerActions: '规划动作',
+  actionsBody: '先确认规划建议，再让它影响学习流程。',
+  creating: '创建中...',
+  createActions: '创建动作',
+  createRuntimeActions: '创建运行动作',
+  loadingActions: '正在加载规划动作...',
+  noActions: '没有排队的规划动作。',
+  accept: '接受',
+  startReview: '开始复习',
+  generateDraft: '生成草稿',
+  complete: '完成',
+  dismiss: '忽略',
+  runtime: 'Agent 运行',
+  recentRuns: '最近运行',
+  runtimeBody: '当前学习空间的 L1 Planner、L2 Mentor 和 L3 Tutor 执行轨迹。',
+  refresh: '刷新',
+  loadingRuntime: '正在加载 agent 运行...',
+  noRuns: '还没有记录 agent 运行。',
+  sourceLibrary: '资料库',
+  uploadMaterial: '上传学习资料',
+  uploadBody: '支持 .txt、.md 和粘贴笔记。PDF、OCR 和网页导入后续补充。',
+  chooseFile: '选择资料文件',
+  noFile: '未选择文件',
+  type: '类型',
+  size: '大小',
+  pasteFilename: '粘贴文件名',
+  format: '格式',
+  plainText: '纯文本',
+  pastePlaceholder: '在这里粘贴笔记、摘录或复制的 Markdown。',
+  adding: '添加中...',
+  addPasted: '添加粘贴资料',
+  sources: '资料',
+  studyMaterials: '学习资料',
+  filters: '资料状态筛选',
+  loadingSources: '正在加载资料...',
+  noSources: '还没有资料。上传 Markdown 或文本文件开始。',
+  noSourceMatch: '没有匹配该筛选的资料。',
+  created: '创建于',
+  running: '运行中...',
+  viewChunks: '查看分块',
+  aiMentor: 'AI 导师',
+  readyForSources: '等待资料',
+  readyBody: '上传文本或 Markdown 资料，运行提取，然后在生成路线前检查分块。',
+  ragPreview: 'RAG 预览',
+  chunkPreview: '分块预览',
+  chunks: '个分块',
+  loadingChunks: '正在加载分块...',
+  selectSource: '选择一个资料来预览解析后的分块。',
+  noChunks: '这个资料还没有分块。'
+} : {
+  studySpace: 'Study space',
+  spaceId: 'Space ID',
+  learningRoute: 'Learning route',
+  activeRoute: 'Active route',
+  draftRoute: 'Draft route',
+  noRoute: 'No learning route yet.',
+  routeEmpty: 'Generate a route from your goal and ingested source chunks.',
+  generating: 'Generating...',
+  regenerateDraft: 'Regenerate draft',
+  generateRoute: 'Generate route',
+  activating: 'Activating...',
+  activateRoute: 'Activate route',
+  loadingRoutes: 'Loading learning routes...',
+  days: 'days',
+  study: 'Study',
+  routeEmptyLong: 'No learning route yet. Generate a route after uploading or ingesting sources.',
+  planner: 'Space planner',
+  nextBest: 'Next best action',
+  plannerBody: 'Reads route progress, mentor state, and quiz mastery without changing your route automatically.',
+  planning: 'Planning...',
+  refreshPlan: 'Refresh plan',
+  runPlanner: 'Run planner',
+  loadingPlanner: 'Loading planner state...',
+  recommendedNext: 'Recommended next',
+  noNext: 'No specific next chapter is required.',
+  updated: 'Updated',
+  riskChapters: 'Risk chapters',
+  noRisk: 'No risk chapters detected.',
+  mastery: 'Mastery',
+  reviews: 'Reviews',
+  noReview: 'No review action is queued.',
+  routeProposals: 'Route proposals',
+  noRouteProposal: 'No route adjustment proposed.',
+  runPlannerHint: 'Run the planner after activating a route or submitting a quiz.',
+  actionQueue: 'Action queue',
+  plannerActions: 'Planner actions',
+  actionsBody: 'Confirm planner suggestions before they affect your study flow.',
+  creating: 'Creating...',
+  createActions: 'Create actions',
+  createRuntimeActions: 'Create runtime actions',
+  loadingActions: 'Loading planner actions...',
+  noActions: 'No planner actions queued.',
+  accept: 'Accept',
+  startReview: 'Start review',
+  generateDraft: 'Generate draft',
+  complete: 'Complete',
+  dismiss: 'Dismiss',
+  runtime: 'Agent runtime',
+  recentRuns: 'Recent agent runs',
+  runtimeBody: 'Latest L1 Planner, L2 Mentor, and L3 Tutor execution traces for this study space.',
+  refresh: 'Refresh',
+  loadingRuntime: 'Loading agent runtime...',
+  noRuns: 'No agent runs recorded yet.',
+  sourceLibrary: 'Source library',
+  uploadMaterial: 'Upload learning material',
+  uploadBody: 'Supports .txt, .md, and pasted notes. PDF, OCR, and webpage import will be added later.',
+  chooseFile: 'Choose source file',
+  noFile: 'No file selected',
+  type: 'Type',
+  size: 'Size',
+  pasteFilename: 'Paste filename',
+  format: 'Format',
+  plainText: 'Plain text',
+  pastePlaceholder: 'Paste notes, excerpts, or copied Markdown here.',
+  adding: 'Adding...',
+  addPasted: 'Add pasted source',
+  sources: 'Sources',
+  studyMaterials: 'Study materials',
+  filters: 'Source status filters',
+  loadingSources: 'Loading sources...',
+  noSources: 'No sources yet. Upload a Markdown or text file to start.',
+  noSourceMatch: 'No sources match this filter.',
+  created: 'Created',
+  running: 'Running...',
+  viewChunks: 'View chunks',
+  aiMentor: 'AI Mentor',
+  readyForSources: 'Ready for sources',
+  readyBody: 'Upload text or Markdown material, run ingestion, then inspect chunks before route generation.',
+  ragPreview: 'RAG preview',
+  chunkPreview: 'Chunk preview',
+  chunks: 'chunks',
+  loadingChunks: 'Loading chunks...',
+  selectSource: 'Select a source to preview parsed chunks.',
+  noChunks: 'This source has no chunks yet.'
+})
 
 const sources = ref<SourceItem[]>([])
 const activeFilter = ref<SourceFilter>('all')
@@ -227,15 +399,15 @@ const supervisionRefreshCount = computed(() => {
   return (plannerState.value?.evidence ?? []).filter(item => item.needs_supervision_refresh === true).length
 })
 const sourceFilters = computed(() => [
-  { key: 'all' as const, label: 'All', count: sources.value.length },
-  { key: 'uploaded' as const, label: 'Uploaded', count: sources.value.filter(source => source.status === 'uploaded').length },
+  { key: 'all' as const, label: isZh.value ? '全部' : 'All', count: sources.value.length },
+  { key: 'uploaded' as const, label: isZh.value ? '已上传' : 'Uploaded', count: sources.value.filter(source => source.status === 'uploaded').length },
   {
     key: 'processing' as const,
-    label: 'Processing',
+    label: isZh.value ? '处理中' : 'Processing',
     count: sources.value.filter(source => source.status === 'processing').length
   },
-  { key: 'ready' as const, label: 'Ready', count: sources.value.filter(source => source.status === 'ready').length },
-  { key: 'failed' as const, label: 'Failed', count: sources.value.filter(source => source.status === 'failed').length }
+  { key: 'ready' as const, label: isZh.value ? '就绪' : 'Ready', count: sources.value.filter(source => source.status === 'ready').length },
+  { key: 'failed' as const, label: isZh.value ? '失败' : 'Failed', count: sources.value.filter(source => source.status === 'failed').length }
 ])
 const filteredSources = computed(() => {
   if (activeFilter.value === 'all') return sources.value
@@ -251,11 +423,11 @@ const selectedFileSize = computed(() => {
 })
 const uploadPhaseLabel = computed(() => {
   const labels: Record<UploadPhase, string> = {
-    idle: 'Upload source',
-    creating_url: 'Creating upload URL...',
-    uploading_file: 'Uploading file...',
-    confirming_upload: 'Confirming upload...',
-    refreshing_sources: 'Refreshing sources...'
+    idle: isZh.value ? '上传资料' : 'Upload source',
+    creating_url: isZh.value ? '正在创建上传 URL...' : 'Creating upload URL...',
+    uploading_file: isZh.value ? '正在上传文件...' : 'Uploading file...',
+    confirming_upload: isZh.value ? '正在确认上传...' : 'Confirming upload...',
+    refreshing_sources: isZh.value ? '正在刷新资料...' : 'Refreshing sources...'
   }
   return labels[uploadPhase.value]
 })
@@ -271,10 +443,10 @@ function protectedHeaders() {
 function formatStatus(status: SourceStatus) {
   const labels: Record<string, string> = {
     pending_upload: 'Pending upload',
-    uploaded: 'Uploaded',
-    processing: 'Processing',
-    ready: 'Ready',
-    failed: 'Failed'
+    uploaded: isZh.value ? '已上传' : 'Uploaded',
+    processing: isZh.value ? '处理中' : 'Processing',
+    ready: isZh.value ? '就绪' : 'Ready',
+    failed: isZh.value ? '失败' : 'Failed'
   }
   return labels[status] ?? status
 }
@@ -284,9 +456,9 @@ function canRunIngestion(source: SourceItem) {
 }
 
 function ingestionActionLabel(source: SourceItem) {
-  if (source.status === 'failed') return 'Retry ingestion'
-  if (source.status === 'ready') return 'Re-run ingestion'
-  return 'Run ingestion'
+  if (source.status === 'failed') return isZh.value ? '重试提取' : 'Retry ingestion'
+  if (source.status === 'ready') return isZh.value ? '重新提取' : 'Re-run ingestion'
+  return isZh.value ? '运行提取' : 'Run ingestion'
 }
 
 function contentTypeForFile(file: File) {
@@ -827,7 +999,8 @@ async function initializePage() {
   loadAgentRuns()
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadLocale()
   void initializePage()
 })
 </script>
@@ -838,20 +1011,20 @@ onMounted(() => {
       <div class="space-main">
         <div class="topbar page-heading">
           <div>
-            <p class="eyebrow">Study space</p>
-            <h1>Study Space</h1>
-            <p>Space ID: {{ spaceId }}</p>
+            <p class="eyebrow">{{ copy.studySpace }}</p>
+            <h1>{{ copy.studySpace }}</h1>
+            <p>{{ copy.spaceId }}: {{ spaceId }}</p>
           </div>
         </div>
 
         <section class="card route-overview">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Learning route</p>
-              <h2>{{ visibleRoute?.route.status === 'active' ? 'Active route' : visibleRoute ? 'Draft route' : 'No learning route yet.' }}</h2>
+              <p class="eyebrow">{{ copy.learningRoute }}</p>
+              <h2>{{ visibleRoute?.route.status === 'active' ? copy.activeRoute : visibleRoute ? copy.draftRoute : copy.noRoute }}</h2>
               <h3 v-if="visibleRoute" class="route-title">{{ visibleRoute.route.title }}</h3>
               <p v-if="visibleRoute">{{ visibleRoute.route.summary }}</p>
-              <p v-else>Generate a route from your goal and ingested source chunks.</p>
+              <p v-else>{{ copy.routeEmpty }}</p>
             </div>
             <div class="route-actions">
               <button
@@ -861,7 +1034,7 @@ onMounted(() => {
                 :disabled="generatingRoute"
                 @click="generateRouteDraft"
               >
-                {{ generatingRoute ? 'Generating...' : visibleRoute ? 'Regenerate draft' : 'Generate route' }}
+                {{ generatingRoute ? copy.generating : visibleRoute ? copy.regenerateDraft : copy.generateRoute }}
               </button>
               <button
                 v-if="latestDraftRoute"
@@ -871,38 +1044,38 @@ onMounted(() => {
                 :disabled="activatingRouteId === latestDraftRoute.route.id"
                 @click="activateRoute(latestDraftRoute.route.id)"
               >
-                {{ activatingRouteId === latestDraftRoute.route.id ? 'Activating...' : 'Activate route' }}
+                {{ activatingRouteId === latestDraftRoute.route.id ? copy.activating : copy.activateRoute }}
               </button>
             </div>
           </div>
 
-          <p v-if="loadingRoutes" class="muted">Loading learning routes...</p>
+          <p v-if="loadingRoutes" class="muted">{{ copy.loadingRoutes }}</p>
           <div v-else-if="visibleRoute" class="chapter-list">
             <article v-for="chapter in visibleRoute.chapters" :key="chapter.id" class="chapter-row">
               <span class="status-badge">{{ chapter.status }}</span>
               <div>
                 <h3>{{ chapter.order_index }}. {{ chapter.title }}</h3>
                 <p>{{ chapter.goal }}</p>
-                <small>{{ chapter.estimated_days }} days</small>
+                <small>{{ chapter.estimated_days }} {{ copy.days }}</small>
               </div>
               <NuxtLink
                 data-testid="study-chapter"
                 class="secondary-button chapter-study-link"
                 :to="`/chapters/${chapter.id}`"
               >
-                Study
+                {{ copy.study }}
               </NuxtLink>
             </article>
           </div>
-          <p v-else class="empty-state">No learning route yet. Generate a route after uploading or ingesting sources.</p>
+          <p v-else class="empty-state">{{ copy.routeEmptyLong }}</p>
         </section>
 
         <section class="card planner-panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Space planner</p>
-              <h2>Next best action</h2>
-              <p class="muted">Reads route progress, mentor state, and quiz mastery without changing your route automatically.</p>
+              <p class="eyebrow">{{ copy.planner }}</p>
+              <h2>{{ copy.nextBest }}</h2>
+              <p class="muted">{{ copy.plannerBody }}</p>
             </div>
             <button
               data-testid="run-space-planner"
@@ -911,38 +1084,38 @@ onMounted(() => {
               :disabled="runningPlanner"
               @click="runSpacePlanner"
             >
-              {{ runningPlanner ? 'Planning...' : plannerState ? 'Refresh plan' : 'Run planner' }}
+              {{ runningPlanner ? copy.planning : plannerState ? copy.refreshPlan : copy.runPlanner }}
             </button>
           </div>
 
-          <p v-if="loadingPlannerState" class="muted">Loading planner state...</p>
+          <p v-if="loadingPlannerState" class="muted">{{ copy.loadingPlanner }}</p>
           <div v-else-if="plannerState" class="planner-grid">
             <article class="planner-summary">
               <span class="status-badge">Planner</span>
               <h3>{{ plannerState.summary }}</h3>
-              <p v-if="plannerNextChapter">Recommended next: {{ plannerNextChapter.order_index }}. {{ plannerNextChapter.title }}</p>
-              <p v-else class="muted">No specific next chapter is required.</p>
+              <p v-if="plannerNextChapter">{{ copy.recommendedNext }}: {{ plannerNextChapter.order_index }}. {{ plannerNextChapter.title }}</p>
+              <p v-else class="muted">{{ copy.noNext }}</p>
               <p v-if="supervisionRefreshCount" class="supervision-refresh-note">
                 {{ supervisionRefreshCount }} {{ supervisionRefreshCount === 1 ? 'chapter needs' : 'chapters need' }} supervision refresh
               </p>
-              <small v-if="plannerUpdatedAt">Updated {{ plannerUpdatedAt }}</small>
+              <small v-if="plannerUpdatedAt">{{ copy.updated }} {{ plannerUpdatedAt }}</small>
             </article>
 
             <article class="planner-list">
-              <h3>Risk chapters</h3>
-              <p v-if="plannerState.risk_chapters.length === 0" class="empty-state">No risk chapters detected.</p>
+              <h3>{{ copy.riskChapters }}</h3>
+              <p v-if="plannerState.risk_chapters.length === 0" class="empty-state">{{ copy.noRisk }}</p>
               <ul v-else>
                 <li v-for="risk in plannerState.risk_chapters" :key="risk.chapter_id">
                   <strong>{{ risk.title }}</strong>
                   <span>{{ risk.reason }}</span>
-                  <small v-if="risk.score_percent !== null">Mastery {{ risk.score_percent }}%</small>
+                  <small v-if="risk.score_percent !== null">{{ copy.mastery }} {{ risk.score_percent }}%</small>
                 </li>
               </ul>
             </article>
 
             <article class="planner-list">
-              <h3>Reviews</h3>
-              <p v-if="plannerState.review_recommendations.length === 0" class="empty-state">No review action is queued.</p>
+              <h3>{{ copy.reviews }}</h3>
+              <p v-if="plannerState.review_recommendations.length === 0" class="empty-state">{{ copy.noReview }}</p>
               <ul v-else>
                 <li v-for="review in plannerState.review_recommendations" :key="`${review.chapter_id}-${review.action}`">
                   <strong>{{ review.action }}</strong>
@@ -952,8 +1125,8 @@ onMounted(() => {
             </article>
 
             <article class="planner-list">
-              <h3>Route proposals</h3>
-              <p v-if="plannerState.route_adjustments.length === 0" class="empty-state">No route adjustment proposed.</p>
+              <h3>{{ copy.routeProposals }}</h3>
+              <p v-if="plannerState.route_adjustments.length === 0" class="empty-state">{{ copy.noRouteProposal }}</p>
               <ul v-else>
                 <li v-for="proposal in plannerState.route_adjustments" :key="`${proposal.kind}-${proposal.title}`">
                   <strong>{{ proposal.title }}</strong>
@@ -962,15 +1135,15 @@ onMounted(() => {
               </ul>
             </article>
           </div>
-          <p v-else class="empty-state">Run the planner after activating a route or submitting a quiz.</p>
+          <p v-else class="empty-state">{{ copy.runPlannerHint }}</p>
         </section>
 
         <section class="card planner-actions-panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Action queue</p>
-              <h2>Planner actions</h2>
-              <p class="muted">Confirm planner suggestions before they affect your study flow.</p>
+              <p class="eyebrow">{{ copy.actionQueue }}</p>
+              <h2>{{ copy.plannerActions }}</h2>
+              <p class="muted">{{ copy.actionsBody }}</p>
             </div>
             <div class="row-actions planner-action-controls">
               <button
@@ -980,7 +1153,7 @@ onMounted(() => {
                 :disabled="creatingPlannerActions"
                 @click="createPlannerActions"
               >
-                {{ creatingPlannerActions ? 'Creating...' : 'Create actions' }}
+                {{ creatingPlannerActions ? copy.creating : copy.createActions }}
               </button>
               <button
                 data-testid="create-runtime-actions"
@@ -989,14 +1162,14 @@ onMounted(() => {
                 :disabled="creatingRuntimeActions"
                 @click="createRuntimeActions"
               >
-                {{ creatingRuntimeActions ? 'Creating...' : 'Create runtime actions' }}
+                {{ creatingRuntimeActions ? copy.creating : copy.createRuntimeActions }}
               </button>
             </div>
           </div>
           <p v-if="runtimeActionsMessage" class="muted">{{ runtimeActionsMessage }}</p>
 
-          <p v-if="loadingPlannerActions" class="muted">Loading planner actions...</p>
-          <p v-else-if="plannerActions.length === 0" class="empty-state">No planner actions queued.</p>
+          <p v-if="loadingPlannerActions" class="muted">{{ copy.loadingActions }}</p>
+          <p v-else-if="plannerActions.length === 0" class="empty-state">{{ copy.noActions }}</p>
           <div v-else class="planner-action-list">
             <article v-for="action in plannerActions" :key="action.id" class="planner-action-row">
               <span class="status-badge">{{ action.status }}</span>
@@ -1013,7 +1186,7 @@ onMounted(() => {
                   :disabled="updatingPlannerActionId === action.id"
                   @click="updatePlannerAction(action, 'accepted')"
                 >
-                  Accept
+                  {{ copy.accept }}
                 </button>
                 <button
                   v-if="action.action_type === 'review_chapter' && action.chapter_id && action.status !== 'completed' && action.status !== 'dismissed'"
@@ -1023,7 +1196,7 @@ onMounted(() => {
                   :disabled="updatingPlannerActionId === action.id"
                   @click="startReviewAction(action)"
                 >
-                  Start review
+                  {{ copy.startReview }}
                 </button>
                 <button
                   v-if="action.action_type === 'route_adjustment' && action.status !== 'completed' && action.status !== 'dismissed'"
@@ -1033,7 +1206,7 @@ onMounted(() => {
                   :disabled="updatingPlannerActionId === action.id"
                   @click="generateRouteDraftFromAction(action)"
                 >
-                  Generate draft
+                  {{ copy.generateDraft }}
                 </button>
                 <button
                   v-if="action.status !== 'completed'"
@@ -1042,7 +1215,7 @@ onMounted(() => {
                   :disabled="updatingPlannerActionId === action.id"
                   @click="updatePlannerAction(action, 'completed')"
                 >
-                  Complete
+                  {{ copy.complete }}
                 </button>
                 <button
                   v-if="action.status === 'proposed'"
@@ -1051,7 +1224,7 @@ onMounted(() => {
                   :disabled="updatingPlannerActionId === action.id"
                   @click="updatePlannerAction(action, 'dismissed')"
                 >
-                  Dismiss
+                  {{ copy.dismiss }}
                 </button>
               </div>
             </article>
@@ -1061,9 +1234,9 @@ onMounted(() => {
         <section class="card agent-runtime-panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Agent runtime</p>
-              <h2>Recent agent runs</h2>
-              <p class="muted">Latest L1 Planner, L2 Mentor, and L3 Tutor execution traces for this study space.</p>
+              <p class="eyebrow">{{ copy.runtime }}</p>
+              <h2>{{ copy.recentRuns }}</h2>
+              <p class="muted">{{ copy.runtimeBody }}</p>
             </div>
             <button
               data-testid="refresh-agent-runs"
@@ -1072,12 +1245,12 @@ onMounted(() => {
               :disabled="loadingAgentRuns"
               @click="loadAgentRuns"
             >
-              Refresh
+              {{ copy.refresh }}
             </button>
           </div>
 
-          <p v-if="loadingAgentRuns" class="muted">Loading agent runtime...</p>
-          <p v-else-if="agentRuns.length === 0" class="empty-state">No agent runs recorded yet.</p>
+          <p v-if="loadingAgentRuns" class="muted">{{ copy.loadingRuntime }}</p>
+          <p v-else-if="agentRuns.length === 0" class="empty-state">{{ copy.noRuns }}</p>
           <div v-else class="agent-runtime-list">
             <article v-for="run in agentRuns" :key="run.id ?? `${run.agent_type}-${run.thread_id}`" class="agent-runtime-row">
               <button
@@ -1174,27 +1347,27 @@ onMounted(() => {
 
         <section class="card source-upload-card">
           <div>
-            <p class="eyebrow">Source library</p>
-            <h2>Upload learning material</h2>
-            <p class="muted">Supports .txt, .md, and pasted notes. PDF, OCR, and webpage import will be added later.</p>
+            <p class="eyebrow">{{ copy.sourceLibrary }}</p>
+            <h2>{{ copy.uploadMaterial }}</h2>
+            <p class="muted">{{ copy.uploadBody }}</p>
           </div>
 
           <div class="source-input-grid">
             <div class="source-input-panel">
               <label class="file-picker">
-                <span>Choose source file</span>
+                <span>{{ copy.chooseFile }}</span>
                 <input type="file" accept=".txt,.md,text/plain,text/markdown" @change="onFileSelected">
               </label>
 
               <div class="selected-file-panel">
-                <p class="selected-file">{{ selectedFile?.name || 'No file selected' }}</p>
+                <p class="selected-file">{{ selectedFile?.name || copy.noFile }}</p>
                 <dl v-if="selectedFile" class="file-meta">
                   <div>
-                    <dt>Type</dt>
+                    <dt>{{ copy.type }}</dt>
                     <dd>{{ inferredContentType }}</dd>
                   </div>
                   <div>
-                    <dt>Size</dt>
+                    <dt>{{ copy.size }}</dt>
                     <dd>{{ selectedFileSize }}</dd>
                   </div>
                 </dl>
@@ -1211,7 +1384,7 @@ onMounted(() => {
             <div class="source-input-panel pasted-source-panel">
               <div class="inline-fields">
                 <label>
-                  <span>Paste filename</span>
+                  <span>{{ copy.pasteFilename }}</span>
                   <input
                     v-model="pastedSourceFilename"
                     data-testid="pasted-source-filename"
@@ -1221,10 +1394,10 @@ onMounted(() => {
                   >
                 </label>
                 <label>
-                  <span>Format</span>
+                  <span>{{ copy.format }}</span>
                   <select v-model="pastedSourceContentType" data-testid="pasted-source-type">
                     <option value="text/markdown">Markdown</option>
-                    <option value="text/plain">Plain text</option>
+                    <option value="text/plain">{{ copy.plainText }}</option>
                   </select>
                 </label>
               </div>
@@ -1232,7 +1405,7 @@ onMounted(() => {
                 v-model="pastedSourceContent"
                 data-testid="pasted-source-content"
                 rows="7"
-                placeholder="Paste notes, excerpts, or copied Markdown here."
+                :placeholder="copy.pastePlaceholder"
               />
               <button
                 data-testid="add-pasted-source"
@@ -1241,7 +1414,7 @@ onMounted(() => {
                 :disabled="!canCreatePastedSource"
                 @click="createPastedSource"
               >
-                {{ creatingTextSource ? 'Adding...' : 'Add pasted source' }}
+                {{ creatingTextSource ? copy.adding : copy.addPasted }}
               </button>
             </div>
           </div>
@@ -1250,15 +1423,15 @@ onMounted(() => {
         <section class="card source-list-card">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Sources</p>
-              <h2>Study materials</h2>
+              <p class="eyebrow">{{ copy.sources }}</p>
+              <h2>{{ copy.studyMaterials }}</h2>
             </div>
             <button type="button" class="secondary-button" :disabled="loadingSources" @click="loadSources">
-              Refresh
+              {{ copy.refresh }}
             </button>
           </div>
 
-          <div class="filter-bar" aria-label="Source status filters">
+          <div class="filter-bar" :aria-label="copy.filters">
             <button
               v-for="filter in sourceFilters"
               :key="filter.key"
@@ -1272,9 +1445,9 @@ onMounted(() => {
             </button>
           </div>
 
-          <p v-if="loadingSources" class="muted">Loading sources...</p>
-          <p v-else-if="sources.length === 0" class="empty-state">No sources yet. Upload a Markdown or text file to start.</p>
-          <p v-else-if="filteredSources.length === 0" class="empty-state">No sources match this filter.</p>
+          <p v-if="loadingSources" class="muted">{{ copy.loadingSources }}</p>
+          <p v-else-if="sources.length === 0" class="empty-state">{{ copy.noSources }}</p>
+          <p v-else-if="filteredSources.length === 0" class="empty-state">{{ copy.noSourceMatch }}</p>
 
           <div v-else class="source-list">
             <article
@@ -1292,7 +1465,7 @@ onMounted(() => {
               </div>
 
               <p v-if="source.error_message" class="source-error">{{ source.error_message }}</p>
-              <p v-if="source.created_at" class="source-meta">Created {{ new Date(source.created_at).toLocaleString() }}</p>
+              <p v-if="source.created_at" class="source-meta">{{ copy.created }} {{ new Date(source.created_at).toLocaleString() }}</p>
 
               <div class="row-actions">
                 <button
@@ -1302,7 +1475,7 @@ onMounted(() => {
                   :disabled="ingestingSourceId === source.id"
                   @click="runIngestion(source)"
                 >
-                  {{ ingestingSourceId === source.id ? 'Running...' : ingestionActionLabel(source) }}
+                  {{ ingestingSourceId === source.id ? copy.running : ingestionActionLabel(source) }}
                 </button>
                 <button
                   type="button"
@@ -1310,7 +1483,7 @@ onMounted(() => {
                   :disabled="chunklessSourceIds.has(source.id)"
                   @click="loadChunks(source)"
                 >
-                  View chunks
+                  {{ copy.viewChunks }}
                 </button>
               </div>
             </article>
@@ -1320,24 +1493,24 @@ onMounted(() => {
 
       <aside class="space-rail">
         <section class="panel mentor-panel">
-          <p class="eyebrow">AI Mentor</p>
-          <h2>Ready for sources</h2>
-          <p>Upload text or Markdown material, run ingestion, then inspect chunks before route generation.</p>
+          <p class="eyebrow">{{ copy.aiMentor }}</p>
+          <h2>{{ copy.readyForSources }}</h2>
+          <p>{{ copy.readyBody }}</p>
         </section>
 
         <section class="card chunk-preview">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">RAG preview</p>
-              <h2>Chunk preview</h2>
+              <p class="eyebrow">{{ copy.ragPreview }}</p>
+              <h2>{{ copy.chunkPreview }}</h2>
             </div>
-            <span v-if="chunks.length" class="chunk-count">{{ chunks.length }} chunks</span>
+            <span v-if="chunks.length" class="chunk-count">{{ chunks.length }} {{ copy.chunks }}</span>
           </div>
 
-          <p v-if="loadingChunks" class="muted">Loading chunks...</p>
-          <div v-else-if="!hasSelectedSource" class="empty-state">Select a source to preview parsed chunks.</div>
+          <p v-if="loadingChunks" class="muted">{{ copy.loadingChunks }}</p>
+          <div v-else-if="!hasSelectedSource" class="empty-state">{{ copy.selectSource }}</div>
           <div v-else-if="chunks.length === 0" class="empty-state preview-empty">
-            <p>This source has no chunks yet.</p>
+            <p>{{ copy.noChunks }}</p>
             <button
               v-if="selectedSource && canRunIngestion(selectedSource)"
               data-testid="preview-run-ingestion"
@@ -1346,7 +1519,7 @@ onMounted(() => {
               :disabled="ingestingSourceId === selectedSource.id"
               @click="runSelectedSourceIngestion"
             >
-              {{ ingestingSourceId === selectedSource.id ? 'Running...' : ingestionActionLabel(selectedSource) }}
+              {{ ingestingSourceId === selectedSource.id ? copy.running : ingestionActionLabel(selectedSource) }}
             </button>
           </div>
           <div v-else class="chunk-list">

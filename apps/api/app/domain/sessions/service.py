@@ -394,6 +394,7 @@ async def answer_session_message(
     embedding_provider: EmbeddingProvider,
     answer_provider: AnswerProvider,
     web_search_enabled: bool | None = None,
+    thinking_effort: str = "medium",
 ) -> MessageResponse:
     runtime_config = graph_runtime_config_from_settings(get_settings())
     if not runtime_config.session_tutor_graph_enabled:
@@ -405,6 +406,7 @@ async def answer_session_message(
             embedding_provider=embedding_provider,
             answer_provider=answer_provider,
             web_search_enabled=web_search_enabled,
+            thinking_effort=thinking_effort,
         )
 
     from app.domain.session_tutor_graph.service import run_session_tutor_graph
@@ -418,6 +420,7 @@ async def answer_session_message(
         embedding_provider=embedding_provider,
         answer_provider=answer_provider,
         web_search_enabled=web_search_enabled,
+        thinking_effort=thinking_effort,
     )
 
 
@@ -430,6 +433,7 @@ async def _answer_session_message_without_graph(
     embedding_provider: EmbeddingProvider,
     answer_provider: AnswerProvider,
     web_search_enabled: bool | None = None,
+    thinking_effort: str = "medium",
 ) -> MessageResponse:
     tutor_session = await ensure_session_in_tenant(
         session=session,
@@ -467,6 +471,7 @@ async def _answer_session_message_without_graph(
         chunks=chunks,
         source_filenames=source_filenames,
         web_search_results=[],
+        thinking_effort=thinking_effort,
     )
     assistant_response = await create_message_with_response(
         session=session,
@@ -479,6 +484,7 @@ async def _answer_session_message_without_graph(
                 "runtime": "deterministic",
                 "graph_enabled": False,
                 "web_search_enabled": bool(web_search_enabled),
+                "thinking_effort": thinking_effort,
             },
             citations=[
                 MessageCitationCreate(
@@ -505,12 +511,14 @@ async def _answer_session_message_without_graph(
             "user_message_id": str(user_message.id),
             "graph_enabled": False,
             "web_search_enabled": bool(web_search_enabled),
+            "thinking_effort": thinking_effort,
         },
         output_payload={
             "assistant_message_id": str(assistant_response.id),
             "citation_count": len(assistant_response.citations),
             "graph_enabled": False,
             "web_search_enabled": bool(web_search_enabled),
+            "thinking_effort": thinking_effort,
         },
         model="deterministic",
         status=AgentRunStatus.completed,

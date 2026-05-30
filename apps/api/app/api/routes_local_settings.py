@@ -1,9 +1,18 @@
+import httpx
 from fastapi import APIRouter, Depends
 
 from app.core.auth import CurrentUserContext, get_authorized_user_context
 from app.core.config import Settings, get_settings
-from app.domain.local_settings.schemas import LocalAISettingsResponse, LocalAISettingsUpdate
-from app.domain.local_settings.service import load_local_ai_settings, save_local_ai_settings
+from app.domain.local_settings.schemas import (
+    LocalAIModelsResponse,
+    LocalAISettingsResponse,
+    LocalAISettingsUpdate,
+)
+from app.domain.local_settings.service import (
+    discover_local_ai_models,
+    load_local_ai_settings,
+    save_local_ai_settings,
+)
 
 router = APIRouter(tags=["local-settings"])
 
@@ -23,3 +32,12 @@ async def update_local_ai_settings(
     settings: Settings = Depends(get_settings),
 ) -> LocalAISettingsResponse:
     return save_local_ai_settings(payload, path=settings.local_settings_path)
+
+
+@router.post("/local-settings/ai/models", response_model=LocalAIModelsResponse)
+async def refresh_local_ai_models(
+    _context: CurrentUserContext = Depends(get_authorized_user_context),
+    settings: Settings = Depends(get_settings),
+) -> LocalAIModelsResponse:
+    async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
+        return await discover_local_ai_models(path=settings.local_settings_path, client=client)

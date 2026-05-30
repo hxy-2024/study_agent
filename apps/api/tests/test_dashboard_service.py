@@ -319,10 +319,19 @@ async def test_get_main_agent_recommendation_persists_completed_run() -> None:
     run = fake_session.added[0]
     assert run.agent_type == AgentType.main_agent
     assert run.status == AgentRunStatus.completed
-    assert run.model == "deterministic"
+    assert run.model == "langgraph:main_agent_v1"
     assert run.input_payload["request"]["available_minutes"] == 30
     assert run.input_payload["signal_counts"]["chapters"] == 1
-    assert run.output_payload["strategy_version"] == "main_agent_agenda_v2"
+    assert run.input_payload["node_trace"] == [
+        "inspect_context",
+        "choose_next_tool",
+        "build_recommendation",
+        "validate_recommendation",
+    ]
+    assert run.input_payload["route_decision"] == "new_material"
+    assert run.input_payload["tool_calls"] == ["build_main_agent_recommendation"]
+    assert run.output_payload["strategy_version"] == "main_agent_graph_v1"
+    assert run.output_payload["freshness"] == "agentic_graph_v1"
     assert recommendation.agent_run_id == run.id
 
 

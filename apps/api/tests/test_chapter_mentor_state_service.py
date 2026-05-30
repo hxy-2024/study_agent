@@ -190,13 +190,13 @@ def test_build_signal_runs_statement_filters_completed_session_tutor_runs_for_ch
     sql = str(compiled)
 
     assert "agent_runs.tenant_id" in sql
-    assert tenant_id.hex in sql
+    assert str(tenant_id) in sql
     assert "agent_runs.agent_type" in sql
     assert AgentType.session_tutor.value in sql
     assert "agent_runs.status" in sql
     assert AgentRunStatus.completed.value in sql
     assert "sessions.chapter_id" in sql
-    assert chapter_id.hex in sql
+    assert str(chapter_id) in sql
 
 
 def test_needs_supervision_refresh_when_latest_tutor_run_is_newer_than_mentor_state() -> None:

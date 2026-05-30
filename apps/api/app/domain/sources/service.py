@@ -4,9 +4,14 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.db.models import Source, SourceChunk, SourceStatus, StudySpace
 from app.domain.sources.schemas import TextSourceCreateRequest, UploadPresignRequest
-from app.infrastructure.storage import TextSourceWriter, create_presigned_put_url
+from app.infrastructure.storage import (
+    TextSourceWriter,
+    create_presigned_put_url,
+    write_runtime_upload_object,
+)
 
 SUPPORTED_CONTENT_TYPES = {
     "application/pdf",
@@ -34,6 +39,11 @@ def build_object_key(tenant_id: uuid.UUID, study_space_id: uuid.UUID, filename: 
     return f"tenants/{tenant_id}/spaces/{study_space_id}/sources/{source_id}/{safe_name}"
 
 
+def build_local_upload_url(source_id: uuid.UUID) -> str:
+    settings = get_settings()
+    return f"{settings.api_public_url.rstrip('/')}{settings.api_v1_prefix}/uploads/local/{source_id}"
+
+
 async def ensure_study_space_in_tenant(
     session: AsyncSession,
     study_space_id: uuid.UUID,
@@ -55,6 +65,7 @@ async def create_upload_request(
     payload: UploadPresignRequest,
     tenant_id: uuid.UUID,
 ) -> tuple[Source, str]:
+    settings = get_settings()
     validate_content_type(payload.content_type)
     await ensure_study_space_in_tenant(session, payload.study_space_id, tenant_id)
     object_key = build_object_key(tenant_id, payload.study_space_id, payload.filename)
@@ -68,7 +79,10 @@ async def create_upload_request(
     session.add(source)
     await session.commit()
     await session.refresh(source)
-    upload_url = create_presigned_put_url(object_key=object_key, content_type=payload.content_type)
+    if settings.storage_backend == "filesystem":
+        upload_url = build_local_upload_url(source.id)
+    else:
+        upload_url = create_presigned_put_url(object_key=object_key, content_type=payload.content_type)
     return source, upload_url
 
 
@@ -145,6 +159,34 @@ async def mark_source_uploaded(
     source.status = SourceStatus.uploaded
     await session.commit()
     await session.refresh(source)
+    return source
+
+
+async def store_local_upload(
+    session: AsyncSession,
+    source_id: uuid.UUID,
+    payload: bytes,
+    content_type: str,
+) -> Source:
+    settings = get_settings()
+    if settings.storage_backend != "filesystem":
+        raise ValueError("Local upload endpoint is available only for filesystem storage")
+
+    source = await session.scalar(select(Source).where(Source.id == source_id))
+    if source is None:
+        raise ValueError("Source not found")
+    if source.status != SourceStatus.pending_upload:
+        raise ValueError(f"Source cannot be uploaded from status {source.status.value}")
+
+    normalized_content_type = content_type.split(";")[0].strip().lower()
+    if normalized_content_type != source.content_type:
+        raise ValueError("Upload content type does not match source")
+
+    await write_runtime_upload_object(
+        object_key=source.object_key,
+        payload=payload,
+        content_type=normalized_content_type,
+    )
     return source
 
 

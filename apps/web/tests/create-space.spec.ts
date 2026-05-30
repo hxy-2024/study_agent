@@ -80,6 +80,12 @@ describe('NewSpacePage', () => {
       if (url.endsWith('/study-spaces/space-1/route-drafts')) {
         return Promise.resolve(routeDraft())
       }
+      if (url.endsWith('/local-settings/ai')) {
+        return Promise.resolve({
+          llm_model: 'deepseek-chat',
+          available_models: ['deepseek-chat', 'deepseek-reasoner']
+        })
+      }
       return Promise.resolve({})
     })
   })
@@ -90,12 +96,57 @@ describe('NewSpacePage', () => {
     expect(wrapper.find('[data-testid="back-home"]').attributes('href')).toBe('/')
     expect(wrapper.text()).toContain('Create learning space')
     expect(wrapper.text()).toContain('Space and learning goal')
-    expect(wrapper.text()).toContain('Default model')
+    expect(wrapper.text()).not.toContain('Model input')
+    expect(wrapper.text()).not.toContain('Custom model')
     expect(wrapper.text()).toContain('Material and RAG ingestion')
-    expect(wrapper.text()).toContain('Embedding model')
+    expect(wrapper.text()).toContain('Embedding preset')
+    expect(wrapper.text()).toContain('Local chunk embeddings')
     expect(wrapper.text()).toContain('Learning route outline')
-    expect(wrapper.text()).toContain('AI Render')
+    expect(wrapper.text()).toContain('Generate route')
+    expect(wrapper.text()).not.toContain('AI Render')
     expect(wrapper.text()).toContain('Generate chapter study details')
+  })
+
+  it('generates a real route draft instead of rendering a local placeholder', async () => {
+    const wrapper = mountPage()
+    await wrapper.find('[name="space-name"]').setValue('Linear Algebra')
+    await wrapper.find('[name="learning-goal"]').setValue('Understand matrices')
+
+    await wrapper.find('[data-testid="generate-route"]').trigger('click')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/study-spaces',
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/study-spaces/space-1/route-drafts',
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(wrapper.text()).toContain('RAG Fundamentals')
+    expect(wrapper.text()).not.toContain('Clarify the learning goal')
+  })
+
+  it('requires the space name and goal before generating a route', async () => {
+    const wrapper = mountPage()
+
+    await wrapper.find('[data-testid="generate-route"]').trigger('click')
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/study-spaces',
+      expect.anything()
+    )
+    expect(wrapper.text()).toContain('Fill in the space name and learning goal before generating a route.')
+  })
+
+  it('lists configured local models as embedding preset options', async () => {
+    const wrapper = mountPage()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const select = wrapper.find('[data-testid="embedding-preset"]')
+    expect(select.exists()).toBe(true)
+    expect(wrapper.text()).toContain('Current default model: deepseek-chat')
+    expect(wrapper.text()).toContain('deepseek-reasoner')
   })
 
   it('runs RAG before showing embedded chunks', async () => {

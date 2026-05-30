@@ -1,11 +1,15 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import StudySpace, StudySpaceStatus
 from app.domain.learning_routes.generator import DeterministicRouteGenerator, RouteGenerationRequest
 from app.domain.study_spaces.schemas import StudySpaceCreate
+
+
+class StudySpaceNameConflictError(ValueError):
+    """Raised when an active study space already uses the requested name."""
 
 
 def create_route_outline(goal: str, target_days: int) -> list[dict]:
@@ -38,10 +42,25 @@ async def create_study_space(
     tenant_id: uuid.UUID,
     owner_user_id: uuid.UUID,
 ) -> StudySpace:
+    normalized_name = payload.name.strip()
+    if not normalized_name:
+        raise ValueError("Study space name is required")
+
+    existing_result = await session.execute(
+        select(StudySpace.id)
+        .where(StudySpace.tenant_id == tenant_id)
+        .where(StudySpace.owner_user_id == owner_user_id)
+        .where(StudySpace.status != StudySpaceStatus.archived)
+        .where(func.lower(StudySpace.name) == normalized_name.lower())
+        .limit(1)
+    )
+    if existing_result.scalar_one_or_none() is not None:
+        raise StudySpaceNameConflictError("A study space with this name already exists")
+
     study_space = StudySpace(
         tenant_id=tenant_id,
         owner_user_id=owner_user_id,
-        name=payload.name,
+        name=normalized_name,
         goal=payload.goal,
         level=payload.level,
         intensity=payload.intensity,

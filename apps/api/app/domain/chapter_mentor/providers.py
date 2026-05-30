@@ -10,6 +10,8 @@ from app.domain.local_settings.service import load_local_ai_settings
 from app.domain.rag.retrieval import RetrievedChunk
 
 WebSearchResult = dict[str, str]
+AnswerStyle = str
+ThinkingEffort = str
 
 
 SYSTEM_PROMPT = (
@@ -19,6 +21,19 @@ SYSTEM_PROMPT = (
     "Keep the answer concise and actionable."
 )
 
+STYLE_INSTRUCTIONS: dict[AnswerStyle, str] = {
+    "concise": "Use a concise explanation with direct next steps.",
+    "socratic": "Use a Socratic style: ask guiding questions before giving conclusions.",
+    "exam_review": "Use an exam review style: emphasize likely test points, traps, and recall cues.",
+    "code_tutor": "Use a code tutor style: prefer concrete examples, debugging checks, and implementation steps.",
+}
+
+THINKING_INSTRUCTIONS: dict[ThinkingEffort, str] = {
+    "low": "Use low reasoning depth: answer briefly, skip optional background, and give the next action quickly.",
+    "medium": "Use medium reasoning depth: explain the key steps and tradeoffs without over-expanding.",
+    "high": "Use high reasoning depth: work through the problem carefully, structure the answer in steps, and verify assumptions without revealing hidden chain-of-thought.",
+}
+
 
 class AnswerProvider(Protocol):
     async def answer(
@@ -27,6 +42,7 @@ class AnswerProvider(Protocol):
         chunks: list[RetrievedChunk],
         source_filenames: dict,
         web_search_results: list[WebSearchResult] | None = None,
+        thinking_effort: ThinkingEffort = "medium",
     ) -> ChapterMentorResponse:
         """Generate a grounded chapter answer."""
 
@@ -38,6 +54,7 @@ class DeterministicAnswerProvider:
         chunks: list[RetrievedChunk],
         source_filenames: dict,
         web_search_results: list[WebSearchResult] | None = None,
+        thinking_effort: ThinkingEffort = "medium",
     ) -> ChapterMentorResponse:
         return compose_grounded_answer(
             question=question,
@@ -53,12 +70,16 @@ class OpenAICompatibleAnswerProvider:
         api_key: str,
         model: str,
         timeout_seconds: int,
+        answer_style: AnswerStyle = "concise",
+        system_prompt: str = "",
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.answer_style = answer_style
+        self.system_prompt = system_prompt.strip()
         self.client = client
 
     async def answer(
@@ -67,6 +88,7 @@ class OpenAICompatibleAnswerProvider:
         chunks: list[RetrievedChunk],
         source_filenames: dict,
         web_search_results: list[WebSearchResult] | None = None,
+        thinking_effort: ThinkingEffort = "medium",
     ) -> ChapterMentorResponse:
         fallback = compose_grounded_answer(
             question=question,
@@ -80,7 +102,7 @@ class OpenAICompatibleAnswerProvider:
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": self._system_prompt(thinking_effort)},
                 {
                     "role": "user",
                     "content": self._build_user_prompt(
@@ -144,6 +166,12 @@ class OpenAICompatibleAnswerProvider:
             f"Web search context:\n{web_context or 'No web search context returned.'}"
         )
 
+    def _system_prompt(self, thinking_effort: ThinkingEffort = "medium") -> str:
+        style_instruction = STYLE_INSTRUCTIONS.get(self.answer_style, STYLE_INSTRUCTIONS["concise"])
+        thinking_instruction = THINKING_INSTRUCTIONS.get(thinking_effort, THINKING_INSTRUCTIONS["medium"])
+        base_prompt = self.system_prompt or SYSTEM_PROMPT
+        return f"{base_prompt} {style_instruction} {thinking_instruction}"
+
     def _extract_answer(self, payload: dict) -> str:
         choices = payload.get("choices") or []
         if not choices:
@@ -154,7 +182,12 @@ class OpenAICompatibleAnswerProvider:
         return content.strip()
 
 
-def create_answer_provider(settings: Settings) -> AnswerProvider:
+def create_answer_provider(
+    settings: Settings,
+    *,
+    agent_layer: str = "chapter_mentor",
+    model_override: str | None = None,
+) -> AnswerProvider:
     local_settings = (
         load_local_ai_settings(path=settings.local_settings_path)
         if Path(settings.local_settings_path).exists()
@@ -164,11 +197,22 @@ def create_answer_provider(settings: Settings) -> AnswerProvider:
         local_settings.llm_provider if local_settings is not None else settings.llm_provider
     ).strip().lower()
     api_key = (local_settings.llm_api_key if local_settings is not None else "") or settings.llm_api_key
-    if provider_name in {"openai", "openai-compatible"} and api_key:
+    system_prompt = ""
+    if local_settings is not None:
+        system_prompt = (
+            local_settings.session_tutor_system_prompt
+            if agent_layer == "session_tutor"
+            else local_settings.chapter_mentor_system_prompt
+        )
+    openai_compatible_provider = provider_name not in {"", "deterministic", "local"}
+    if openai_compatible_provider and api_key:
+        model = (model_override or "").strip()
         return OpenAICompatibleAnswerProvider(
             base_url=(local_settings.llm_base_url if local_settings is not None else "") or settings.llm_base_url,
             api_key=api_key,
-            model=(local_settings.llm_model if local_settings is not None else "") or settings.llm_model,
+            model=model or (local_settings.llm_model if local_settings is not None else "") or settings.llm_model,
             timeout_seconds=settings.llm_timeout_seconds,
+            answer_style=(local_settings.answer_style if local_settings is not None else "concise"),
+            system_prompt=system_prompt,
         )
     return DeterministicAnswerProvider()

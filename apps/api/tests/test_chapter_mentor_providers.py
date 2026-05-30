@@ -81,9 +81,74 @@ async def test_openai_compatible_provider_posts_grounded_prompt() -> None:
     assert captured["url"] == "https://llm.example/v1/chat/completions"
     assert captured["authorization"] == "Bearer test-key"
     assert captured["payload"]["model"] == "mentor-model"
+    assert "concise explanation" in captured["payload"]["messages"][0]["content"]
     assert "Retrieval evidence text." in captured["payload"]["messages"][1]["content"]
     assert response.answer == "Use retrieval evidence first, then explain the idea."
     assert response.citations[0].source_filename == "notes.md"
+
+
+@pytest.mark.anyio
+async def test_openai_compatible_provider_uses_custom_system_prompt() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "Custom mentor answer."}}]},
+        )
+
+    chunks = [retrieved_chunk("Evidence for the custom prompt.")]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerProvider(
+            base_url="https://llm.example/v1",
+            api_key="test-key",
+            model="mentor-model",
+            timeout_seconds=10,
+            answer_style="exam_review",
+            system_prompt="Use the user's custom chapter mentor policy.",
+            client=client,
+        )
+        await provider.answer(
+            question="What should I do?",
+            chunks=chunks,
+            source_filenames={chunks[0].source_id: "notes.md"},
+        )
+
+    system_prompt = captured["payload"]["messages"][0]["content"]
+    assert "Use the user's custom chapter mentor policy." in system_prompt
+    assert "exam review style" in system_prompt
+
+
+@pytest.mark.anyio
+async def test_openai_compatible_provider_adds_thinking_effort_instruction() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "Detailed answer."}}]},
+        )
+
+    chunks = [retrieved_chunk("Evidence for high effort.")]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerProvider(
+            base_url="https://llm.example/v1",
+            api_key="test-key",
+            model="mentor-model",
+            timeout_seconds=10,
+            client=client,
+        )
+        await provider.answer(
+            question="Explain carefully.",
+            chunks=chunks,
+            source_filenames={chunks[0].source_id: "notes.md"},
+            thinking_effort="high",
+        )
+
+    system_prompt = captured["payload"]["messages"][0]["content"]
+    assert "high reasoning depth" in system_prompt
 
 
 @pytest.mark.anyio
@@ -103,6 +168,7 @@ async def test_openai_compatible_provider_includes_web_search_context() -> None:
             api_key="test-key",
             model="mentor-model",
             timeout_seconds=10,
+            answer_style="socratic",
             client=client,
         )
         response = await provider.answer(
@@ -118,6 +184,7 @@ async def test_openai_compatible_provider_includes_web_search_context() -> None:
             ],
         )
 
+    assert "Socratic style" in captured["payload"]["messages"][0]["content"]
     user_prompt = captured["payload"]["messages"][1]["content"]
     assert "No uploaded chapter evidence retrieved." in user_prompt
     assert "Web search context:" in user_prompt
