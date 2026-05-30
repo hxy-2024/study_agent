@@ -70,6 +70,24 @@ The API verifies membership before returning tenant-scoped data.
 
 ## Local Development
 
+### Runtime profiles
+
+The launcher supports two local runtime families. The lightweight local profile
+is for personal fast startup without Docker; Docker profiles keep the deployment
+database and object-storage shape.
+
+| Mode | Command | DB | Source storage | Use |
+| --- | --- | --- | --- | --- |
+| local/dev | `python main.py local` | SQLite | `.local/storage` | Personal fast startup |
+| docker-dev | `python main.py docker-dev` | Postgres | MinIO | Host debugging with real infrastructure |
+| docker | `python main.py docker` | Postgres | MinIO | Migration and deployment checks |
+
+`python main.py dev` is an alias for `python main.py local`. Local SQLite data
+is stored under `.local/` and is intended only for the personal/local runtime.
+The Docker and deployed modes still use Postgres, pgvector, Redis, and MinIO.
+Do not treat the SQLite database as the production database or as a migration
+target for deployed data.
+
 Prerequisites:
 
 - Docker Desktop running.
@@ -106,15 +124,28 @@ cd F:\AIproject\study_agent
 python main.py
 ```
 
-Both commands start local infrastructure, prepare the API database, and run the
-API and web dev servers. Use `Ctrl+C` to stop API/Web processes. The Docker
-services remain running so local data is preserved.
+For the Docker-backed workflow, these commands start local infrastructure,
+prepare the API database, and run the API and web dev servers. Use `Ctrl+C` to
+stop API/Web processes. The Docker services remain running so local data is
+preserved.
+
+Docker deployment-style startup:
+
+```powershell
+cd F:\AIproject\study_agent
+docker compose -f infra/docker-compose.yml up --build
+```
+
+The Compose stack starts Postgres, Redis, MinIO, the API, and the web service.
+The web service is exposed on `http://localhost:3000`, and the API is exposed on
+`http://localhost:8000`.
 
 Run local checks:
 
 ```powershell
 .\scripts\dev-check.ps1
 python main.py check
+python main.py docker-check
 ```
 
 Data safety commands:

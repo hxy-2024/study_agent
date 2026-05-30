@@ -31,9 +31,26 @@ def resolve_command(command: Sequence[str]) -> list[str]:
     return [executable, *command[1:]]
 
 
-def run(command: Sequence[str], cwd: Path = ROOT, check: bool = True) -> subprocess.CompletedProcess:
+def command_env(command: Sequence[str], env: dict[str, str] | None = None) -> dict[str, str] | None:
+    if command[0] != "uv":
+        return env
+    merged = os.environ.copy()
+    if env is not None:
+        merged.update(env)
+    uv_cache_dir = ROOT / ".local" / "uv-cache"
+    uv_cache_dir.mkdir(parents=True, exist_ok=True)
+    merged.setdefault("UV_CACHE_DIR", str(uv_cache_dir))
+    return merged
+
+
+def run(
+    command: Sequence[str],
+    cwd: Path = ROOT,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     print(f"> {' '.join(command)}")
-    return subprocess.run(resolve_command(command), cwd=cwd, check=check)
+    return subprocess.run(resolve_command(command), cwd=cwd, check=check, env=command_env(command, env))
 
 
 def run_stdout_to_file(command: Sequence[str], output_path: Path) -> None:
@@ -69,6 +86,32 @@ def prepare_api(skip_install: bool) -> None:
     run(["uv", "run", "alembic", "upgrade", "head"], cwd=API_DIR)
 
 
+def local_runtime_env(args: argparse.Namespace) -> dict[str, str]:
+    local_root = ROOT / ".local"
+    database_path = local_root / "study_agent.db"
+    storage_root = local_root / "storage"
+    env = os.environ.copy()
+    env.update(
+        {
+            "RUNTIME_PROFILE": "local",
+            "API_PUBLIC_URL": f"http://{args.host}:{args.api_port}",
+            "DATABASE_URL": f"sqlite+aiosqlite:///{database_path.as_posix()}",
+            "STORAGE_BACKEND": "filesystem",
+            "LOCAL_STORAGE_ROOT": str(storage_root),
+            "LOCAL_SETTINGS_PATH": str(local_root / "settings.json"),
+        }
+    )
+    return env
+
+
+def prepare_api_local(skip_install: bool, env: dict[str, str]) -> None:
+    require_command("uv")
+    (ROOT / ".local" / "storage" / "sources").mkdir(parents=True, exist_ok=True)
+    if not skip_install:
+        run(["uv", "sync"], cwd=API_DIR, env=env)
+    run(["uv", "run", "python", "-m", "scripts.prepare_local"], cwd=API_DIR, env=env)
+
+
 def prepare_web(skip_install: bool) -> None:
     require_command("npm")
     if skip_install:
@@ -79,7 +122,27 @@ def prepare_web(skip_install: bool) -> None:
 
 def spawn(command: Sequence[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.Popen:
     print(f"> {' '.join(command)}")
-    return subprocess.Popen(resolve_command(command), cwd=cwd, env=env)
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    return subprocess.Popen(
+        resolve_command(command),
+        cwd=cwd,
+        env=command_env(command, env),
+        creationflags=creationflags,
+    )
+
+
+def stop_process_tree(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return
+    process.send_signal(signal.SIGTERM)
 
 
 def wait_for_processes(processes: list[subprocess.Popen]) -> int:
@@ -92,17 +155,48 @@ def wait_for_processes(processes: list[subprocess.Popen]) -> int:
     except KeyboardInterrupt:
         print("\nStopping local dev processes...")
         for process in processes:
-            if process.poll() is None:
-                process.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
+            stop_process_tree(process)
         for process in processes:
             try:
-                process.wait(timeout=10)
+                process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
         return 0
 
 
-def dev(args: argparse.Namespace) -> int:
+def local(args: argparse.Namespace) -> int:
+    env = local_runtime_env(args)
+    if not args.web_only:
+        prepare_api_local(skip_install=args.skip_install, env=env)
+    if not args.api_only:
+        prepare_web(skip_install=args.skip_install)
+
+    processes: list[subprocess.Popen] = []
+    if not args.web_only:
+        processes.append(
+            spawn(
+                ["uv", "run", "uvicorn", "app.main:app", "--reload", "--host", args.host, "--port", str(args.api_port)],
+                cwd=API_DIR,
+                env=env,
+            )
+        )
+    if not args.api_only:
+        processes.append(
+            spawn(
+                ["npm", "run", "dev", "--", "--host", args.host, "--port", str(args.web_port)],
+                cwd=WEB_DIR,
+            )
+        )
+
+    print("")
+    print("Profile: local (SQLite + filesystem storage)")
+    print(f"API: http://{args.host}:{args.api_port}")
+    print(f"Web: http://{args.host}:{args.web_port}")
+    print("Press Ctrl+C to stop.")
+    return wait_for_processes(processes)
+
+
+def docker_dev(args: argparse.Namespace) -> int:
     if not args.skip_infra:
         start_infra()
     if not args.web_only:
@@ -135,7 +229,7 @@ def dev(args: argparse.Namespace) -> int:
 
 def check(_: argparse.Namespace) -> int:
     errors: list[str] = []
-    for command in REQUIRED_COMMANDS:
+    for command in ("uv", "npm"):
         if shutil.which(command) is None:
             errors.append(f"Missing required command: {command}")
 
@@ -149,8 +243,33 @@ def check(_: argparse.Namespace) -> int:
             print(f"- {error}")
         return 1
 
+    print("Local profile check passed.")
+    print(f"SQLite: {(ROOT / '.local' / 'study_agent.db')}")
+    print(f"Storage: {(ROOT / '.local' / 'storage')}")
+    return 0
+
+
+def docker_check(_: argparse.Namespace) -> int:
+    errors: list[str] = []
+    for command in REQUIRED_COMMANDS:
+        if shutil.which(command) is None:
+            errors.append(f"Missing required command: {command}")
+    if errors:
+        print("Docker environment check failed:")
+        for error in errors:
+            print(f"- {error}")
+        return 1
     run(["docker", "compose", "-f", str(COMPOSE_FILE), "config"])
     print("Docker compose config is valid.")
+    return 0
+
+
+def docker(args: argparse.Namespace) -> int:
+    require_command("docker")
+    command = ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d"]
+    if args.build:
+        command.append("--build")
+    run(command)
     return 0
 
 
@@ -304,18 +423,43 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Local study_agent developer launcher.")
     subcommands = parser.add_subparsers(dest="command")
 
-    dev_parser = subcommands.add_parser("dev", help="Start local infra, API, and web app.")
+    local_parser = subcommands.add_parser("local", help="Start API and web with SQLite and filesystem storage.")
+    local_parser.add_argument("--host", default="127.0.0.1")
+    local_parser.add_argument("--api-port", type=int, default=8000)
+    local_parser.add_argument("--web-port", type=int, default=3000)
+    local_parser.add_argument("--skip-install", action="store_true")
+    local_parser.add_argument("--api-only", action="store_true")
+    local_parser.add_argument("--web-only", action="store_true")
+    local_parser.set_defaults(func=local)
+
+    dev_parser = subcommands.add_parser("dev", help="Alias for local mode.")
     dev_parser.add_argument("--host", default="127.0.0.1")
     dev_parser.add_argument("--api-port", type=int, default=8000)
     dev_parser.add_argument("--web-port", type=int, default=3000)
     dev_parser.add_argument("--skip-install", action="store_true")
-    dev_parser.add_argument("--skip-infra", action="store_true")
     dev_parser.add_argument("--api-only", action="store_true")
     dev_parser.add_argument("--web-only", action="store_true")
-    dev_parser.set_defaults(func=dev)
+    dev_parser.set_defaults(func=local)
+
+    docker_dev_parser = subcommands.add_parser("docker-dev", help="Start Docker infra, then host API and web app.")
+    docker_dev_parser.add_argument("--host", default="127.0.0.1")
+    docker_dev_parser.add_argument("--api-port", type=int, default=8000)
+    docker_dev_parser.add_argument("--web-port", type=int, default=3000)
+    docker_dev_parser.add_argument("--skip-install", action="store_true")
+    docker_dev_parser.add_argument("--skip-infra", action="store_true")
+    docker_dev_parser.add_argument("--api-only", action="store_true")
+    docker_dev_parser.add_argument("--web-only", action="store_true")
+    docker_dev_parser.set_defaults(func=docker_dev)
+
+    docker_parser = subcommands.add_parser("docker", help="Start Docker Compose deployment stack.")
+    docker_parser.add_argument("--build", action="store_true", help="Build API/Web images before starting.")
+    docker_parser.set_defaults(func=docker)
 
     check_parser = subcommands.add_parser("check", help="Run local environment checks.")
     check_parser.set_defaults(func=check)
+
+    docker_check_parser = subcommands.add_parser("docker-check", help="Run Docker profile checks.")
+    docker_check_parser.set_defaults(func=docker_check)
 
     reset_parser = subcommands.add_parser("reset-db", help="Show or run local database reset steps.")
     reset_parser.add_argument("--yes", action="store_true", help="Run docker compose down/up.")
