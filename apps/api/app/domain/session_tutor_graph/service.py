@@ -1,5 +1,6 @@
 import logging
 import uuid
+from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Awaitable, Callable
 
@@ -306,3 +307,199 @@ async def run_session_tutor_graph(
         )
         raise
     return _build_message_response(final_state["assistant_response"])
+
+
+async def run_session_tutor_graph_stream(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    session_id: uuid.UUID,
+    content: str,
+    embedding_provider: EmbeddingProvider,
+    answer_provider: AnswerProvider,
+    web_search_enabled: bool | None = None,
+    thinking_effort: str = "medium",
+) -> AsyncIterator[dict]:
+    settings = get_settings()
+    local_settings = load_local_ai_settings(path=settings.local_settings_path)
+    effective_web_search_enabled = (
+        local_settings.web_search_default_enabled
+        if web_search_enabled is None
+        else web_search_enabled
+    )
+    runtime_config = graph_runtime_config_from_settings(settings)
+    thread_id = session_tutor_thread_id(session_id)
+    checkpointer = create_checkpointer(runtime_config)
+    initial_state = SessionTutorGraphState(
+        tenant_id=str(tenant_id),
+        user_id=str(user_id),
+        session_id=str(session_id),
+        content=content,
+        thinking_effort=thinking_effort,
+        node_trace=[],
+        learning_signals=[],
+    )
+    latest_state = initial_state.copy()
+
+    def remember(state: SessionTutorGraphState) -> None:
+        latest_state.clear()
+        latest_state.update(state)
+
+    def observed_async(
+        node: Callable[[SessionTutorGraphState], Awaitable[SessionTutorGraphState]],
+    ) -> Callable[[SessionTutorGraphState], Awaitable[SessionTutorGraphState]]:
+        async def wrapper(state: SessionTutorGraphState) -> SessionTutorGraphState:
+            try:
+                result = await node(state)
+            except Exception:
+                remember(state)
+                raise
+            remember(result)
+            return result
+
+        return wrapper
+
+    def observed_sync(
+        node: Callable[[SessionTutorGraphState], SessionTutorGraphState],
+    ) -> Callable[[SessionTutorGraphState], SessionTutorGraphState]:
+        def wrapper(state: SessionTutorGraphState) -> SessionTutorGraphState:
+            try:
+                result = node(state)
+            except Exception:
+                remember(state)
+                raise
+            remember(result)
+            return result
+
+        return wrapper
+
+    graph_builder = StateGraph(SessionTutorGraphState)
+    graph_builder.add_node(
+        "load_session_context",
+        observed_async(lambda state: nodes.load_session_context(state, db_session=session)),
+    )
+    graph_builder.add_node(
+        "persist_user_message",
+        observed_async(lambda state: nodes.persist_user_message(state, db_session=session)),
+    )
+    graph_builder.add_node(
+        "load_chapter_supervision",
+        observed_async(lambda state: nodes.load_chapter_supervision(state, db_session=session)),
+    )
+    graph_builder.add_node(
+        "retrieve_evidence",
+        observed_async(
+            lambda state: nodes.retrieve_evidence(
+                state,
+                db_session=session,
+                embedding_provider=embedding_provider,
+            ),
+        ),
+    )
+    graph_builder.add_node(
+        "web_search",
+        observed_async(
+            lambda state: nodes.web_search(
+                state,
+                enabled=effective_web_search_enabled,
+                max_results=settings.session_tutor_web_search_max_results,
+                timeout_seconds=settings.session_tutor_web_search_timeout_seconds,
+            ),
+        ),
+    )
+    graph_builder.add_node(
+        "generate_answer",
+        observed_async(lambda state: nodes.generate_answer(state, answer_provider=answer_provider)),
+    )
+    graph_builder.add_node(
+        "persist_assistant_message",
+        observed_async(lambda state: nodes.persist_assistant_message(state, db_session=session)),
+    )
+    graph_builder.add_node("extract_learning_signals", observed_sync(nodes.extract_learning_signals))
+
+    async def record_graph_agent_run(state: SessionTutorGraphState) -> SessionTutorGraphState:
+        state.setdefault("node_trace", []).append("record_agent_run")
+        assistant_message_id = state.get("assistant_message_id")
+        metadata = build_graph_metadata(
+            graph_name=SESSION_TUTOR_GRAPH_NAME,
+            thread_id=thread_id,
+            checkpoint_backend=runtime_config.checkpoint_backend,
+            node_trace=state["node_trace"],
+        )
+        await record_agent_run(
+            session=session,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            message_id=uuid.UUID(assistant_message_id) if assistant_message_id else None,
+            input_payload={
+                "content": state["content"],
+                "user_message_id": str(state.get("user_message_id")),
+                "chapter_supervision_used": state.get("chapter_supervision") is not None,
+                "graph_enabled": runtime_config.session_tutor_graph_enabled,
+                "checkpoint_backend": runtime_config.checkpoint_backend,
+                "web_search_enabled": effective_web_search_enabled,
+                "thinking_effort": state.get("thinking_effort", "medium"),
+                "stream": True,
+            },
+            output_payload={
+                **metadata,
+                "assistant_message_id": str(state.get("assistant_message_id")),
+                "citation_count": len(state.get("citations", [])),
+                "web_search_result_count": len(state.get("web_search_results", [])),
+                "web_search_error": state.get("web_search_error"),
+                "learning_signals": state["learning_signals"],
+                "chapter_supervision_used": state.get("chapter_supervision") is not None,
+                "graph_enabled": runtime_config.session_tutor_graph_enabled,
+                "thinking_effort": state.get("thinking_effort", "medium"),
+                "stream": True,
+            },
+            model="langgraph:stream",
+            status=AgentRunStatus.completed,
+        )
+        return state
+
+    graph_builder.add_node("record_agent_run", observed_async(record_graph_agent_run))
+    graph_builder.set_entry_point("load_session_context")
+    graph_builder.add_edge("load_session_context", "persist_user_message")
+    graph_builder.add_edge("persist_user_message", "load_chapter_supervision")
+    graph_builder.add_edge("load_chapter_supervision", "retrieve_evidence")
+    graph_builder.add_edge("retrieve_evidence", "web_search")
+    graph_builder.add_edge("web_search", "generate_answer")
+    graph_builder.add_edge("generate_answer", "persist_assistant_message")
+    graph_builder.add_edge("persist_assistant_message", "extract_learning_signals")
+    graph_builder.add_edge("extract_learning_signals", "record_agent_run")
+    graph_builder.add_edge("record_agent_run", END)
+    graph = graph_builder.compile(checkpointer=checkpointer)
+
+    final_state: SessionTutorGraphState | None = None
+    try:
+        async for mode, chunk in graph.astream(
+            initial_state,
+            config={"configurable": {"thread_id": thread_id}},
+            stream_mode=["updates", "custom"],
+        ):
+            if mode == "custom" and isinstance(chunk, dict):
+                yield chunk
+            elif mode == "updates" and isinstance(chunk, dict):
+                for update in chunk.values():
+                    if isinstance(update, dict):
+                        final_state = update
+                        remember(update)
+    except Exception as exc:
+        await _try_record_failed_agent_run(
+            session=session,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            content=content,
+            state=latest_state,
+            thread_id=thread_id,
+            checkpoint_backend=runtime_config.checkpoint_backend,
+            exc=exc,
+        )
+        raise
+
+    if final_state is not None and "assistant_response" in final_state:
+        yield {
+            "type": "final",
+            "message": _build_message_response(final_state["assistant_response"]).model_dump(mode="json"),
+        }

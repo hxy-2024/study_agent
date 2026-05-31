@@ -9,9 +9,6 @@ from app.db.models import SourceChunk
 from app.domain.rag.embeddings import EmbeddingProvider
 
 
-EXPECTED_EMBEDDING_DIMENSION = 16
-
-
 @dataclass(frozen=True)
 class RetrievedChunk:
     id: uuid.UUID
@@ -22,6 +19,9 @@ class RetrievedChunk:
     text: str
     citation: dict[str, Any]
     embedding: list[float]
+    embedding_provider: str
+    embedding_model: str
+    embedding_dimension: int
     score: float
 
 
@@ -69,15 +69,15 @@ async def retrieve_chunks(
     embedding_provider: EmbeddingProvider,
 ) -> list[RetrievedChunk]:
     _validate_limit(limit)
-    if embedding_provider.dimension != EXPECTED_EMBEDDING_DIMENSION:
-        raise ValueError("Embedding dimension must be 16")
-
     query_embedding = embedding_provider.embed_text(query)
     result = await session.execute(
         select(SourceChunk).where(
             SourceChunk.tenant_id == tenant_id,
             SourceChunk.study_space_id == study_space_id,
             SourceChunk.is_active.is_(True),
+            SourceChunk.embedding_provider == embedding_provider.provider_key,
+            SourceChunk.embedding_model == embedding_provider.model_name,
+            SourceChunk.embedding_dimension == len(query_embedding),
         ).order_by(SourceChunk.source_id, SourceChunk.chunk_index, SourceChunk.id)
     )
     chunks = [
@@ -90,6 +90,9 @@ async def retrieve_chunks(
             text=row.text,
             citation=row.citation,
             embedding=list(row.embedding),
+            embedding_provider=row.embedding_provider,
+            embedding_model=row.embedding_model,
+            embedding_dimension=row.embedding_dimension,
             score=0.0,
         )
         for row in result.scalars().all()

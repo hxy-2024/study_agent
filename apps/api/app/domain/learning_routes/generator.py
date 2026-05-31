@@ -1,7 +1,14 @@
+import json
 import re
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
+
+import httpx
+
+from app.core.config import Settings
+from app.domain.local_settings.service import load_local_ai_settings
 
 
 @dataclass(frozen=True)
@@ -131,6 +138,176 @@ class DeterministicRouteGenerator:
         ]
 
 
+class LLMRouteGenerator:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        timeout_seconds: int,
+        system_prompt: str = "",
+        fallback: RouteGenerator | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.model = model
+        self.timeout_seconds = timeout_seconds
+        self.system_prompt = system_prompt.strip()
+        self.fallback = fallback or DeterministicRouteGenerator()
+        self.client = client
+
+    async def generate(self, request: RouteGenerationRequest) -> RouteGenerationResult:
+        if not request.chunks:
+            return await self.fallback.generate(request)
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": self._system_prompt()},
+                {"role": "user", "content": self._user_prompt(request)},
+            ],
+            "temperature": 0.2,
+            "response_format": {"type": "json_object"},
+        }
+        try:
+            if self.client is not None:
+                response = await self.client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json=payload,
+                    timeout=self.timeout_seconds,
+                )
+            else:
+                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                    response = await client.post(
+                        f"{self.base_url}/chat/completions",
+                        headers={"Authorization": f"Bearer {self.api_key}"},
+                        json=payload,
+                    )
+            response.raise_for_status()
+            return self._parse_response(response.json(), request)
+        except (httpx.HTTPError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            return await self.fallback.generate(request)
+
+    def _system_prompt(self) -> str:
+        return self.system_prompt or (
+            "You generate concise, feasible study routes from uploaded source evidence. "
+            "Use the provided chunks as the primary source of truth. "
+            "Return only valid JSON matching the requested schema."
+        )
+
+    def _user_prompt(self, request: RouteGenerationRequest) -> str:
+        evidence = "\n\n".join(
+            (
+                f"[{index}] chunk_id={chunk.chunk_id} source_id={chunk.source_id} "
+                f"chunk_index={chunk.chunk_index}\n{chunk.text}"
+            )
+            for index, chunk in enumerate(request.chunks, start=1)
+        )
+        return (
+            "Create a practical study route.\n\n"
+            f"Study space: {request.study_space_name}\n"
+            f"Learning goal: {request.goal}\n"
+            f"Level: {request.level}\n"
+            f"Intensity: {request.intensity}\n"
+            f"Target days: {request.target_days}\n"
+            f"Maximum chapters: {request.max_chapters}\n\n"
+            "Source evidence:\n"
+            f"{evidence}\n\n"
+            "Return JSON only with this schema:\n"
+            "{\n"
+            '  "title": "short route title",\n'
+            '  "summary": "one sentence route summary",\n'
+            '  "chapters": [\n'
+            "    {\n"
+            '      "title": "short chapter title",\n'
+            '      "goal": "specific learning objective",\n'
+            '      "summary": "concise, actionable chapter description",\n'
+            '      "estimated_days": 1,\n'
+            '      "source_chunk_indexes": [1]\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "Use 3 to max_chapters chapters when possible. The sum of estimated_days should "
+            "roughly match Target days. source_chunk_indexes must refer to evidence numbers above."
+        )
+
+    def _parse_response(
+        self,
+        payload: dict,
+        request: RouteGenerationRequest,
+    ) -> RouteGenerationResult:
+        choices = payload.get("choices") or []
+        content = choices[0].get("message", {}).get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("LLM route response did not include content")
+        parsed = json.loads(_strip_json_fence(content))
+        raw_chapters = parsed.get("chapters")
+        if not isinstance(raw_chapters, list) or not raw_chapters:
+            raise ValueError("LLM route response did not include chapters")
+
+        max_chapters = max(1, request.max_chapters)
+        chapters: list[ChapterDraft] = []
+        for raw in raw_chapters[:max_chapters]:
+            if not isinstance(raw, dict):
+                continue
+            title = _clean_text(raw.get("title"), "Source-guided chapter", 120)
+            goal = _clean_text(raw.get("goal"), f"Study evidence for: {request.goal}.", 260)
+            summary = _clean_text(raw.get("summary"), "Study and practice the cited material.", 500)
+            estimated_days = _positive_int(raw.get("estimated_days"), 1)
+            chapters.append(
+                ChapterDraft(
+                    title=title,
+                    goal=goal,
+                    summary=summary,
+                    estimated_days=estimated_days,
+                    source_chunk_refs=_chunk_refs_from_indexes(
+                        raw.get("source_chunk_indexes"),
+                        request.chunks,
+                    ),
+                )
+            )
+        if not chapters:
+            raise ValueError("LLM route response chapters were invalid")
+        return RouteGenerationResult(
+            title=_clean_text(
+                parsed.get("title"),
+                f"{request.study_space_name} learning route",
+                160,
+            ),
+            summary=_clean_text(
+                parsed.get("summary"),
+                f"A {len(chapters)} chapter route for {request.goal}.",
+                500,
+            ),
+            generation_strategy="llm_rag",
+            chapters=chapters,
+        )
+
+
+def create_route_generator(settings: Settings) -> RouteGenerator:
+    local_settings = (
+        load_local_ai_settings(path=settings.local_settings_path)
+        if Path(settings.local_settings_path).exists()
+        else None
+    )
+    provider_name = (
+        local_settings.llm_provider if local_settings is not None else settings.llm_provider
+    ).strip().lower()
+    api_key = (local_settings.llm_api_key if local_settings is not None else "") or settings.llm_api_key
+    openai_compatible_provider = provider_name not in {"", "deterministic", "local"}
+    if not openai_compatible_provider or not api_key:
+        return DeterministicRouteGenerator()
+    return LLMRouteGenerator(
+        base_url=(local_settings.llm_base_url if local_settings is not None else "") or settings.llm_base_url,
+        api_key=api_key,
+        model=(local_settings.llm_model if local_settings is not None else "") or settings.llm_model,
+        timeout_seconds=settings.llm_timeout_seconds,
+        system_prompt=(local_settings.main_agent_system_prompt if local_settings is not None else ""),
+    )
+
+
 def split_days(target_days: int, chapter_count: int) -> list[int]:
     count = max(1, chapter_count)
     total = max(count, target_days)
@@ -182,3 +359,51 @@ def excerpt(text: str, limit: int) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 1].rstrip() + "."
+
+
+def _strip_json_fence(content: str) -> str:
+    stripped = content.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.IGNORECASE)
+        stripped = re.sub(r"\s*```$", "", stripped)
+    return stripped.strip()
+
+
+def _clean_text(value: object, fallback: str, limit: int) -> str:
+    text = str(value).strip() if isinstance(value, str) else ""
+    if not text:
+        text = fallback
+    return excerpt(text, limit)
+
+
+def _positive_int(value: object, fallback: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(1, number)
+
+
+def _chunk_refs_from_indexes(
+    indexes: object,
+    chunks: list[SourceChunkExcerpt],
+) -> list[dict]:
+    if not isinstance(indexes, list):
+        return []
+    refs: list[dict] = []
+    for item in indexes:
+        try:
+            index = int(item)
+        except (TypeError, ValueError):
+            continue
+        if index < 1 or index > len(chunks):
+            continue
+        chunk = chunks[index - 1]
+        refs.append(
+            {
+                "source_id": str(chunk.source_id),
+                "chunk_id": str(chunk.chunk_id),
+                "chunk_index": chunk.chunk_index,
+            }
+        )
+    return refs

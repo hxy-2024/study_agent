@@ -52,6 +52,7 @@ type RouteDraftResponse = {
 type LocalSettingsResponse = {
   llm_model?: string
   available_models?: string[]
+  embedding_model?: string
 }
 
 const form = reactive({
@@ -90,6 +91,7 @@ const submitting = ref(false)
 const errorMessage = ref('')
 const selectedChapter = ref(0)
 const configuredModel = ref('')
+const configuredEmbeddingModel = ref('')
 const configuredModels = ref<string[]>([])
 const createLayoutRef = ref<HTMLFormElement | null>(null)
 const formColumnPercent = ref(50)
@@ -144,6 +146,22 @@ const createLayoutStyle = computed(() => ({
   '--form-column-percent': `${formColumnPercent.value}%`
 }))
 
+function backendErrorMessage(error: unknown, fallback: string) {
+  if (typeof error === 'object' && error !== null && 'data' in error) {
+    const data = (error as { data?: { detail?: unknown } }).data
+    if (typeof data?.detail === 'string' && data.detail.trim()) {
+      return data.detail
+    }
+  }
+  if (error instanceof Error && error.message) return error.message
+  return fallback
+}
+
+function isEmbeddingModel(model: string) {
+  const normalized = model.trim().toLowerCase()
+  return ['embedding', 'embed', 'bge', 'gte', 'jina', 'e5-'].some(marker => normalized.includes(marker))
+}
+
 const embeddingPresetOptions = computed(() => {
   const options = [
     {
@@ -151,7 +169,9 @@ const embeddingPresetOptions = computed(() => {
       label: t('create.localChunkEmbeddings')
     }
   ]
-  const uniqueModels = Array.from(new Set([configuredModel.value, ...configuredModels.value].filter(Boolean)))
+  const uniqueModels = Array.from(
+    new Set([configuredEmbeddingModel.value, configuredModel.value, ...configuredModels.value].filter(Boolean))
+  ).filter(isEmbeddingModel)
   for (const model of uniqueModels) {
     options.push({
       value: `configured:${model}`,
@@ -168,9 +188,14 @@ async function loadLocalModelSettings() {
       headers: DEV_AUTH_HEADERS
     })
     configuredModel.value = response.llm_model || ''
+    configuredEmbeddingModel.value = response.embedding_model || ''
     configuredModels.value = response.available_models || []
+    if (response.embedding_model && isEmbeddingModel(response.embedding_model)) {
+      modelSettings.embeddingPreset = `configured:${response.embedding_model}`
+    }
   } catch {
     configuredModel.value = ''
+    configuredEmbeddingModel.value = ''
     configuredModels.value = []
   }
 }
@@ -244,7 +269,7 @@ async function generateRouteDraft() {
     const studySpaceId = await ensureSpace()
     await createRouteDraft(studySpaceId)
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : t('create.routeFailed')
+    errorMessage.value = backendErrorMessage(error, t('create.routeFailed'))
   } finally {
     generatingRoute.value = false
   }
@@ -273,7 +298,10 @@ async function runRag() {
     sourceId.value = uploaded.source.id
     await $fetch<IngestResult>(`${config.public.apiBaseUrl}/ingestion/sources/${sourceId.value}/run`, {
       method: 'POST',
-      headers: DEV_AUTH_HEADERS
+      headers: DEV_AUTH_HEADERS,
+      body: {
+        embedding_preset: modelSettings.embeddingPreset
+      }
     })
     const chunks = await $fetch<SourceChunkList>(`${config.public.apiBaseUrl}/sources/${sourceId.value}/chunks`, {
       headers: DEV_AUTH_HEADERS
@@ -281,7 +309,7 @@ async function runRag() {
     materialChunks.value = chunks.chunks
     await createRouteDraft(studySpaceId)
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : t('create.ragFailed')
+    errorMessage.value = backendErrorMessage(error, t('create.ragFailed'))
   } finally {
     runningRag.value = false
   }
@@ -325,7 +353,7 @@ async function confirmChapterDetails() {
     }
     await router.push(`/chapters/${firstChapterId}`)
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : t('create.enterFailed')
+    errorMessage.value = backendErrorMessage(error, t('create.enterFailed'))
   } finally {
     submitting.value = false
   }

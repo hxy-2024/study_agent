@@ -30,6 +30,10 @@ async def test_local_ai_settings_route_roundtrip_masks_api_key(tmp_path) -> None
                     "llm_base_url": "https://llm.example.test/v1",
                     "llm_model": "study-model",
                     "llm_api_key": "secret-key",
+                    "embedding_base_url": "https://dashscope.example.test/compatible-mode/v1",
+                    "embedding_model": "text-embedding-v4",
+                    "embedding_api_key": "embedding-secret",
+                    "embedding_dimensions": 1024,
                     "web_search_default_enabled": True,
                     "answer_style": "exam_review",
                 },
@@ -40,8 +44,11 @@ async def test_local_ai_settings_route_roundtrip_masks_api_key(tmp_path) -> None
 
     assert update.status_code == 200
     assert update.json()["llm_api_key_masked"] == "********"
+    assert update.json()["embedding_api_key_masked"] == "********"
     assert read.status_code == 200
     assert read.json()["llm_model"] == "study-model"
+    assert read.json()["embedding_model"] == "text-embedding-v4"
+    assert read.json()["embedding_dimensions"] == 1024
     assert read.json()["llm_api_key_masked"] == "********"
     assert read.json()["answer_style"] == "exam_review"
 

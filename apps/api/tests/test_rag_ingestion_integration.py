@@ -86,6 +86,9 @@ async def test_ingest_source_replaces_chunks_and_marks_source_ready() -> None:
     }
     assert type(chunks[0].citation) is dict
     assert len(chunks[0].embedding) == 16
+    assert chunks[0].embedding_provider == "local-deterministic"
+    assert chunks[0].embedding_model == "local-deterministic"
+    assert chunks[0].embedding_dimension == 16
 
 
 @pytest.mark.anyio

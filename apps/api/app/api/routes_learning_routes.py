@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUserContext, get_authorized_user_context
+from app.core.config import get_settings
 from app.db.session import get_db_session
-from app.domain.learning_routes.generator import DeterministicRouteGenerator
+from app.domain.learning_routes.generator import create_route_generator
 from app.domain.learning_routes.schemas import (
     ChapterResponse,
     ChaptersListResponse,
@@ -20,6 +21,8 @@ from app.domain.learning_routes.service import (
     list_active_chapters,
     list_routes_for_space,
 )
+from app.domain.local_settings.service import load_local_ai_settings
+from app.domain.rag.embeddings import create_embedding_provider_from_preset
 
 router = APIRouter(tags=["learning-routes"])
 
@@ -64,13 +67,22 @@ async def create_study_space_route_draft(
     session: AsyncSession = Depends(get_db_session),
 ) -> RouteWithChaptersResponse:
     request = payload or RouteDraftRequest()
+    settings = get_settings()
     try:
+        embedding_provider = create_embedding_provider_from_preset(
+            None,
+            dimension=settings.rag_embedding_dimension,
+            local_ai_settings=load_local_ai_settings(path=settings.local_settings_path),
+            runtime_settings=settings,
+            timeout_seconds=settings.llm_timeout_seconds,
+        )
         route, chapters = await create_route_draft(
             session=session,
             tenant_id=context.tenant_id,
             study_space_id=study_space_id,
-            generator=DeterministicRouteGenerator(),
+            generator=create_route_generator(settings),
             max_chapters=request.max_chapters,
+            embedding_provider=embedding_provider,
         )
     except ValueError as exc:
         status_code = 404 if "not found" in str(exc).lower() else 400

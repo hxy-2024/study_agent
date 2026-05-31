@@ -5,7 +5,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class IngestSourceRequest(BaseModel):
-    source_id: uuid.UUID
+    model_config = ConfigDict(extra="forbid")
+
+    embedding_preset: str | None = Field(default=None, max_length=200)
 
 
 class IngestSourceResponse(BaseModel):

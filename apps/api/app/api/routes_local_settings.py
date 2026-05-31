@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends
 from app.core.auth import CurrentUserContext, get_authorized_user_context
 from app.core.config import Settings, get_settings
 from app.domain.local_settings.schemas import (
+    LocalEmbeddingModelsResponse,
     LocalAIModelsResponse,
     LocalAISettingsResponse,
     LocalAISettingsUpdate,
 )
 from app.domain.local_settings.service import (
+    discover_local_embedding_models,
     discover_local_ai_models,
     load_local_ai_settings,
     save_local_ai_settings,
@@ -41,3 +43,17 @@ async def refresh_local_ai_models(
 ) -> LocalAIModelsResponse:
     async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
         return await discover_local_ai_models(path=settings.local_settings_path, client=client)
+
+
+@router.post("/local-settings/ai/embedding-models", response_model=LocalEmbeddingModelsResponse)
+async def refresh_local_embedding_models(
+    payload: LocalAISettingsUpdate | None = None,
+    _context: CurrentUserContext = Depends(get_authorized_user_context),
+    settings: Settings = Depends(get_settings),
+) -> LocalEmbeddingModelsResponse:
+    async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
+        return await discover_local_embedding_models(
+            path=settings.local_settings_path,
+            client=client,
+            update=payload,
+        )

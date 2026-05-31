@@ -225,7 +225,18 @@ class SourceChunk(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     citation: Mapped[dict] = mapped_column(JSONValue, nullable=False, default=dict)
-    embedding: Mapped[list[float]] = mapped_column(EmbeddingVector(16), nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(EmbeddingVector(), nullable=False)
+    embedding_provider: Mapped[str] = mapped_column(
+        String(80),
+        nullable=False,
+        default="local-deterministic",
+    )
+    embedding_model: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        default="local-deterministic",
+    )
+    embedding_dimension: Mapped[int] = mapped_column(Integer, nullable=False, default=16)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

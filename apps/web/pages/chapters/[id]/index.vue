@@ -410,12 +410,28 @@ function isMasteryRecord(response: unknown): response is MasteryRecord {
   return typeof candidate.level === 'string' && typeof candidate.score_percent === 'number'
 }
 
+function isMentorMessage(response: unknown): response is MentorMessage {
+  if (!response || typeof response !== 'object') return false
+  const candidate = response as Partial<MentorMessage>
+  return typeof candidate.id === 'string' && typeof candidate.content === 'string' && candidate.role === 'assistant'
+}
+
 function localUserMessage(sessionId: string, content: string): MentorMessage {
   return {
     id: `local-user-${Date.now()}`,
     session_id: sessionId,
     role: 'user',
     content,
+    citations: []
+  }
+}
+
+function localAssistantMessage(sessionId: string): MentorMessage {
+  return {
+    id: `local-assistant-${Date.now()}`,
+    session_id: sessionId,
+    role: 'assistant',
+    content: '',
     citations: []
   }
 }
@@ -478,6 +494,76 @@ function citationJumpUrl(citation: MentorCitation) {
   const spaceId = detail.value?.study_space.id
   if (!spaceId) return `/spaces?source_id=${citation.source_id}&chunk_id=${citation.chunk_id}`
   return `/spaces/${spaceId}?source_id=${citation.source_id}&chunk_id=${citation.chunk_id}`
+}
+
+function updateMentorMessage(messageId: string, updater: (message: MentorMessage) => MentorMessage) {
+  mentorMessages.value = mentorMessages.value.map(message => (
+    message.id === messageId ? updater(message) : message
+  ))
+}
+
+function appendAssistantDelta(messageId: string, content: string) {
+  updateMentorMessage(messageId, message => ({
+    ...message,
+    content: `${message.content}${content}`
+  }))
+  scrollChatToLatest()
+}
+
+function replaceMentorMessage(messageId: string, nextMessage: MentorMessage) {
+  updateMentorMessage(messageId, () => nextMessage)
+  scrollChatToLatest()
+}
+
+async function readMentorStream(response: Response, assistantMessageId: string) {
+  if (!response.ok) {
+    throw new Error(await response.text())
+  }
+  if (!response.body) {
+    throw new Error('Streaming response is not available.')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      handleMentorStreamLine(line, assistantMessageId)
+    }
+  }
+
+  const remaining = `${buffer}${decoder.decode()}`
+  if (remaining.trim()) {
+    handleMentorStreamLine(remaining, assistantMessageId)
+  }
+}
+
+function handleMentorStreamLine(line: string, assistantMessageId: string) {
+  const trimmed = line.trim()
+  if (!trimmed) return
+  const event = JSON.parse(trimmed) as {
+    type?: string
+    content?: string
+    message?: MentorMessage
+    detail?: string
+  }
+  if (event.type === 'delta' && event.content) {
+    appendAssistantDelta(assistantMessageId, event.content)
+    return
+  }
+  if (event.type === 'final' && event.message) {
+    replaceMentorMessage(assistantMessageId, event.message)
+    return
+  }
+  if (event.type === 'error') {
+    throw new Error(event.detail || copy.value.failedAskMentor)
+  }
 }
 
 async function loadChapter() {
@@ -740,7 +826,12 @@ async function askMentor() {
   mentorAbortController.value = abortController
   try {
     const session = await ensureMentorSession()
-    mentorMessages.value = [...mentorMessages.value, localUserMessage(session.id, question)]
+    const assistantPlaceholder = localAssistantMessage(session.id)
+    mentorMessages.value = [
+      ...mentorMessages.value,
+      localUserMessage(session.id, question),
+      assistantPlaceholder
+    ]
     scrollChatToLatest()
     mentorQuestion.value = ''
     const requestBody: {
@@ -756,17 +847,23 @@ async function askMentor() {
     if (selectedMentorModel.value) {
       requestBody.model = selectedMentorModel.value
     }
-    const answer = await $fetch<MentorMessage>(
-      `${config.public.apiBaseUrl}/sessions/${session.id}/messages`,
+    const response = await fetch(
+      `${config.public.apiBaseUrl}/sessions/${session.id}/messages/stream`,
       {
         method: 'POST',
-        headers: protectedHeaders(),
-        body: requestBody,
+        headers: {
+          ...protectedHeaders(),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody),
         signal: abortController.signal
       }
     )
-    mentorMessages.value = [...mentorMessages.value, answer]
-    scrollChatToLatest()
+    if (isMentorMessage(response)) {
+      replaceMentorMessage(assistantPlaceholder.id, response)
+    } else {
+      await readMentorStream(response, assistantPlaceholder.id)
+    }
   } catch (error) {
     if (isAbortError(error)) return
     mentorErrorMessage.value = appendBackendMessage(copy.value.failedAskMentor, error)

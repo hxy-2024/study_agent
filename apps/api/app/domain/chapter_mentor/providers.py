@@ -1,3 +1,5 @@
+import json
+from collections.abc import AsyncIterator
 from typing import Protocol
 from pathlib import Path
 
@@ -46,6 +48,16 @@ class AnswerProvider(Protocol):
     ) -> ChapterMentorResponse:
         """Generate a grounded chapter answer."""
 
+    async def stream_answer_text(
+        self,
+        question: str,
+        chunks: list[RetrievedChunk],
+        source_filenames: dict,
+        web_search_results: list[WebSearchResult] | None = None,
+        thinking_effort: ThinkingEffort = "medium",
+    ) -> AsyncIterator[str]:
+        """Generate answer text incrementally when supported."""
+
 
 class DeterministicAnswerProvider:
     async def answer(
@@ -61,6 +73,23 @@ class DeterministicAnswerProvider:
             chunks=chunks,
             source_filenames=source_filenames,
         )
+
+    async def stream_answer_text(
+        self,
+        question: str,
+        chunks: list[RetrievedChunk],
+        source_filenames: dict,
+        web_search_results: list[WebSearchResult] | None = None,
+        thinking_effort: ThinkingEffort = "medium",
+    ) -> AsyncIterator[str]:
+        response = await self.answer(
+            question=question,
+            chunks=chunks,
+            source_filenames=source_filenames,
+            web_search_results=web_search_results,
+            thinking_effort=thinking_effort,
+        )
+        yield response.answer
 
 
 class OpenAICompatibleAnswerProvider:
@@ -138,6 +167,70 @@ class OpenAICompatibleAnswerProvider:
             answer_text = self._extract_answer(response.json())
             return fallback.model_copy(update={"answer": answer_text})
 
+    async def stream_answer_text(
+        self,
+        question: str,
+        chunks: list[RetrievedChunk],
+        source_filenames: dict,
+        web_search_results: list[WebSearchResult] | None = None,
+        thinking_effort: ThinkingEffort = "medium",
+    ) -> AsyncIterator[str]:
+        fallback = compose_grounded_answer(
+            question=question,
+            chunks=chunks,
+            source_filenames=source_filenames,
+        )
+        web_results = web_search_results or []
+        if not chunks and not web_results:
+            yield fallback.answer
+            return
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": self._system_prompt(thinking_effort)},
+                {
+                    "role": "user",
+                    "content": self._build_user_prompt(
+                        question,
+                        chunks,
+                        source_filenames,
+                        web_results,
+                    ),
+                },
+            ],
+            "temperature": 0.2,
+            "stream": True,
+        }
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+
+        try:
+            if self.client is not None:
+                async with self.client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=self.timeout_seconds,
+                ) as response:
+                    response.raise_for_status()
+                    async for delta in self._iter_stream_deltas(response):
+                        yield delta
+                return
+
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                ) as response:
+                    response.raise_for_status()
+                    async for delta in self._iter_stream_deltas(response):
+                        yield delta
+        except Exception:
+            yield fallback.answer
+
     def _build_user_prompt(
         self,
         question: str,
@@ -180,6 +273,24 @@ class OpenAICompatibleAnswerProvider:
         if not isinstance(content, str) or not content.strip():
             raise ValueError("LLM response did not include answer content")
         return content.strip()
+
+    async def _iter_stream_deltas(self, response: httpx.Response) -> AsyncIterator[str]:
+        async for line in response.aiter_lines():
+            line = line.strip()
+            if not line or line == "data: [DONE]":
+                continue
+            if not line.startswith("data: "):
+                continue
+            try:
+                payload = json.loads(line.removeprefix("data: "))
+            except json.JSONDecodeError:
+                continue
+            choices = payload.get("choices") or []
+            if not choices:
+                continue
+            content = choices[0].get("delta", {}).get("content")
+            if isinstance(content, str) and content:
+                yield content
 
 
 def create_answer_provider(

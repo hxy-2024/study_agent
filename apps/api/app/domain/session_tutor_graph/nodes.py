@@ -1,7 +1,10 @@
 import uuid
 from datetime import datetime
 
+from langgraph.config import get_stream_writer
+
 from app.db.models import AgentRunStatus, MessageRole
+from app.domain.chapter_mentor.service import compose_grounded_answer
 from app.domain.chapter_mentor.service import load_source_filenames
 from app.domain.chapter_mentor_state.service import get_chapter_mentor_state
 from app.domain.rag.retrieval import RetrievedChunk, retrieve_chunks
@@ -67,6 +70,9 @@ def _retrieved_chunks_from_state(state: SessionTutorGraphState) -> list[Retrieve
                 "chunk_index": evidence["chunk_index"],
             },
             embedding=[],
+            embedding_provider="local-deterministic",
+            embedding_model="local-deterministic",
+            embedding_dimension=0,
             score=evidence["score"],
         )
         for evidence in state.get("retrieved_chunks", [])
@@ -172,14 +178,39 @@ async def generate_answer(
 ) -> SessionTutorGraphState:
     _trace(state, "generate_answer")
     chunks = _retrieved_chunks_from_state(state)
-    answer = await answer_provider.answer(
-        question=state["content"],
-        chunks=chunks,
-        source_filenames=_source_filenames_by_uuid(state),
-        web_search_results=state.get("web_search_results", []),
-        thinking_effort=state.get("thinking_effort", "medium"),
-    )
-    state["answer"] = answer.answer
+    source_filenames = _source_filenames_by_uuid(state)
+    streamed_answer = ""
+    try:
+        writer = get_stream_writer()
+    except RuntimeError:
+        writer = None
+
+    if hasattr(answer_provider, "stream_answer_text"):
+        async for delta in answer_provider.stream_answer_text(
+            question=state["content"],
+            chunks=chunks,
+            source_filenames=source_filenames,
+            web_search_results=state.get("web_search_results", []),
+            thinking_effort=state.get("thinking_effort", "medium"),
+        ):
+            streamed_answer += delta
+            if writer is not None:
+                writer({"type": "delta", "content": delta})
+        answer = compose_grounded_answer(
+            question=state["content"],
+            chunks=chunks,
+            source_filenames=source_filenames,
+        )
+        state["answer"] = streamed_answer.strip() or answer.answer
+    else:
+        answer = await answer_provider.answer(
+            question=state["content"],
+            chunks=chunks,
+            source_filenames=source_filenames,
+            web_search_results=state.get("web_search_results", []),
+            thinking_effort=state.get("thinking_effort", "medium"),
+        )
+        state["answer"] = answer.answer
     state["citations"] = [
         AnswerCitation(
             source_id=str(citation.source_id),

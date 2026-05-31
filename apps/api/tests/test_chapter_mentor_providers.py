@@ -23,6 +23,9 @@ def retrieved_chunk(text: str, *, chunk_index: int = 0) -> RetrievedChunk:
         text=text,
         citation={},
         embedding=[0.1] * 16,
+        embedding_provider="local-deterministic",
+        embedding_model="local-deterministic",
+        embedding_dimension=16,
         score=0.9,
     )
 
@@ -85,6 +88,44 @@ async def test_openai_compatible_provider_posts_grounded_prompt() -> None:
     assert "Retrieval evidence text." in captured["payload"]["messages"][1]["content"]
     assert response.answer == "Use retrieval evidence first, then explain the idea."
     assert response.citations[0].source_filename == "notes.md"
+
+
+@pytest.mark.anyio
+async def test_openai_compatible_provider_streams_answer_deltas() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            content=(
+                'data: {"choices":[{"delta":{"content":"Use "}}]}\n\n'
+                'data: {"choices":[{"delta":{"content":"streaming."}}]}\n\n'
+                "data: [DONE]\n\n"
+            ),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    chunks = [retrieved_chunk("Streaming evidence text.", chunk_index=2)]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerProvider(
+            base_url="https://llm.example/v1",
+            api_key="test-key",
+            model="mentor-model",
+            timeout_seconds=10,
+            client=client,
+        )
+        deltas = [
+            delta
+            async for delta in provider.stream_answer_text(
+                question="Stream this answer.",
+                chunks=chunks,
+                source_filenames={chunks[0].source_id: "notes.md"},
+            )
+        ]
+
+    assert captured["payload"]["stream"] is True
+    assert deltas == ["Use ", "streaming."]
 
 
 @pytest.mark.anyio

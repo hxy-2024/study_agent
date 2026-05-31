@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "gpt-4.1-mini"
     llm_timeout_seconds: int = 30
+    embedding_base_url: str = ""
+    embedding_api_key: str = ""
+    embedding_model: str = ""
+    embedding_dimensions: int | None = None
     session_tutor_graph_enabled: bool = True
     session_tutor_graph_checkpoint_backend: str = "memory"
     session_tutor_web_search_enabled: bool = False
