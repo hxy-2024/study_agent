@@ -14,6 +14,10 @@ class LocalAISettingsUpdate(BaseModel):
     llm_model: str | None = None
     available_models: list[str] | None = None
     llm_api_key: str | None = None
+    embedding_base_url: str | None = None
+    embedding_model: str | None = None
+    embedding_api_key: str | None = None
+    embedding_dimensions: int | None = Field(default=None, ge=1, le=8192)
     web_search_default_enabled: bool | None = None
     web_search_provider: WebSearchProvider | None = None
     tavily_api_key: str | None = None
@@ -31,6 +35,11 @@ class LocalAISettingsResponse(BaseModel):
     available_models: list[str] = Field(default_factory=list)
     llm_api_key: str = ""
     llm_api_key_masked: str = ""
+    embedding_base_url: str = ""
+    embedding_model: str = ""
+    embedding_api_key: str = ""
+    embedding_api_key_masked: str = ""
+    embedding_dimensions: int | None = None
     web_search_default_enabled: bool = False
     web_search_provider: WebSearchProvider = "duckduckgo"
     tavily_api_key: str = ""
@@ -48,6 +57,10 @@ class LocalAISettings(BaseModel):
     llm_model: str = "gpt-4.1-mini"
     available_models: list[str] = Field(default_factory=list)
     llm_api_key: str = ""
+    embedding_base_url: str = ""
+    embedding_model: str = ""
+    embedding_api_key: str = ""
+    embedding_dimensions: int | None = None
     web_search_default_enabled: bool = False
     web_search_provider: WebSearchProvider = "duckduckgo"
     tavily_api_key: str = ""
@@ -65,6 +78,11 @@ class LocalAISettings(BaseModel):
             available_models=self.available_models,
             llm_api_key=self.llm_api_key,
             llm_api_key_masked="********" if self.llm_api_key else "",
+            embedding_base_url=self.embedding_base_url,
+            embedding_model=self.embedding_model,
+            embedding_api_key=self.embedding_api_key,
+            embedding_api_key_masked="********" if self.embedding_api_key else "",
+            embedding_dimensions=self.embedding_dimensions,
             web_search_default_enabled=self.web_search_default_enabled,
             web_search_provider=self.web_search_provider,
             tavily_api_key=self.tavily_api_key,
@@ -78,5 +96,10 @@ class LocalAISettings(BaseModel):
 
 
 class LocalAIModelsResponse(BaseModel):
+    models: list[str] = Field(default_factory=list)
+    selected_model: str = ""
+
+
+class LocalEmbeddingModelsResponse(BaseModel):
     models: list[str] = Field(default_factory=list)
     selected_model: str = ""

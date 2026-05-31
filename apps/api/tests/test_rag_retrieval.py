@@ -6,7 +6,6 @@ from pydantic import ValidationError
 
 from app.domain.rag.schemas import RetrieveRequest
 from app.domain.rag.retrieval import (
-    EXPECTED_EMBEDDING_DIMENSION,
     RetrievedChunk,
     dot_product,
     rank_chunks_by_dot_product,
@@ -33,6 +32,9 @@ def _chunk(
         text=f"chunk {chunk_index}",
         citation={"filename": f"{chunk_index}.md"},
         embedding=embedding or [1.0, 0.0],
+        embedding_provider="local-deterministic",
+        embedding_model="local-deterministic",
+        embedding_dimension=len(embedding or [1.0, 0.0]),
         score=0.0,
     )
 
@@ -118,7 +120,7 @@ def test_rank_chunks_by_dot_product_orders_ties_deterministically() -> None:
 
 
 class _EmbeddingProvider(EmbeddingProvider):
-    def __init__(self, dimension: int = EXPECTED_EMBEDDING_DIMENSION) -> None:
+    def __init__(self, dimension: int = 16) -> None:
         self._dimension = dimension
         self.embed_calls: list[str] = []
 
@@ -148,24 +150,6 @@ class _CapturingSession:
     async def execute(self, statement: Any) -> _ExecuteResult:
         self.statement = statement
         return _ExecuteResult()
-
-
-async def test_retrieve_chunks_rejects_non_16_dimension_provider_before_embedding() -> None:
-    provider = _EmbeddingProvider(dimension=2)
-    session = _CapturingSession()
-
-    with pytest.raises(ValueError, match="Embedding dimension must be 16"):
-        await retrieve_chunks(
-            session=session,  # type: ignore[arg-type]
-            tenant_id=uuid.uuid4(),
-            study_space_id=uuid.uuid4(),
-            query="query",
-            limit=1,
-            embedding_provider=provider,
-        )
-
-    assert provider.embed_calls == []
-    assert session.statement is None
 
 
 async def test_retrieve_chunks_rejects_non_positive_limit_before_embedding() -> None:
@@ -205,6 +189,9 @@ async def test_retrieve_chunks_scopes_query_to_active_chunks_for_tenant_and_stud
     assert "source_chunks.tenant_id = :tenant_id_1" in statement_text
     assert "source_chunks.study_space_id = :study_space_id_1" in statement_text
     assert "source_chunks.is_active IS true" in statement_text
+    assert "source_chunks.embedding_provider = :embedding_provider_1" in statement_text
+    assert "source_chunks.embedding_model = :embedding_model_1" in statement_text
+    assert "source_chunks.embedding_dimension = :embedding_dimension_1" in statement_text
 
 
 def test_retrieve_request_does_not_accept_client_tenant_scope() -> None:

@@ -50,9 +50,6 @@ async def ingest_source(
     }
     if source.status not in allowed_statuses:
         raise ValueError(f"Source status does not allow ingestion: {source.status.value}")
-    if embedding_provider.dimension != 16:
-        raise ValueError("Embedding dimension must be 16")
-
     claim = await _claim_source_for_ingestion(
         session=session,
         source=source,
@@ -77,6 +74,7 @@ async def ingest_source(
         chunk_rows = []
         for chunk in chunks:
             payload = chunk.to_source_chunk_payload()
+            embedding = embedding_provider.embed_text(chunk.text)
             chunk_rows.append(
                 SourceChunk(
                     tenant_id=claim.tenant_id,
@@ -86,7 +84,10 @@ async def ingest_source(
                     text=payload["text"],
                     token_count=payload["token_count"],
                     citation=payload["citation"],
-                    embedding=embedding_provider.embed_text(chunk.text),
+                    embedding=embedding,
+                    embedding_provider=embedding_provider.provider_key,
+                    embedding_model=embedding_provider.model_name,
+                    embedding_dimension=len(embedding),
                     is_active=True,
                 )
             )

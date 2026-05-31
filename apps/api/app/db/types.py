@@ -44,7 +44,7 @@ class EmbeddingVector(TypeDecorator):
     impl = JSON
     cache_ok = True
 
-    def __init__(self, dimensions: int) -> None:
+    def __init__(self, dimensions: int | None = None) -> None:
         super().__init__()
         self.dimensions = dimensions
 

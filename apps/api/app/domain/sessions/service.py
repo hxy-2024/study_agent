@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from collections.abc import AsyncIterator
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -19,6 +20,7 @@ from app.db.models import (
 from app.core.config import get_settings
 from app.domain.agent_runtime.config import graph_runtime_config_from_settings
 from app.domain.chapter_mentor.providers import AnswerProvider
+from app.domain.chapter_mentor.service import compose_grounded_answer
 from app.domain.chapter_mentor.service import load_source_filenames
 from app.domain.rag.embeddings import EmbeddingProvider
 from app.domain.rag.retrieval import retrieve_chunks
@@ -422,6 +424,135 @@ async def answer_session_message(
         web_search_enabled=web_search_enabled,
         thinking_effort=thinking_effort,
     )
+
+
+async def stream_session_message(
+    *,
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    session_id: uuid.UUID,
+    content: str,
+    embedding_provider: EmbeddingProvider,
+    answer_provider: AnswerProvider,
+    web_search_enabled: bool | None = None,
+    thinking_effort: str = "medium",
+) -> AsyncIterator[dict[str, Any]]:
+    runtime_config = graph_runtime_config_from_settings(get_settings())
+    if runtime_config.session_tutor_graph_enabled:
+        from app.domain.session_tutor_graph.service import run_session_tutor_graph_stream
+
+        async for event in run_session_tutor_graph_stream(
+            session=session,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id,
+            content=content,
+            embedding_provider=embedding_provider,
+            answer_provider=answer_provider,
+            web_search_enabled=web_search_enabled,
+            thinking_effort=thinking_effort,
+        ):
+            yield event
+        return
+
+    tutor_session = await ensure_session_in_tenant(
+        session=session,
+        tenant_id=tenant_id,
+        session_id=session_id,
+    )
+    chapter = await ensure_chapter_in_tenant(
+        session=session,
+        tenant_id=tenant_id,
+        chapter_id=tutor_session.chapter_id,
+    )
+    user_message = await create_message(
+        session=session,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        payload=MessageCreate(role=MessageRole.user, content=content),
+    )
+    query = f"{chapter.title}\n{getattr(chapter, 'goal', '')}\n{content}"
+    chunks = await retrieve_chunks(
+        session=session,
+        tenant_id=tenant_id,
+        study_space_id=tutor_session.study_space_id,
+        query=query,
+        limit=5,
+        embedding_provider=embedding_provider,
+    )
+    source_filenames = await load_source_filenames(
+        session=session,
+        tenant_id=tenant_id,
+        study_space_id=tutor_session.study_space_id,
+        source_ids=[chunk.source_id for chunk in chunks],
+    )
+    answer_text = ""
+    async for delta in answer_provider.stream_answer_text(
+        question=content,
+        chunks=chunks,
+        source_filenames=source_filenames,
+        web_search_results=[],
+        thinking_effort=thinking_effort,
+    ):
+        answer_text += delta
+        yield {"type": "delta", "content": delta}
+
+    grounded_response = compose_grounded_answer(
+        question=content,
+        chunks=chunks,
+        source_filenames=source_filenames,
+    )
+    assistant_response = await create_message_with_response(
+        session=session,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        payload=MessageCreate(
+            role=MessageRole.assistant,
+            content=answer_text.strip() or grounded_response.answer,
+            metadata={
+                "runtime": "stream",
+                "graph_enabled": graph_runtime_config_from_settings(get_settings()).session_tutor_graph_enabled,
+                "web_search_enabled": bool(web_search_enabled),
+                "thinking_effort": thinking_effort,
+            },
+            citations=[
+                MessageCitationCreate(
+                    source_id=citation.source_id,
+                    source_chunk_id=citation.chunk_id,
+                    quote=citation.text,
+                    citation={
+                        "source_filename": citation.source_filename,
+                        "chunk_index": citation.chunk_index,
+                        "stream": True,
+                    },
+                )
+                for citation in grounded_response.citations
+            ],
+        ),
+    )
+    await record_agent_run(
+        session=session,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        message_id=assistant_response.id,
+        input_payload={
+            "content": content,
+            "user_message_id": str(user_message.id),
+            "stream": True,
+            "web_search_enabled": bool(web_search_enabled),
+            "thinking_effort": thinking_effort,
+        },
+        output_payload={
+            "assistant_message_id": str(assistant_response.id),
+            "citation_count": len(assistant_response.citations),
+            "stream": True,
+            "thinking_effort": thinking_effort,
+        },
+        model="stream",
+        status=AgentRunStatus.completed,
+    )
+    yield {"type": "final", "message": assistant_response.model_dump(mode="json")}
 
 
 async def _answer_session_message_without_graph(

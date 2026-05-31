@@ -1,13 +1,16 @@
 import uuid
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUserContext, get_authorized_user_context
 from app.core.config import get_settings
 from app.db.session import get_db_session
 from app.domain.chapter_mentor.providers import create_answer_provider
-from app.domain.rag.embeddings import DeterministicEmbeddingProvider
+from app.domain.local_settings.service import load_local_ai_settings
+from app.domain.rag.embeddings import create_embedding_provider_from_preset
 from app.domain.sessions.schemas import (
     MessageResponse,
     SessionCreate,
@@ -23,6 +26,7 @@ from app.domain.sessions.service import (
     list_messages_for_session,
     list_sessions_for_chapter,
     rename_session,
+    stream_session_message,
 )
 
 router = APIRouter(tags=["sessions"])
@@ -139,7 +143,13 @@ async def create_tutor_message(
             user_id=context.user_id,
             session_id=session_id,
             content=payload.content,
-            embedding_provider=DeterministicEmbeddingProvider(settings.rag_embedding_dimension),
+            embedding_provider=create_embedding_provider_from_preset(
+                None,
+                dimension=settings.rag_embedding_dimension,
+                local_ai_settings=load_local_ai_settings(path=settings.local_settings_path),
+                runtime_settings=settings,
+                timeout_seconds=settings.llm_timeout_seconds,
+            ),
             answer_provider=create_answer_provider(
                 settings,
                 agent_layer="session_tutor",
@@ -150,3 +160,50 @@ async def create_tutor_message(
         )
     except ValueError as exc:
         raise map_session_error(exc) from exc
+
+
+@router.post("/sessions/{session_id}/messages/stream")
+async def stream_tutor_message(
+    session_id: uuid.UUID,
+    payload: TutorMessageRequest,
+    context: CurrentUserContext = Depends(get_authorized_user_context),
+    session: AsyncSession = Depends(get_db_session),
+) -> StreamingResponse:
+    settings = get_settings()
+
+    async def events():
+        try:
+            async for event in stream_session_message(
+                session=session,
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                session_id=session_id,
+                content=payload.content,
+                embedding_provider=create_embedding_provider_from_preset(
+                    None,
+                    dimension=settings.rag_embedding_dimension,
+                    local_ai_settings=load_local_ai_settings(path=settings.local_settings_path),
+                    runtime_settings=settings,
+                    timeout_seconds=settings.llm_timeout_seconds,
+                ),
+                answer_provider=create_answer_provider(
+                    settings,
+                    agent_layer="session_tutor",
+                    model_override=payload.model,
+                ),
+                web_search_enabled=payload.web_search_enabled,
+                thinking_effort=payload.thinking_effort,
+            ):
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        except ValueError as exc:
+            yield json.dumps(
+                {"type": "error", "detail": str(map_session_error(exc).detail)},
+                ensure_ascii=False,
+            ) + "\n"
+        except Exception:
+            yield json.dumps(
+                {"type": "error", "detail": "Mentor streaming failed."},
+                ensure_ascii=False,
+            ) + "\n"
+
+    return StreamingResponse(events(), media_type="application/x-ndjson")

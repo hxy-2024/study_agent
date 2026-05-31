@@ -22,6 +22,10 @@ def test_local_ai_settings_roundtrip_masks_api_key(tmp_path: Path) -> None:
             llm_base_url="https://llm.example.test/v1",
             llm_model="study-model",
             llm_api_key="secret-key",
+            embedding_base_url="https://dashscope.example.test/compatible-mode/v1",
+            embedding_model="text-embedding-v4",
+            embedding_api_key="embedding-secret",
+            embedding_dimensions=1024,
             web_search_default_enabled=True,
             answer_style="socratic",
         ),
@@ -33,8 +37,12 @@ def test_local_ai_settings_roundtrip_masks_api_key(tmp_path: Path) -> None:
     assert saved.llm_api_key_masked == "********"
     assert loaded.llm_provider == "openai-compatible"
     assert loaded.llm_api_key == "secret-key"
+    assert loaded.embedding_model == "text-embedding-v4"
+    assert loaded.embedding_api_key == "embedding-secret"
+    assert loaded.embedding_dimensions == 1024
     assert loaded.to_response().llm_api_key == "secret-key"
     assert loaded.to_response().llm_api_key_masked == "********"
+    assert loaded.to_response().embedding_api_key_masked == "********"
     assert loaded.to_response().answer_style == "socratic"
 
 
@@ -68,6 +76,8 @@ def test_local_ai_settings_preserves_existing_secret_when_update_sends_empty_str
     save_local_ai_settings(
         LocalAISettingsUpdate(
             llm_api_key="secret-key",
+            embedding_api_key="embedding-secret",
+            embedding_dimensions=1024,
             tavily_api_key="tavily-secret",
         ),
         path=path,
@@ -77,6 +87,7 @@ def test_local_ai_settings_preserves_existing_secret_when_update_sends_empty_str
         LocalAISettingsUpdate(
             llm_model="new-model",
             llm_api_key="",
+            embedding_api_key="",
             tavily_api_key="",
         ),
         path=path,
@@ -85,7 +96,23 @@ def test_local_ai_settings_preserves_existing_secret_when_update_sends_empty_str
 
     assert loaded.llm_model == "new-model"
     assert loaded.llm_api_key == "secret-key"
+    assert loaded.embedding_api_key == "embedding-secret"
     assert loaded.tavily_api_key == "tavily-secret"
+
+
+def test_local_ai_settings_can_clear_embedding_dimensions(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    save_local_ai_settings(
+        LocalAISettingsUpdate(embedding_dimensions=1024),
+        path=path,
+    )
+
+    save_local_ai_settings(
+        LocalAISettingsUpdate(embedding_dimensions=None),
+        path=path,
+    )
+
+    assert load_local_ai_settings(path=path).embedding_dimensions is None
 
 
 @pytest.mark.anyio
@@ -127,6 +154,73 @@ async def test_discover_local_ai_models_uses_openai_compatible_models_endpoint(
     assert response.selected_model == "deepseek-chat"
     assert loaded.llm_model == "deepseek-chat"
     assert loaded.available_models == ["deepseek-chat", "deepseek-reasoner"]
+
+
+@pytest.mark.anyio
+async def test_discover_local_embedding_models_filters_embedding_models(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    save_local_ai_settings(
+        LocalAISettingsUpdate(
+            embedding_base_url="https://dashscope.example.test/compatible-mode/v1",
+            embedding_api_key="embedding-secret",
+        ),
+        path=path,
+    )
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers["authorization"]
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "deepseek-chat"},
+                    {"id": "text-embedding-v4"},
+                    {"id": "text-embedding-v3"},
+                ]
+            },
+        )
+
+    from app.domain.local_settings.service import discover_local_embedding_models
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        response = await discover_local_embedding_models(path=path, client=client)
+
+    loaded = load_local_ai_settings(path=path)
+    assert captured["url"] == "https://dashscope.example.test/compatible-mode/v1/models"
+    assert captured["authorization"] == "Bearer embedding-secret"
+    assert response.models == ["text-embedding-v4", "text-embedding-v3"]
+    assert response.selected_model == "text-embedding-v4"
+    assert loaded.embedding_model == "text-embedding-v4"
+
+
+@pytest.mark.anyio
+async def test_discover_local_embedding_models_uses_dashscope_fallback_when_models_endpoint_fails(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "settings.json"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, request=request)
+
+    from app.domain.local_settings.service import discover_local_embedding_models
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        response = await discover_local_embedding_models(
+            path=path,
+            client=client,
+            update=LocalAISettingsUpdate(
+                embedding_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                embedding_api_key="embedding-secret",
+            ),
+        )
+
+    loaded = load_local_ai_settings(path=path)
+    assert response.models[:2] == ["text-embedding-v4", "text-embedding-v3"]
+    assert response.selected_model == "text-embedding-v4"
+    assert loaded.embedding_base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    assert loaded.embedding_model == "text-embedding-v4"
 
 
 def test_create_answer_provider_uses_local_ai_settings_override(tmp_path: Path) -> None:

@@ -81,24 +81,6 @@ async def test_ingest_source_rejects_processing_sources() -> None:
         )
 
 
-@pytest.mark.anyio
-async def test_ingest_source_rejects_wrong_embedding_dimension_before_writes() -> None:
-    source = _source_with_status(SourceStatus.uploaded)
-    session = FakeSourceSession(source)
-
-    with pytest.raises(ValueError, match="Embedding dimension must be 16"):
-        await ingest_source(
-            session=session,
-            source_id=source.id,
-            reader=InMemoryTextSourceReader({"objects/intro.md": "hello"}),
-            embedding_provider=DeterministicEmbeddingProvider(8),
-            max_chars=200,
-            overlap_chars=20,
-        )
-
-    assert session.write_attempted is False
-
-
 class FakeSourceSession:
     def __init__(self, source: Source) -> None:
         self.source = source

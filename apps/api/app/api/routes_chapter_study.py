@@ -11,7 +11,8 @@ from app.domain.chapter_mentor.schemas import ChapterMentorQuestionRequest, Chap
 from app.domain.chapter_mentor.service import ask_chapter_mentor
 from app.domain.chapter_study.schemas import ChapterStudyDetailResponse
 from app.domain.chapter_study.service import complete_chapter, get_chapter_detail
-from app.domain.rag.embeddings import DeterministicEmbeddingProvider
+from app.domain.local_settings.service import load_local_ai_settings
+from app.domain.rag.embeddings import create_embedding_provider_from_preset
 
 router = APIRouter(tags=["chapter-study"])
 
@@ -62,8 +63,12 @@ async def ask_chapter_mentor_question(
 ) -> ChapterMentorResponse:
     settings = get_settings()
     try:
-        embedding_provider = DeterministicEmbeddingProvider(
-            dimension=settings.rag_embedding_dimension
+        embedding_provider = create_embedding_provider_from_preset(
+            None,
+            dimension=settings.rag_embedding_dimension,
+            local_ai_settings=load_local_ai_settings(path=settings.local_settings_path),
+            runtime_settings=settings,
+            timeout_seconds=settings.llm_timeout_seconds,
         )
         return await ask_chapter_mentor(
             session=session,

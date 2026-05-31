@@ -20,6 +20,11 @@ function localSettings(overrides = {}) {
     available_models: [],
     llm_api_key: '',
     llm_api_key_masked: '',
+    embedding_base_url: '',
+    embedding_model: '',
+    embedding_api_key: '',
+    embedding_api_key_masked: '',
+    embedding_dimensions: null,
     web_search_default_enabled: false,
     web_search_provider: 'duckduckgo',
     tavily_api_key: '',
@@ -56,6 +61,8 @@ describe('Settings page', () => {
     expect(wrapper.text()).toContain('\u914d\u7f6e')
     expect((wrapper.find('[data-testid="settings-llm-model"]').element as HTMLInputElement).value).toBe('gpt-4.1-mini')
     expect((wrapper.find('[data-testid="settings-api-key"]').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.find('[data-testid="settings-embedding-model"]').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.find('[data-testid="settings-embedding-dimensions"]').element as HTMLSelectElement).value).toBe('')
     await wrapper.findAll('.settings-category-button').find(button => button.text() === '\u5916\u89c2')?.trigger('click')
     expect((wrapper.find('[data-testid="settings-locale"]').element as HTMLSelectElement).value).toBe('zh-CN')
     await wrapper.findAll('.settings-category-button').find(button => button.text() === '\u914d\u7f6e')?.trigger('click')
@@ -86,8 +93,38 @@ describe('Settings page', () => {
     expect(wrapper.text()).toContain('deepseek-reasoner')
   })
 
-  it('saves language, prompts, answer style, and provider settings', async () => {
+  it('refreshes available embedding models from the embedding provider', async () => {
     fetchMock.mockResolvedValueOnce(localSettings())
+    fetchMock.mockResolvedValueOnce({
+      models: ['text-embedding-v4', 'text-embedding-v3'],
+      selected_model: 'text-embedding-v4'
+    })
+
+    const wrapper = mount(SettingsPage)
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    await wrapper.find('[data-testid="refresh-embedding-models"]').trigger('click')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(fetchMock).toHaveBeenLastCalledWith('http://127.0.0.1:8000/api/v1/local-settings/ai/embedding-models', {
+      method: 'POST',
+      headers: {
+        'X-User-Id': '00000000-0000-0000-0000-000000000002',
+        'X-Tenant-Id': '00000000-0000-0000-0000-000000000001'
+      },
+      body: {
+        embedding_base_url: '',
+        embedding_api_key: '',
+        embedding_model: '',
+        embedding_dimensions: null
+      }
+    })
+    expect((wrapper.find('[data-testid="settings-embedding-model"]').element as HTMLSelectElement).value).toBe('text-embedding-v4')
+    expect(wrapper.text()).toContain('text-embedding-v3')
+  })
+
+  it('saves language, prompts, answer style, and provider settings', async () => {
+    fetchMock.mockResolvedValueOnce(localSettings({ embedding_model: 'text-embedding-v4' }))
     fetchMock.mockResolvedValueOnce(localSettings({ locale: 'en-US', answer_style: 'code_tutor', llm_api_key: 'secret-key' }))
 
     const wrapper = mount(SettingsPage)
@@ -96,6 +133,10 @@ describe('Settings page', () => {
     await wrapper.find('[data-testid="settings-provider"]').setValue('openai-compatible')
     await wrapper.find('[data-testid="settings-base-url"]').setValue('https://llm.example.test/v1')
     await wrapper.find('[data-testid="settings-api-key"]').setValue('secret-key')
+    await wrapper.find('[data-testid="settings-embedding-base-url"]').setValue('https://dashscope.example.test/compatible-mode/v1')
+    await wrapper.find('[data-testid="settings-embedding-model"]').setValue('text-embedding-v4')
+    await wrapper.find('[data-testid="settings-embedding-api-key"]').setValue('embedding-secret')
+    await wrapper.find('[data-testid="settings-embedding-dimensions"]').setValue(1024)
     await wrapper.findAll('.settings-category-button').find(button => button.text() === '\u5916\u89c2')?.trigger('click')
     await wrapper.find('[data-testid="settings-locale"]').setValue('en-US')
     await wrapper.findAll('.settings-category-button').find(button => button.text() === 'Configuration')?.trigger('click')
@@ -116,6 +157,10 @@ describe('Settings page', () => {
         llm_base_url: 'https://llm.example.test/v1',
         llm_model: 'gpt-4.1-mini',
         llm_api_key: 'secret-key',
+        embedding_base_url: 'https://dashscope.example.test/compatible-mode/v1',
+        embedding_model: 'text-embedding-v4',
+        embedding_api_key: 'embedding-secret',
+        embedding_dimensions: 1024,
         web_search_default_enabled: false,
         web_search_provider: 'duckduckgo',
         tavily_api_key: '',

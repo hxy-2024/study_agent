@@ -10,6 +10,7 @@ from app.domain.chapter_mentor.schemas import (
 )
 from app.domain.rag.retrieval import RetrievedChunk
 from app.domain.session_tutor_graph.service import run_session_tutor_graph
+from app.domain.session_tutor_graph.service import run_session_tutor_graph_stream
 
 
 class FakeEmbeddingProvider:
@@ -45,6 +46,20 @@ class FakeAnswerProvider:
                 )
             ],
         )
+
+
+class StreamingAnswerProvider(FakeAnswerProvider):
+    async def stream_answer_text(
+        self,
+        question: str,
+        chunks: list[RetrievedChunk],
+        source_filenames: dict[uuid.UUID, str],
+        web_search_results: list[dict[str, str]] | None = None,
+        thinking_effort: str = "medium",
+    ):
+        self.web_search_results = web_search_results
+        yield "Streaming "
+        yield f"answer for: {question}"
 
 
 class FailingAnswerProvider:
@@ -108,6 +123,9 @@ async def test_graph_records_messages_agent_run_and_supervision(monkeypatch) -> 
             text="Evidence text",
             citation={"source_filename": "notes.md", "chunk_index": 0},
             embedding=[0.1] * 16,
+            embedding_provider="local-deterministic",
+            embedding_model="local-deterministic",
+            embedding_dimension=16,
             score=0.91,
         )
     ]
@@ -213,6 +231,103 @@ async def test_graph_records_messages_agent_run_and_supervision(monkeypatch) -> 
         signal["type"] == "confusion_detected"
         for signal in runs[0].output_payload["learning_signals"]
     )
+
+
+@pytest.mark.anyio
+async def test_graph_streams_answer_deltas_and_final_message(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    study_space_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+    chunk_id = uuid.uuid4()
+    added = []
+
+    tutor_session = SimpleNamespace(
+        id=session_id,
+        tenant_id=tenant_id,
+        study_space_id=study_space_id,
+        chapter_id=chapter_id,
+    )
+    retrieved = [
+        RetrievedChunk(
+            id=chunk_id,
+            tenant_id=tenant_id,
+            study_space_id=study_space_id,
+            source_id=source_id,
+            chunk_index=0,
+            text="Evidence text",
+            citation={"source_filename": "notes.md", "chunk_index": 0},
+            embedding=[0.1] * 16,
+            embedding_provider="local-deterministic",
+            embedding_model="local-deterministic",
+            embedding_dimension=16,
+            score=0.91,
+        )
+    ]
+
+    class FakeSession:
+        async def scalar(self, statement):
+            if "chapter_mentor_states" in str(statement):
+                return None
+            return tutor_session
+
+        def add(self, obj) -> None:
+            added.append(obj)
+
+        async def flush(self) -> None:
+            for obj in added:
+                if getattr(obj, "id", None) is None:
+                    obj.id = uuid.uuid4()
+
+        async def commit(self) -> None:
+            pass
+
+        async def refresh(self, obj) -> None:
+            if getattr(obj, "id", None) is None:
+                obj.id = uuid.uuid4()
+
+    async def fake_retrieve_chunks(**kwargs):
+        assert kwargs["tenant_id"] == tenant_id
+        assert kwargs["study_space_id"] == study_space_id
+        return retrieved
+
+    async def fake_load_source_filenames(**kwargs):
+        assert kwargs["tenant_id"] == tenant_id
+        assert kwargs["study_space_id"] == study_space_id
+        return {source_id: "notes.md"}
+
+    monkeypatch.setattr(
+        "app.domain.session_tutor_graph.nodes.retrieve_chunks",
+        fake_retrieve_chunks,
+    )
+    monkeypatch.setattr(
+        "app.domain.session_tutor_graph.nodes.load_source_filenames",
+        fake_load_source_filenames,
+    )
+    monkeypatch.setattr(
+        "app.domain.session_tutor_graph.nodes.web_search_tool",
+        FakeWebSearchTool(),
+    )
+
+    events = [
+        event
+        async for event in run_session_tutor_graph_stream(
+            session=FakeSession(),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=session_id,
+            content="Explain streaming.",
+            embedding_provider=FakeEmbeddingProvider(),
+            answer_provider=StreamingAnswerProvider(),
+        )
+    ]
+
+    assert events[0] == {"type": "delta", "content": "Streaming "}
+    assert events[1] == {"type": "delta", "content": "answer for: Explain streaming."}
+    assert events[-1]["type"] == "final"
+    assert events[-1]["message"]["content"] == "Streaming answer for: Explain streaming."
 
 
 @pytest.mark.anyio
@@ -334,6 +449,9 @@ async def test_graph_rolls_back_before_recording_failed_agent_run_after_db_error
             text="Evidence text",
             citation={"source_filename": "notes.md", "chunk_index": 0},
             embedding=[0.1] * 16,
+            embedding_provider="local-deterministic",
+            embedding_model="local-deterministic",
+            embedding_dimension=16,
             score=0.91,
         )
     ]

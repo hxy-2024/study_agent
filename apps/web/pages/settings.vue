@@ -13,6 +13,11 @@ interface LocalSettingsResponse {
   available_models: string[]
   llm_api_key: string
   llm_api_key_masked: string
+  embedding_base_url: string
+  embedding_model: string
+  embedding_api_key: string
+  embedding_api_key_masked: string
+  embedding_dimensions: number | null
   web_search_default_enabled: boolean
   web_search_provider: WebSearchProvider
   tavily_api_key: string
@@ -35,6 +40,7 @@ const activeCategory = ref<SettingsCategory>('general')
 const loading = ref(false)
 const saving = ref(false)
 const refreshingModels = ref(false)
+const refreshingEmbeddingModels = ref(false)
 const error = ref('')
 const toastMessage = ref('')
 let toastTimer: ReturnType<typeof window.setTimeout> | null = null
@@ -45,6 +51,11 @@ const settings = reactive({
   apiKey: '',
   defaultModel: 'gpt-4.1-mini',
   availableModels: [] as string[],
+  availableEmbeddingModels: [] as string[],
+  embeddingBaseUrl: '',
+  embeddingModel: '',
+  embeddingApiKey: '',
+  embeddingDimensions: null as number | null,
   webSearchDefault: false,
   webSearchProvider: 'duckduckgo' as WebSearchProvider,
   tavilyApiKey: '',
@@ -67,6 +78,13 @@ const copy = computed(() => {
       baseUrl: 'Base URL',
       apiKey: 'API key',
       defaultModel: 'Default model',
+      embeddingBaseUrl: '检索向量 Base URL',
+      embeddingModel: '检索向量模型',
+      embeddingApiKey: '检索向量 API key',
+      embeddingDimensions: '检索向量维度',
+      refreshEmbeddingModels: '刷新向量模型',
+      refreshingEmbeddingModels: '刷新中...',
+      autoDimensions: '自动检测',
       refreshModels: '刷新模型',
       refreshingModels: '刷新中...',
       webSearchDefault: '默认开启联网补充',
@@ -94,6 +112,13 @@ const copy = computed(() => {
     baseUrl: 'Base URL',
     apiKey: 'API key',
     defaultModel: 'Default model',
+    embeddingBaseUrl: 'Embedding base URL',
+    embeddingModel: 'Embedding model',
+    embeddingApiKey: 'Embedding API key',
+    embeddingDimensions: 'Embedding dimensions',
+    refreshEmbeddingModels: 'Refresh embedding models',
+    refreshingEmbeddingModels: 'Refreshing...',
+    autoDimensions: 'Auto detect',
     refreshModels: 'Refresh models',
     refreshingModels: 'Refreshing...',
     webSearchDefault: 'Enable web supplement by default',
@@ -118,6 +143,12 @@ const categories = computed(() => [
   { id: 'configuration' as const, label: copy.value.configuration }
 ])
 
+const embeddingModelOptions = computed(() => {
+  return Array.from(
+    new Set([settings.embeddingModel, ...settings.availableEmbeddingModels].filter(Boolean))
+  )
+})
+
 function devAuthHeaders() {
   return {
     'X-User-Id': '00000000-0000-0000-0000-000000000002',
@@ -131,6 +162,10 @@ function applyResponse(response: LocalSettingsResponse) {
   settings.defaultModel = response.llm_model
   settings.availableModels = response.available_models || []
   settings.apiKey = response.llm_api_key || ''
+  settings.embeddingBaseUrl = response.embedding_base_url || ''
+  settings.embeddingModel = response.embedding_model || ''
+  settings.embeddingApiKey = response.embedding_api_key || ''
+  settings.embeddingDimensions = response.embedding_dimensions ?? null
   settings.webSearchDefault = response.web_search_default_enabled
   settings.webSearchProvider = response.web_search_provider
   settings.tavilyApiKey = response.tavily_api_key || ''
@@ -174,6 +209,32 @@ async function refreshModels() {
   }
 }
 
+async function refreshEmbeddingModels() {
+  refreshingEmbeddingModels.value = true
+  error.value = ''
+  try {
+    const response = await $fetch<ModelRefreshResponse>(
+      `${config.public.apiBaseUrl}/local-settings/ai/embedding-models`,
+      {
+        method: 'POST',
+        headers: devAuthHeaders(),
+        body: {
+          embedding_base_url: settings.embeddingBaseUrl,
+          embedding_api_key: settings.embeddingApiKey,
+          embedding_model: settings.embeddingModel,
+          embedding_dimensions: settings.embeddingDimensions
+        }
+      }
+    )
+    settings.availableEmbeddingModels = response.models
+    settings.embeddingModel = response.selected_model
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : 'Unable to refresh embedding models.'
+  } finally {
+    refreshingEmbeddingModels.value = false
+  }
+}
+
 async function saveLocalSettings() {
   saving.value = true
   error.value = ''
@@ -186,6 +247,10 @@ async function saveLocalSettings() {
         llm_base_url: settings.baseUrl,
         llm_model: settings.defaultModel,
         llm_api_key: settings.apiKey,
+        embedding_base_url: settings.embeddingBaseUrl,
+        embedding_model: settings.embeddingModel,
+        embedding_api_key: settings.embeddingApiKey,
+        embedding_dimensions: settings.embeddingDimensions,
         web_search_default_enabled: settings.webSearchDefault,
         web_search_provider: settings.webSearchProvider,
         tavily_api_key: settings.tavilyApiKey,
@@ -305,6 +370,70 @@ onBeforeUnmount(() => {
             {{ refreshingModels ? copy.refreshingModels : copy.refreshModels }}
           </button>
         </div>
+        <label class="form-field">
+          {{ copy.embeddingBaseUrl }}
+          <input
+            v-model="settings.embeddingBaseUrl"
+            class="input"
+            data-testid="settings-embedding-base-url"
+            type="url"
+            placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+          >
+        </label>
+        <label class="form-field">
+          {{ copy.embeddingApiKey }}
+          <input
+            v-model="settings.embeddingApiKey"
+            class="input"
+            data-testid="settings-embedding-api-key"
+            type="password"
+          >
+        </label>
+        <div class="settings-model-row">
+          <label class="form-field">
+            {{ copy.embeddingModel }}
+            <select
+              v-model="settings.embeddingModel"
+              class="select"
+              data-testid="settings-embedding-model"
+            >
+              <option v-if="!embeddingModelOptions.length" value="" disabled>
+                {{ settings.locale === 'zh-CN' ? '请先刷新向量模型' : 'Refresh embedding models first' }}
+              </option>
+              <option
+                v-for="model in embeddingModelOptions"
+                :key="model"
+                :value="model"
+              >
+                {{ model }}
+              </option>
+            </select>
+          </label>
+          <button
+            class="secondary-button settings-refresh-button"
+            type="button"
+            data-testid="refresh-embedding-models"
+            :disabled="refreshingEmbeddingModels"
+            @click="refreshEmbeddingModels"
+          >
+            {{ refreshingEmbeddingModels ? copy.refreshingEmbeddingModels : copy.refreshEmbeddingModels }}
+          </button>
+        </div>
+        <label class="form-field">
+          {{ copy.embeddingDimensions }}
+          <select
+            v-model="settings.embeddingDimensions"
+            class="select"
+            data-testid="settings-embedding-dimensions"
+          >
+            <option :value="null">{{ copy.autoDimensions }}</option>
+            <option :value="512">512</option>
+            <option :value="768">768</option>
+            <option :value="1024">1024</option>
+            <option :value="1536">1536</option>
+            <option :value="2048">2048</option>
+          </select>
+        </label>
         <label class="form-field settings-checkbox">
           <input v-model="settings.webSearchDefault" type="checkbox">
           {{ copy.webSearchDefault }}
@@ -384,3 +513,41 @@ onBeforeUnmount(() => {
   </section>
 </template>
 
+<style scoped>
+.settings-toast {
+  position: fixed;
+  z-index: 80;
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  min-width: 0;
+  width: fit-content;
+  max-width: calc(100vw - 48px);
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  border-radius: 8px;
+  background: #16a34a;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  color: #fff;
+  font-weight: 800;
+  line-height: 1;
+  padding: 9px 12px;
+  pointer-events: none;
+  text-align: center;
+  transform: translate(-50%, -50%);
+  animation: settings-toast-fade 1.6s ease forwards;
+}
+
+@keyframes settings-toast-fade {
+  0%,
+  62% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -54%) scale(0.98);
+  }
+}
+</style>

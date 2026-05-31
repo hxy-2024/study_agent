@@ -98,9 +98,9 @@ describe('NewSpacePage', () => {
     expect(wrapper.text()).toContain('Space and learning goal')
     expect(wrapper.text()).not.toContain('Model input')
     expect(wrapper.text()).not.toContain('Custom model')
-    expect(wrapper.text()).toContain('Material and RAG ingestion')
-    expect(wrapper.text()).toContain('Embedding preset')
-    expect(wrapper.text()).toContain('Local chunk embeddings')
+    expect(wrapper.text()).toContain('Material and retrieval index')
+    expect(wrapper.text()).toContain('Retrieval vector model')
+    expect(wrapper.text()).toContain('Local retrieval vectors')
     expect(wrapper.text()).toContain('Learning route outline')
     expect(wrapper.text()).toContain('Generate route')
     expect(wrapper.text()).not.toContain('AI Render')
@@ -139,14 +139,15 @@ describe('NewSpacePage', () => {
     expect(wrapper.text()).toContain('Fill in the space name and learning goal before generating a route.')
   })
 
-  it('lists configured local models as embedding preset options', async () => {
+  it('does not list chat models as retrieval vector options', async () => {
     const wrapper = mountPage()
     await new Promise(resolve => setTimeout(resolve, 0))
 
     const select = wrapper.find('[data-testid="embedding-preset"]')
     expect(select.exists()).toBe(true)
-    expect(wrapper.text()).toContain('Current default model: deepseek-chat')
-    expect(wrapper.text()).toContain('deepseek-reasoner')
+    expect(wrapper.text()).toContain('Local retrieval vectors')
+    expect(wrapper.text()).not.toContain('Current default model: deepseek-chat')
+    expect(wrapper.text()).not.toContain('deepseek-reasoner')
   })
 
   it('runs RAG before showing embedded chunks', async () => {
@@ -166,6 +167,15 @@ describe('NewSpacePage', () => {
           study_space_id: 'space-1',
           content: '# RAG\nChunking and retrieval notes.'
         })
+      })
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/ingestion/sources/source-1/run',
+      expect.objectContaining({
+        method: 'POST',
+        body: {
+          embedding_preset: 'local-deterministic'
+        }
       })
     )
     expect(wrapper.text()).toContain('RAG Fundamentals')

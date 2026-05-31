@@ -18,11 +18,13 @@ from app.domain.learning_routes.generator import (
     RouteGenerator,
     SourceChunkExcerpt,
 )
+from app.domain.rag.embeddings import EmbeddingProvider
+from app.domain.rag.retrieval import RetrievedChunk, retrieve_chunks
 from app.domain.sources.service import ensure_study_space_in_tenant
 
 
 def collect_chunk_excerpts(
-    chunks: list[SourceChunk],
+    chunks: list[SourceChunk] | list[RetrievedChunk],
     max_excerpt_chars: int,
 ) -> list[SourceChunkExcerpt]:
     return [
@@ -55,6 +57,23 @@ async def load_route_source_chunks(
     return list(rows)
 
 
+async def load_relevant_route_chunks(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    study_space: StudySpace,
+    embedding_provider: EmbeddingProvider,
+    max_chunks: int = 24,
+) -> list[RetrievedChunk]:
+    return await retrieve_chunks(
+        session=session,
+        tenant_id=tenant_id,
+        study_space_id=study_space.id,
+        query=f"{study_space.name}\n{study_space.goal}",
+        limit=max_chunks,
+        embedding_provider=embedding_provider,
+    )
+
+
 async def next_route_version(
     session: AsyncSession,
     study_space_id: uuid.UUID,
@@ -72,6 +91,7 @@ async def persist_generated_route(
     chunks: list[SourceChunk],
     generator: RouteGenerator,
     max_chapters: int,
+    embedding_provider: EmbeddingProvider | None = None,
 ) -> tuple[LearningRoute, list[Chapter]]:
     excerpts = collect_chunk_excerpts(chunks, max_excerpt_chars=500)
     result = await generator.generate(
@@ -129,6 +149,7 @@ async def create_route_draft(
     study_space_id: uuid.UUID,
     generator: RouteGenerator,
     max_chapters: int,
+    embedding_provider: EmbeddingProvider | None = None,
 ) -> tuple[LearningRoute, list[Chapter]]:
     for _attempt in range(2):
         try:
@@ -137,11 +158,26 @@ async def create_route_draft(
                 study_space_id=study_space_id,
                 tenant_id=tenant_id,
             )
-            chunks = await load_route_source_chunks(
-                session=session,
-                tenant_id=tenant_id,
-                study_space_id=study_space_id,
-            )
+            chunks: list[SourceChunk] | list[RetrievedChunk]
+            if embedding_provider is not None:
+                chunks = await load_relevant_route_chunks(
+                    session=session,
+                    tenant_id=tenant_id,
+                    study_space=study_space,
+                    embedding_provider=embedding_provider,
+                )
+                if not chunks:
+                    chunks = await load_route_source_chunks(
+                        session=session,
+                        tenant_id=tenant_id,
+                        study_space_id=study_space_id,
+                    )
+            else:
+                chunks = await load_route_source_chunks(
+                    session=session,
+                    tenant_id=tenant_id,
+                    study_space_id=study_space_id,
+                )
             version = await next_route_version(session=session, study_space_id=study_space_id)
             route, chapters = await persist_generated_route(
                 session=session,

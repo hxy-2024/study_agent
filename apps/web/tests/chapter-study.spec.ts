@@ -11,6 +11,7 @@ const fetchMock = vi.fn()
 const confirmMock = vi.fn()
 
 vi.stubGlobal('$fetch', fetchMock)
+vi.stubGlobal('fetch', fetchMock)
 vi.stubGlobal('confirm', confirmMock)
 vi.stubGlobal('useRuntimeConfig', () => ({
   public: {
@@ -427,7 +428,7 @@ describe('ChapterStudyPage', () => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
         return Promise.resolve([mentorSession()])
       }
-      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages') && options?.method === 'POST') {
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages/stream') && options?.method === 'POST') {
         return new Promise((resolve, reject) => {
           options?.signal?.addEventListener('abort', () => {
             abortWasCalled = true
@@ -495,7 +496,7 @@ describe('ChapterStudyPage', () => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
         return Promise.resolve([])
       }
-      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages') && options?.method === 'POST') {
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages/stream') && options?.method === 'POST') {
         return Promise.resolve(mentorMessage())
       }
       if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
@@ -517,10 +518,10 @@ describe('ChapterStudyPage', () => {
       expect.objectContaining({ method: 'POST' })
     )
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages/stream',
       expect.objectContaining({
         method: 'POST',
-        body: { content: 'How does RAG work?', web_search_enabled: false, thinking_effort: 'medium' }
+        body: JSON.stringify({ content: 'How does RAG work?', web_search_enabled: false, thinking_effort: 'medium' })
       })
     )
     expect(wrapper.text()).toContain('RAG retrieves relevant evidence before answering.')
@@ -531,7 +532,7 @@ describe('ChapterStudyPage', () => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
         return Promise.resolve([mentorSession()])
       }
-      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages') && options?.method === 'POST') {
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages/stream') && options?.method === 'POST') {
         return Promise.resolve(mentorMessage())
       }
       if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
@@ -553,10 +554,10 @@ describe('ChapterStudyPage', () => {
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages/stream',
       expect.objectContaining({
         method: 'POST',
-        body: { content: 'What changed recently?', web_search_enabled: true, thinking_effort: 'medium' }
+        body: JSON.stringify({ content: 'What changed recently?', web_search_enabled: true, thinking_effort: 'medium' })
       })
     )
   })
@@ -572,7 +573,7 @@ describe('ChapterStudyPage', () => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
         return Promise.resolve([mentorSession()])
       }
-      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages') && options?.method === 'POST') {
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages/stream') && options?.method === 'POST') {
         return Promise.resolve(mentorMessage())
       }
       if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
@@ -595,15 +596,15 @@ describe('ChapterStudyPage', () => {
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages/stream',
       expect.objectContaining({
         method: 'POST',
-        body: {
+        body: JSON.stringify({
           content: 'Use the stronger model',
           web_search_enabled: false,
           thinking_effort: 'medium',
           model: 'deepseek-reasoner'
-        }
+        })
       })
     )
   })
@@ -613,7 +614,7 @@ describe('ChapterStudyPage', () => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
         return Promise.resolve([mentorSession()])
       }
-      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages') && options?.method === 'POST') {
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages/stream') && options?.method === 'POST') {
         return Promise.resolve(mentorMessage())
       }
       if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
@@ -636,16 +637,63 @@ describe('ChapterStudyPage', () => {
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages/stream',
       expect.objectContaining({
         method: 'POST',
-        body: {
+        body: JSON.stringify({
           content: 'Think more carefully',
           web_search_enabled: false,
           thinking_effort: 'high'
-        }
+        })
       })
     )
+  })
+
+  it('streams mentor answer chunks into the active chat message', async () => {
+    const encoder = new TextEncoder()
+    fetchMock.mockImplementation((url: string, options?: { method?: string; body?: unknown }) => {
+      if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
+        return Promise.resolve([mentorSession()])
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages/stream') && options?.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          body: {
+            getReader: () => {
+              const chunks = [
+                encoder.encode('{"type":"delta","content":"First "}\n'),
+                encoder.encode('{"type":"delta","content":"chunk"}\n'),
+                encoder.encode(`{"type":"final","message":${JSON.stringify(mentorMessage({ content: 'First chunk' }))}}\n`)
+              ]
+              return {
+                read: vi.fn()
+                  .mockResolvedValueOnce({ done: false, value: chunks[0] })
+                  .mockResolvedValueOnce({ done: false, value: chunks[1] })
+                  .mockResolvedValueOnce({ done: false, value: chunks[2] })
+                  .mockResolvedValueOnce({ done: true })
+              }
+            }
+          }
+        })
+      }
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
+        return Promise.resolve([])
+      }
+      return Promise.resolve(chapterDetail())
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="mentor-question"]').setValue('Stream the answer')
+    await wrapper.find('form.mentor-form').trigger('submit')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages/stream',
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(wrapper.text()).toContain('First chunk')
   })
 
   it('sends mentor question on Enter and keeps Shift Enter for multiline input', async () => {
@@ -653,7 +701,7 @@ describe('ChapterStudyPage', () => {
       if (url.endsWith('/chapters/00000000-0000-0000-0000-000000000601/sessions')) {
         return Promise.resolve([mentorSession()])
       }
-      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages') && options?.method === 'POST') {
+      if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages/stream') && options?.method === 'POST') {
         return Promise.resolve(mentorMessage())
       }
       if (url.endsWith('/sessions/00000000-0000-0000-0000-000000000701/messages')) {
@@ -669,7 +717,7 @@ describe('ChapterStudyPage', () => {
     await input.setValue('Do not send yet')
     await input.trigger('keydown', { key: 'Enter', shiftKey: true })
     expect(fetchMock).not.toHaveBeenCalledWith(
-      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages/stream',
       expect.objectContaining({ method: 'POST' })
     )
 
@@ -678,14 +726,14 @@ describe('ChapterStudyPage', () => {
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages',
+      'http://localhost:8000/api/v1/sessions/00000000-0000-0000-0000-000000000701/messages/stream',
       expect.objectContaining({
         method: 'POST',
-        body: {
+        body: JSON.stringify({
           content: 'Send with Enter',
           web_search_enabled: false,
           thinking_effort: 'medium'
-        }
+        })
       })
     )
   })

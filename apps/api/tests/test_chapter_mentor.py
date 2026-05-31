@@ -19,6 +19,9 @@ def retrieved_chunk(
         text=text,
         citation={"page_number": 2},
         embedding=[0.1] * 16,
+        embedding_provider="local-deterministic",
+        embedding_model="local-deterministic",
+        embedding_dimension=16,
         score=0.9,
     )
 
